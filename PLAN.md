@@ -80,28 +80,34 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
 > Goal: upload a PDF → conditions stored in SQLite.
 > Depends on: Phase 0.
 
-- [ ] **Task 1.1 — PDF text extraction**
-  - Implement `src/lib/pdf/extract.ts`
-  - Text-based PDFs: `expo-pdf-text-extract`
-  - Scanned PDFs: detect empty text → fall back to `expo-ocr` (render pages as images → OCR)
-  - Returns: `{ text: string; pageCount: number; method: 'text' | 'ocr' }`
-  - Verify: test with a real text-based PDF and a scanned PDF; both return non-empty text
+- [x] **Task 1.1 — PDF text extraction**
+  - Implement `src/lib/pdf/extract.ts` using `expo-pdf-text-extract` (`extractTextWithInfo`)
+  - Scanned PDF detection: text density < 50 chars/page → returns `method:'ocr'`
+  - Pipeline surfaces message asking user to re-export as text PDF via 3rd-party OCR tool
+  - Full on-device scanned PDF OCR deferred to a later phase
+  - Note: `expo-ocr` was unpublished (Dec 2023); `expo-text-extractor` replaces it for image OCR (photo-your-document flow, future task)
   - Files: `src/lib/pdf/extract.ts`, `tests/lib/pdf.test.ts`
 
-- [ ] **Task 1.2 — Clinical inference rules**
-  - Implement `src/lib/inference/rules.ts`
-  - Rules: persistent BP ≥ 140/90 → hypertension, fasting glucose ≥ 126 mg/dL → diabetes, etc.
-  - Input: raw extracted text; output: `Condition[]` with `status: 'inferred'`
-  - Verify: unit tests for each rule with sample text inputs
-  - Files: `src/lib/inference/rules.ts`, `tests/lib/inference.test.ts`
-
-- [ ] **Task 1.3 — LLM condition enrichment**
+- [x] **Task 1.2 — LLM condition + measurement enrichment**
   - Implement `src/lib/llm/enrich.ts`
-  - Prompt: extract all medical conditions from text, return structured JSON array with `name`, `organ`, `system`, `date`, `status`, `evidence`
-  - Merge with inference rule output (deduplicate; prefer documented over inferred)
-  - Robust parser: validate JSON schema, fallback to empty array on parse failure
-  - Verify: integration test with sample medical text → returns valid `Condition[]`
+  - Input: raw text (any language — EN, zh-TW, JA supported natively by LLM)
+  - Prompt instructs LLM to return structured JSON with two arrays: `conditions[]` and `measurements[]`
+  - `conditions`: name_medical, name_common, system, organ, anatomical_location, status, severity, date_onset, date_diagnosed, evidence (all languages → English output)
+  - `measurements`: name, value_numeric, unit, reference_low, reference_high, flag, date (lab values)
+  - Robust parser: strip markdown fences, validate shape, fallback to empty arrays on parse failure
+  - Uses `callLLMWithFallback` with `temperature: 0` and a `validate` callback
+  - Verify: unit tests with EN + zh-TW + JA sample texts → valid structured output
   - Files: `src/lib/llm/enrich.ts`, `tests/lib/enrich.test.ts`
+
+- [ ] **Task 1.3 — Clinical inference rules (threshold-based, language-agnostic)**
+  - Implement `src/lib/inference/rules.ts`
+  - Input: `measurements[]` from Task 1.2 (structured numeric values, no text parsing)
+  - Rules operate on `{ name, value_numeric, unit }` — completely language-agnostic
+  - Rules: HbA1c ≥ 6.5% → Type 2 Diabetes; HbA1c 5.7–6.4% → Pre-diabetes; fasting glucose ≥ 126 mg/dL → Type 2 Diabetes; BP ≥ 140/90 (two readings) → Hypertension; LDL ≥ 160 or total cholesterol ≥ 240 → Hyperlipidaemia; Hgb < 13 (male) or < 12 (female) → Anaemia; eGFR < 60 → CKD
+  - Output: `Condition[]` with `status: 'inferred'`, `certainty: 'suspected'`
+  - Deduplicates against LLM-extracted conditions (skip if already documented)
+  - Verify: unit tests for each rule with structured measurement inputs
+  - Files: `src/lib/inference/rules.ts`, `tests/lib/inference.test.ts`
 
 - [ ] **Task 1.4 — Pipeline orchestration**
   - Implement end-to-end flow: file picked → extract text → enrich → save to SQLite
