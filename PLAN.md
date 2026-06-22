@@ -81,12 +81,14 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
 > Goal: upload a PDF → conditions stored in SQLite.
 > Depends on: Phase 0.
 
-- [x] **Task 1.1 — PDF text extraction**
+- [x] **Task 1.1 — PDF + image text extraction**
   - Implement `src/lib/pdf/extract.ts` using `expo-pdf-text-extract` (`extractTextWithInfo`)
   - Scanned PDF detection: text density < 50 chars/page → returns `method:'ocr'`
-  - **Policy:** no in-app OCR. When `method:'ocr'` is returned, the UI shows: "This PDF appears to be image-based. Please use an external OCR tool to convert it to a text-based PDF, then upload again."
+  - **Policy:** no in-app OCR for PDFs. When `method:'ocr'` is returned, the UI shows: "This PDF appears to be image-based. Please use an external OCR tool to convert it to a text-based PDF, then upload again."
   - Future: research PDF extraction libraries that handle image-based PDFs natively — add as a separate task if a suitable one is found
-  - Files: `src/lib/pdf/extract.ts`, `tests/lib/pdf.test.ts`
+  - **Image upload (JPEG/PNG):** `src/lib/ocr/extract.ts` using `expo-text-extractor` v2.0.0 — accepts image URIs directly (camera photos, gallery picks)
+  - Both PDF text path and image OCR path converge at `enrichFromText()`
+  - Files: `src/lib/pdf/extract.ts`, `tests/lib/pdf.test.ts`, `src/lib/ocr/extract.ts`, `tests/lib/ocr.test.ts`
 
 - [x] **Task 1.2 — LLM condition + measurement enrichment**
   - Implement `src/lib/llm/enrich.ts`
@@ -143,11 +145,12 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
   - Files: `src/components/timeline/TimeScrubber.tsx`
 
 - [ ] **Task 2.4 — Upload screen**
-  - `app/index.tsx` — file picker (expo-document-picker), triggers pipeline, shows progress
-  - On completion: navigates to `/visualize`
-  - If extraction returns `method:'ocr'`: show inline error (not a toast) — "This PDF appears to be image-based. Please use an OCR tool (e.g. Adobe Scan, Microsoft Lens) to export it as a text-based PDF, then upload again." — do not navigate away
+  - `app/index.tsx` — two input paths: "Upload PDF" (expo-document-picker) and "Take Photo / Choose Image" (expo-image-picker)
+  - PDF path: `extractTextFromPDF` → if `method:'ocr'`, show inline error: "This PDF appears to be image-based. Please use an OCR tool (e.g. Adobe Scan, Microsoft Lens) to export it as a text-based PDF, then upload again."
+  - Image path: `extractTextFromImage` → text fed directly to `enrichFromText()`
+  - Both paths converge at `enrichFromText()` → pipeline → navigate to `/visualize`
   - Shows disclaimer: app is not a medical device
-  - Verify: pick a text PDF → spinner → navigate to visualize; pick a scanned PDF → error message stays on upload screen
+  - Verify: PDF upload → navigate to visualize; scanned PDF → inline error; camera photo → navigate to visualize
   - Files: `app/index.tsx`
 
 - [ ] **Task 2.5 — Visualize screen**
