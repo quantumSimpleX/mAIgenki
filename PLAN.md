@@ -111,7 +111,7 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
   - Verify: unit tests for each rule with structured measurement inputs
   - Files: `src/lib/inference/rules.ts`, `tests/lib/inference.test.ts`
 
-- [ ] **Task 1.4 — Pipeline orchestration**
+- [x] **Task 1.4 — Pipeline orchestration**
   - Implement end-to-end flow: file picked → extract text → enrich → save to SQLite
   - Expose as `processHealthRecord(uri: string): Promise<HealthRecord>`
   - Verify: pick a real PDF → query SQLite → conditions present
