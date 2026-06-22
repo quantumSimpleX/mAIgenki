@@ -8,8 +8,9 @@ export type ConditionInput = {
   system: string
   organ: string | null
   anatomical_location: string | null
-  status: 'documented' | 'resolved' | 'suspected'
+  status: 'documented' | 'resolved' | 'suspected' | 'inferred'
   severity: string | null
+  certainty: string | null
   date_onset: string | null
   date_diagnosed: string | null
   evidence: string | null
@@ -67,6 +68,7 @@ Always respond with a single JSON object — no markdown, no explanation. The JS
       "anatomical_location": "specific location or null",
       "status": "documented | resolved | suspected",
       "severity": "mild | moderate | severe | null",
+      "certainty": "confirmed | probable | possible | null",
       "date_onset": "YYYY-MM-DD or null",
       "date_diagnosed": "YYYY-MM-DD or null",
       "evidence": "brief verbatim quote from the record that supports this condition, or null"

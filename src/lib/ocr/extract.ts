@@ -1,6 +1,6 @@
-import { recognize } from 'expo-text-extractor'
+import { extractTextFromImage as extractFromLibrary } from 'expo-text-extractor'
 
 export async function extractTextFromImage(uri: string): Promise<string> {
-  const result = await recognize(uri)
-  return result?.text ?? ''
+  const lines = await extractFromLibrary(uri)
+  return lines.join('\n')
 }

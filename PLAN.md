@@ -101,7 +101,7 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
   - Verify: unit tests with EN + zh-TW + JA sample texts → valid structured output
   - Files: `src/lib/llm/enrich.ts`, `tests/lib/enrich.test.ts`
 
-- [ ] **Task 1.3 — Clinical inference rules (threshold-based, language-agnostic)**
+- [x] **Task 1.3 — Clinical inference rules (threshold-based, language-agnostic)**
   - Implement `src/lib/inference/rules.ts`
   - Input: `measurements[]` from Task 1.2 (structured numeric values, no text parsing)
   - Rules operate on `{ name, value_numeric, unit }` — completely language-agnostic
