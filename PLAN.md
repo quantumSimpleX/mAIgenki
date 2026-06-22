@@ -47,17 +47,28 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
   - Verify: `npx expo start --web` shows blank screen with no errors
   - Files: `app.json`, `babel.config.js`, `tailwind.config.js`, `package.json`
 
-- [ ] **Task 0.2 — SQLite schema**
+- [x] **Task 0.2 — SQLite schema**
   - Define tables: `health_records`, `conditions`, `settings`
   - Write typed query helpers in `src/lib/db/`
   - Verify: unit tests for insert + query on each table
   - Files: `src/lib/db/schema.ts`, `src/lib/db/queries.ts`, `tests/lib/db.test.ts`
 
-- [ ] **Task 0.3 — OpenRouter client**
-  - Implement `src/lib/llm/client.ts` — `openai` package with `baseURL: 'https://openrouter.ai/api/v1'`
-  - Reads API key from Zustand store (empty = free tier)
-  - Verify: unit test sends a minimal request to free model and receives a response
-  - Files: `src/lib/llm/client.ts`, `src/store/settings.ts`
+- [x] **Task 0.3 — OpenRouter client + dynamic model chain**
+  - Raw fetch against `openrouter.ai/api/v1` (no openai package)
+  - `callLLMWithFallback<T>` — walks model chain, never throws on model error, accepts `validate()` callback
+  - `DEFAULT_MODELS` — 5 free models ordered by medical extraction quality (Hermes 3 405B → Llama 3.2 3B)
+  - `getModelChain(db)` / `updateModelChain(db, models)` — chain persisted in SQLite settings as JSON
+  - Files: `src/lib/llm/client.ts`, `tests/lib/llm.test.ts`
+
+- [ ] **Task 0.5 — Model chain auto-refresh**
+  - `refreshModelChain(db, apiKey)` in `src/lib/llm/refresh.ts`
+  - Step 1: `GET openrouter.ai/api/v1/models?max_price=0` → free model list + `benchmarks.artificial_analysis` scores
+  - Step 2: fetch `arena.ai/leaderboard`, use LLM chain to extract Document ELO + Instruction Following ELO for the free models
+  - Step 3: composite score = `intelligence_index×0.35 + agentic_index×0.25 + document_elo×0.25 + instruction_elo×0.15` (normalised; missing data redistributes weights)
+  - Step 4: sort descending, take top 5, call `updateModelChain`; persist `llm_chain_last_checked` timestamp
+  - Triggered on app launch if `llm_chain_last_checked` is absent or >30 days old; runs silently in background
+  - Verify: unit tests for scoring logic, weight redistribution when arena data is missing, 30-day trigger gate
+  - Files: `src/lib/llm/refresh.ts`, `tests/lib/llm-refresh.test.ts`
 
 - [x] **Task 0.4 — Core TypeScript types**
   - Define `OrgSystem`, `Condition`, `ConditionStatus`, `HealthRecord` in `src/model/health.ts`
