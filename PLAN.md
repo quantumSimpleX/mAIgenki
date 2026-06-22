@@ -25,7 +25,8 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
 
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
-| `expo-pdf-text-extract` + `expo-ocr` require dev build — breaks Expo Go workflow | High | Medium | Set up dev build in Phase 0; don't rely on Expo Go |
+| `expo-pdf-text-extract` requires dev build — breaks Expo Go workflow | High | Medium | Set up dev build in Phase 0; don't rely on Expo Go |
+| User uploads an image-based (scanned) PDF | Medium | Medium | Detect at extraction (text density < 50 chars/page); show actionable message: "This PDF appears to be image-based. Please use an OCR tool to convert it to a text-based PDF first." No in-app OCR. |
 | LLM returns malformed JSON for condition extraction | High | High | Strict output schema in prompt + robust parser with fallback |
 | Stacking 10 high-res PNGs causes frame drops on older devices | Medium | High | Test with placeholder layers in Phase 2; optimize in Phase 3 |
 | OpenRouter free tier rate limits hit on large PDFs | Medium | Medium | Chunk large PDFs; show progress; surface upgrade prompt |
@@ -83,9 +84,8 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
 - [x] **Task 1.1 — PDF text extraction**
   - Implement `src/lib/pdf/extract.ts` using `expo-pdf-text-extract` (`extractTextWithInfo`)
   - Scanned PDF detection: text density < 50 chars/page → returns `method:'ocr'`
-  - Pipeline surfaces message asking user to re-export as text PDF via 3rd-party OCR tool
-  - Full on-device scanned PDF OCR deferred to a later phase
-  - Note: `expo-ocr` was unpublished (Dec 2023); `expo-text-extractor` replaces it for image OCR (photo-your-document flow, future task)
+  - **Policy:** no in-app OCR. When `method:'ocr'` is returned, the UI shows: "This PDF appears to be image-based. Please use an external OCR tool to convert it to a text-based PDF, then upload again."
+  - Future: research PDF extraction libraries that handle image-based PDFs natively — add as a separate task if a suitable one is found
   - Files: `src/lib/pdf/extract.ts`, `tests/lib/pdf.test.ts`
 
 - [x] **Task 1.2 — LLM condition + measurement enrichment**
@@ -145,8 +145,9 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
 - [ ] **Task 2.4 — Upload screen**
   - `app/index.tsx` — file picker (expo-document-picker), triggers pipeline, shows progress
   - On completion: navigates to `/visualize`
+  - If extraction returns `method:'ocr'`: show inline error (not a toast) — "This PDF appears to be image-based. Please use an OCR tool (e.g. Adobe Scan, Microsoft Lens) to export it as a text-based PDF, then upload again." — do not navigate away
   - Shows disclaimer: app is not a medical device
-  - Verify: pick a PDF → spinner → navigate to visualize screen
+  - Verify: pick a text PDF → spinner → navigate to visualize; pick a scanned PDF → error message stays on upload screen
   - Files: `app/index.tsx`
 
 - [ ] **Task 2.5 — Visualize screen**
