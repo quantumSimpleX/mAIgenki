@@ -134,6 +134,55 @@ describe('redactPII — national ID', () => {
   })
 })
 
+// ── Full-document name sweep ──────────────────────────────────────────────────
+
+describe('redactPII — full-document name sweep', () => {
+  it('redacts all occurrences of the patient name found in the labeled field', () => {
+    const text = [
+      'Patient: John Smith',
+      'John Smith was seen on 2022-06-01.',
+      'BP for John Smith: 145/92 mmHg.',
+      'Diagnosis: Hypertension',
+    ].join('\n')
+    const result = redactPII(text)
+    expect(result).not.toContain('John Smith')
+    expect(result).toContain('Hypertension')
+    expect(result).toContain('145/92 mmHg')
+  })
+
+  it('redacts name occurrences in zh-TW documents', () => {
+    const text = [
+      '姓名：王大明',
+      '王大明於2022年6月1日就診。',
+      '診斷：高血壓',
+    ].join('\n')
+    const result = redactPII(text)
+    expect(result).not.toContain('王大明')
+    expect(result).toContain('高血壓')
+  })
+
+  it('redacts name occurrences in JA documents', () => {
+    const text = [
+      '氏名：山田太郎',
+      '山田太郎は2022年6月1日に受診しました。',
+      '診断：高血圧',
+    ].join('\n')
+    const result = redactPII(text)
+    expect(result).not.toContain('山田太郎')
+    expect(result).toContain('高血圧')
+  })
+
+  it('does not redact unrelated text that happens to match short name fragments', () => {
+    // "Li" extracted as name would be too short and cause false positives
+    // Only names with 2+ characters (EN) or 2+ CJK chars are swept
+    const text = 'Patient: Li\nLipid panel results: LDL 165 mg/dL'
+    const result = redactPII(text)
+    // "Li" at the start of "Lipid" and "LDL" should not be affected
+    expect(result).toContain('Lipid panel')
+    expect(result).toContain('LDL')
+  })
+})
+
 // ── Medical content preserved ─────────────────────────────────────────────────
 
 describe('redactPII — medical content preserved', () => {
