@@ -23,6 +23,8 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
 
 ## Risks & Mitigations
 
+**Hard constraint:** PII must be redacted from extracted text before any call to `enrichFromText()` or any other LLM function. Raw PDFs never leave the device; only redacted plain text is sent to OpenRouter.
+
 | Risk | Likelihood | Impact | Mitigation |
 |---|---|---|---|
 | `expo-pdf-text-extract` requires dev build — breaks Expo Go workflow | High | Medium | Set up dev build in Phase 0; don't rely on Expo Go |
@@ -89,6 +91,16 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
   - **Image upload (JPEG/PNG):** `src/lib/ocr/extract.ts` using `expo-text-extractor` v2.0.0 — accepts image URIs directly (camera photos, gallery picks)
   - Both PDF text path and image OCR path converge at `enrichFromText()`
   - Files: `src/lib/pdf/extract.ts`, `tests/lib/pdf.test.ts`, `src/lib/ocr/extract.ts`, `tests/lib/ocr.test.ts`
+
+- [x] **Task 1.1b — PII redaction before LLM**
+  - Implement `src/lib/privacy/redact.ts` — `redactPII(text: string): string`
+  - Runs between text extraction and `enrichFromText()` in the pipeline
+  - Redacts: patient name (labeled), DOB (labeled), MRN, phone, email, SSN, Taiwan National ID (labeled), Japan My Number (labeled)
+  - Multilingual labels: EN (`Patient:`, `DOB:`, `MRN:`), zh-TW (`姓名：`, `出生日期：`, `身份證字號：`), JA (`氏名：`, `生年月日：`, `マイナンバー：`)
+  - Conservative approach: only redact standalone patterns for highly distinctive formats (email, SSN); all else requires a label prefix to avoid eating medical data
+  - Medical content (conditions, dates of diagnosis, lab values) must be preserved
+  - Verify: unit tests confirm PII is replaced, medical content survives
+  - Files: `src/lib/privacy/redact.ts`, `tests/lib/redact.test.ts`; `src/lib/pipeline.ts` updated
 
 - [x] **Task 1.2 — LLM condition + measurement enrichment**
   - Implement `src/lib/llm/enrich.ts`

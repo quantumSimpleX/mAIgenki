@@ -5,6 +5,7 @@ import { enrichFromText } from './llm/enrich'
 import { applyInferenceRules } from './inference/rules'
 import { getModelChain } from './llm/client'
 import { insertHealthRecord, insertCondition, insertMeasurement } from './db/queries'
+import { redactPII } from './privacy/redact'
 
 // ── Error ─────────────────────────────────────────────────────────────────────
 
@@ -66,22 +67,25 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
     extractionMethod = 'image'
   }
 
-  // Step 2 — get model chain, enrich with LLM
-  const models = opts.models ?? await getModelChain(db)
-  const { conditions: llmConditions, measurements } = await enrichFromText(text, apiKey, models)
+  // Step 2 — redact PII before any text leaves the device
+  const safeText = redactPII(text)
 
-  // Step 3 — apply threshold inference rules
+  // Step 3 — get model chain, enrich with LLM
+  const models = opts.models ?? await getModelChain(db)
+  const { conditions: llmConditions, measurements } = await enrichFromText(safeText, apiKey, models)
+
+  // Step 4 — apply threshold inference rules
   const inferredConditions = applyInferenceRules(measurements, llmConditions, sex)
   const allConditions = [...llmConditions, ...inferredConditions]
 
-  // Step 4 — persist health record
+  // Step 5 — persist health record
   const recordId = await insertHealthRecord(db, {
     filename: filenameFromUri(uri),
     pageCount,
     extractionMethod,
   })
 
-  // Step 5 — persist conditions
+  // Step 6 — persist conditions
   for (const c of allConditions) {
     await insertCondition(db, {
       recordId,
@@ -99,7 +103,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
     })
   }
 
-  // Step 6 — persist measurements
+  // Step 7 — persist measurements
   for (const m of measurements) {
     await insertMeasurement(db, {
       recordId,
