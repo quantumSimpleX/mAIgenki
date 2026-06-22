@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "_init",
-    "slug": "_init",
+    "name": "mAIgenki",
+    "slug": "maigenki",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "init",
+    "scheme": "maigenki",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
@@ -34,7 +34,8 @@
             "imageWidth": 76
           }
         }
-      ]
+      ],
+      "expo-sqlite"
     ],
     "experiments": {
       "typedRoutes": true,
