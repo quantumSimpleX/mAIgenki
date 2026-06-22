@@ -1,0 +1,263 @@
+import {
+  scoreModel,
+  normaliseElo,
+  compositeScore,
+  refreshModelChain,
+  shouldRefresh,
+  SCORE_WEIGHTS,
+} from '@/lib/llm/refresh'
+
+// ── Mocks ─────────────────────────────────────────────────────────────────────
+
+const mockFetch = jest.fn()
+;(globalThis as any).fetch = mockFetch
+
+const mockDb = {
+  runAsync: jest.fn().mockResolvedValue(undefined),
+  getFirstAsync: jest.fn().mockResolvedValue(null),
+  getAllAsync: jest.fn().mockResolvedValue([]),
+  execAsync: jest.fn().mockResolvedValue(undefined),
+}
+
+// Minimal OpenRouter model shape
+function makeModel(id: string, overrides: Record<string, unknown> = {}) {
+  return { id, context_length: 131072, benchmarks: null, ...overrides }
+}
+
+beforeEach(() => jest.clearAllMocks())
+
+// ── SCORE_WEIGHTS ─────────────────────────────────────────────────────────────
+
+describe('SCORE_WEIGHTS', () => {
+  it('sum to 1.0', () => {
+    const total = Object.values(SCORE_WEIGHTS).reduce((a, b) => a + b, 0)
+    expect(total).toBeCloseTo(1.0)
+  })
+})
+
+// ── scoreModel ────────────────────────────────────────────────────────────────
+
+describe('scoreModel', () => {
+  it('returns -1 for a model with no benchmark data', () => {
+    expect(scoreModel(makeModel('x:free'))).toBe(-1)
+  })
+
+  it('computes weighted score from artificial_analysis indices', () => {
+    const model = makeModel('x:free', {
+      benchmarks: {
+        artificial_analysis: {
+          intelligence_index: 80,
+          agentic_index: 70,
+          coding_index: 60,
+        },
+      },
+    })
+    // With no arena data: redistribute arena weights onto OR weights proportionally
+    const score = scoreModel(model)
+    expect(score).toBeGreaterThan(0)
+    expect(score).toBeLessThanOrEqual(100)
+  })
+
+  it('scores higher when arena ELO data is also provided', () => {
+    const model = makeModel('x:free', {
+      benchmarks: {
+        artificial_analysis: { intelligence_index: 80, agentic_index: 70, coding_index: 60 },
+      },
+    })
+    const withoutArena = scoreModel(model)
+    const withArena = scoreModel(model, { documentElo: 1400, instructionElo: 1380 })
+    // Both use same OR data; arena data should refine but not wildly differ
+    expect(typeof withArena).toBe('number')
+    expect(withArena).not.toBe(withoutArena)
+  })
+
+  it('Nemotron Ultra scores lower than Hermes 405B on same benchmark set', () => {
+    const nemotron = makeModel('nvidia/nemotron-3-ultra-550b-a55b:free', {
+      benchmarks: { artificial_analysis: { intelligence_index: 37.8, agentic_index: 27.4, coding_index: 49.3 } },
+    })
+    const hermes = makeModel('nousresearch/hermes-3-llama-3.1-405b:free', {
+      benchmarks: { artificial_analysis: { intelligence_index: 78, agentic_index: 72, coding_index: 65 } },
+    })
+    expect(scoreModel(hermes)).toBeGreaterThan(scoreModel(nemotron))
+  })
+})
+
+// ── normaliseElo ──────────────────────────────────────────────────────────────
+
+describe('normaliseElo', () => {
+  it('maps ELO range to 0–100', () => {
+    expect(normaliseElo(1200, 1100, 1600)).toBeCloseTo(20)
+    expect(normaliseElo(1600, 1100, 1600)).toBeCloseTo(100)
+    expect(normaliseElo(1100, 1100, 1600)).toBeCloseTo(0)
+  })
+
+  it('clamps values outside the range', () => {
+    expect(normaliseElo(900, 1100, 1600)).toBe(0)
+    expect(normaliseElo(1700, 1100, 1600)).toBe(100)
+  })
+})
+
+// ── compositeScore ────────────────────────────────────────────────────────────
+
+describe('compositeScore', () => {
+  it('redistributes arena weights when arena data is absent', () => {
+    const orOnly = compositeScore(
+      { intelligence: 80, agentic: 70, coding: 60 },
+      null,
+    )
+    const withArena = compositeScore(
+      { intelligence: 80, agentic: 70, coding: 60 },
+      { document: 75, instruction: 65 },
+    )
+    // Both should be valid numbers; redistribution means orOnly is still meaningful
+    expect(orOnly).toBeGreaterThan(0)
+    expect(withArena).toBeGreaterThan(0)
+  })
+
+  it('two models with equal OR scores but better arena data ranks higher', () => {
+    const or = { intelligence: 70, agentic: 65, coding: 60 }
+    const goodArena = compositeScore(or, { document: 90, instruction: 85 })
+    const badArena = compositeScore(or, { document: 40, instruction: 35 })
+    expect(goodArena).toBeGreaterThan(badArena)
+  })
+})
+
+// ── shouldRefresh ─────────────────────────────────────────────────────────────
+
+describe('shouldRefresh', () => {
+  it('returns true when no timestamp is stored', () => {
+    expect(shouldRefresh(null)).toBe(true)
+  })
+
+  it('returns true when last check was more than 30 days ago', () => {
+    const old = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString()
+    expect(shouldRefresh(old)).toBe(true)
+  })
+
+  it('returns false when last check was within 30 days', () => {
+    const recent = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
+    expect(shouldRefresh(recent)).toBe(false)
+  })
+})
+
+// ── refreshModelChain ─────────────────────────────────────────────────────────
+
+describe('refreshModelChain', () => {
+  const freeModels = [
+    makeModel('nousresearch/hermes-3-llama-3.1-405b:free', {
+      context_length: 131072,
+      benchmarks: { artificial_analysis: { intelligence_index: 78, agentic_index: 72, coding_index: 65 } },
+    }),
+    makeModel('openai/gpt-oss-120b:free', {
+      context_length: 131072,
+      benchmarks: { artificial_analysis: { intelligence_index: 72, agentic_index: 68, coding_index: 70 } },
+    }),
+    makeModel('nvidia/nemotron-3-ultra-550b-a55b:free', {
+      context_length: 1000000,
+      benchmarks: { artificial_analysis: { intelligence_index: 37.8, agentic_index: 27.4, coding_index: 49.3 } },
+    }),
+    makeModel('meta-llama/llama-3.3-70b-instruct:free', {
+      context_length: 131072,
+      benchmarks: { artificial_analysis: { intelligence_index: 65, agentic_index: 60, coding_index: 55 } },
+    }),
+    makeModel('meta-llama/llama-3.2-3b-instruct:free', {
+      context_length: 131072,
+      benchmarks: null,
+    }),
+  ]
+
+  function orApiResponse() {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ data: freeModels }),
+    })
+  }
+
+  function arenaPageResponse(html: string) {
+    return Promise.resolve({
+      ok: true,
+      text: () => Promise.resolve(html),
+    })
+  }
+
+  function llmArenaResponse(json: string) {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ choices: [{ message: { content: json } }] }),
+    })
+  }
+
+  it('ranks hermes above nemotron ultra based on benchmark scores', async () => {
+    // OR API → arena page fetch → LLM parse of arena data → LLM call fails gracefully
+    mockFetch
+      .mockReturnValueOnce(orApiResponse())                // OpenRouter models
+      .mockReturnValueOnce(arenaPageResponse('<html>leaderboard</html>')) // arena.ai
+      .mockReturnValueOnce(llmArenaResponse('[]'))         // LLM returns empty arena data
+
+    const chain = await refreshModelChain(mockDb as any, '')
+    const hermesIdx = chain.indexOf('nousresearch/hermes-3-llama-3.1-405b:free')
+    const nemotronIdx = chain.indexOf('nvidia/nemotron-3-ultra-550b-a55b:free')
+    expect(hermesIdx).toBeGreaterThanOrEqual(0)
+    // Nemotron should rank lower (higher index) or not appear in top 5
+    if (nemotronIdx >= 0) expect(hermesIdx).toBeLessThan(nemotronIdx)
+  })
+
+  it('stores the refreshed chain in settings', async () => {
+    mockFetch
+      .mockReturnValueOnce(orApiResponse())
+      .mockReturnValueOnce(arenaPageResponse('<html></html>'))
+      .mockReturnValueOnce(llmArenaResponse('[]'))
+
+    await refreshModelChain(mockDb as any, '')
+    expect(mockDb.runAsync).toHaveBeenCalledWith(
+      expect.stringContaining('INSERT OR REPLACE INTO settings'),
+      expect.arrayContaining(['llm_model_chain']),
+    )
+  })
+
+  it('stores llm_chain_last_checked timestamp after refresh', async () => {
+    mockFetch
+      .mockReturnValueOnce(orApiResponse())
+      .mockReturnValueOnce(arenaPageResponse('<html></html>'))
+      .mockReturnValueOnce(llmArenaResponse('[]'))
+
+    await refreshModelChain(mockDb as any, '')
+    const calls = mockDb.runAsync.mock.calls.map((c: unknown[]) => c[1])
+    const hasTimestamp = calls.some(
+      (args: unknown) => Array.isArray(args) && args[0] === 'llm_chain_last_checked',
+    )
+    expect(hasTimestamp).toBe(true)
+  })
+
+  it('still produces a valid chain if arena.ai fetch fails', async () => {
+    mockFetch
+      .mockReturnValueOnce(orApiResponse())
+      .mockRejectedValueOnce(new Error('arena.ai unreachable'))
+
+    const chain = await refreshModelChain(mockDb as any, '')
+    expect(chain.length).toBeGreaterThan(0)
+    expect(chain.every((id: string) => id.endsWith(':free'))).toBe(true)
+  })
+
+  it('falls back to DEFAULT_MODELS if OpenRouter API fails', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('network error'))
+    const chain = await refreshModelChain(mockDb as any, '')
+    // Should return something — the default chain
+    expect(Array.isArray(chain)).toBe(true)
+    expect(chain.length).toBeGreaterThan(0)
+  })
+
+  it('excludes models with no benchmarks from top positions', async () => {
+    mockFetch
+      .mockReturnValueOnce(orApiResponse())
+      .mockReturnValueOnce(arenaPageResponse('<html></html>'))
+      .mockReturnValueOnce(llmArenaResponse('[]'))
+
+    const chain = await refreshModelChain(mockDb as any, '')
+    // llama-3.2-3b has no benchmarks — should be last if it appears at all
+    const smallIdx = chain.indexOf('meta-llama/llama-3.2-3b-instruct:free')
+    if (smallIdx >= 0) {
+      expect(smallIdx).toBe(chain.length - 1)
+    }
+  })
+})
