@@ -60,7 +60,7 @@ It does not block Phases 0–2, but must be done before Phase 3 polish.
   - `getModelChain(db)` / `updateModelChain(db, models)` — chain persisted in SQLite settings as JSON
   - Files: `src/lib/llm/client.ts`, `tests/lib/llm.test.ts`
 
-- [ ] **Task 0.5 — Model chain auto-refresh**
+- [x] **Task 0.5 — Model chain auto-refresh**
   - `refreshModelChain(db, apiKey)` in `src/lib/llm/refresh.ts`
   - Step 1: `GET openrouter.ai/api/v1/models?max_price=0` → free model list + `benchmarks.artificial_analysis` scores
   - Step 2: fetch `arena.ai/leaderboard`, use LLM chain to extract Document ELO + Instruction Following ELO for the free models
