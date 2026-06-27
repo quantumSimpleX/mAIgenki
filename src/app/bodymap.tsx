@@ -29,12 +29,10 @@ const C = {
 
 const MONTHS_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
 const SUPPORTED_LANGS: { code: SupportedLang; label: string }[] = [
-  { code: 'ja', label: '日本語' },
   { code: 'en', label: 'English' },
+  { code: 'zh-TW', label: '繁體中文' },
+  { code: 'ja', label: '日本語' },
   { code: 'es', label: 'Español' },
-  { code: 'fr', label: 'Français' },
-  { code: 'zh', label: '中文' },
-  { code: 'ko', label: '한국어' },
 ]
 
 const K = 2.5

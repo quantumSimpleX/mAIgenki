@@ -1,14 +1,17 @@
+// 11 organ systems — IDs, labels, and colors are the design canonical source of truth.
+// Order matches the legend panel in the body map (top → bottom).
 export type OrgSystem =
-  | 'cardiovascular'
-  | 'respiratory'
-  | 'digestive'
-  | 'musculoskeletal'
-  | 'nervous'
-  | 'endocrine'
-  | 'urinary'
-  | 'reproductive'
-  | 'immune'
-  | 'integumentary'
+  | 'integ'       // Integumentary
+  | 'muscle'      // Muscular
+  | 'skeletal'    // Skeletal
+  | 'cardio'      // Circulatory
+  | 'lymph'       // Lymphatic
+  | 'neuro'       // Nervous
+  | 'pulm'        // Respiratory
+  | 'gi'          // Digestive
+  | 'renal'       // Renal
+  | 'endo'        // Endocrine
+  | 'repro'       // Reproductive
 
 export type ConditionStatus = 'documented' | 'resolved' | 'inferred'
 
@@ -30,15 +33,18 @@ export type HealthRecord = {
   conditions: Condition[]
 }
 
+// Final confirmed colors from mAI Genki design (handoff04).
+// repro updated from #7F1D1D → #C0526A in session 04 for visibility on dark bg.
 export const SYSTEM_COLORS: Record<OrgSystem, string> = {
-  cardiovascular: '#EF4444',
-  respiratory: '#3B82F6',
-  digestive: '#F97316',
-  nervous: '#EAB308',
-  musculoskeletal: '#A855F7',
-  endocrine: '#EC4899',
-  urinary: '#14B8A6',
-  reproductive: '#D946EF',
-  immune: '#22C55E',
-  integumentary: '#D97706',
+  integ:    '#4F46E5',
+  muscle:   '#F472B6',
+  skeletal: '#94A3B8',
+  cardio:   '#EF4444',
+  lymph:    '#22C55E',
+  neuro:    '#EAB308',
+  pulm:     '#06B6D4',
+  gi:       '#F97316',
+  renal:    '#84CC16',
+  endo:     '#D946EF',
+  repro:    '#C0526A',
 }

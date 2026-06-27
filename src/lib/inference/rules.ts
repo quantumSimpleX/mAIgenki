@@ -76,7 +76,7 @@ export function applyInferenceRules(
           results.push(inferred(
             'Type 2 diabetes mellitus',
             'Type 2 diabetes',
-            'endocrine',
+            'endo',
             'pancreas',
             `HbA1c ${m.value_numeric}${m.unit} (≥6.5% threshold)`,
           ))
@@ -86,7 +86,7 @@ export function applyInferenceRules(
           results.push(inferred(
             'Pre-diabetes',
             'Pre-diabetes',
-            'endocrine',
+            'endo',
             'pancreas',
             `HbA1c ${m.value_numeric}${m.unit} (5.7–6.4% range)`,
           ))
@@ -102,7 +102,7 @@ export function applyInferenceRules(
           results.push(inferred(
             'Type 2 diabetes mellitus',
             'Type 2 diabetes',
-            'endocrine',
+            'endo',
             'pancreas',
             `Fasting glucose ${m.value_numeric} ${m.unit} (≥126 mg/dL threshold)`,
           ))
@@ -112,7 +112,7 @@ export function applyInferenceRules(
           results.push(inferred(
             'Pre-diabetes',
             'Pre-diabetes',
-            'endocrine',
+            'endo',
             'pancreas',
             `Fasting glucose ${m.value_numeric} ${m.unit} (100–125 mg/dL range)`,
           ))
@@ -126,7 +126,7 @@ export function applyInferenceRules(
         results.push(inferred(
           'Hypertension',
           'High blood pressure',
-          'cardiovascular',
+          'cardio',
           'heart',
           `Systolic BP ${m.value_numeric} ${m.unit} (≥140 mmHg threshold)`,
         ))
@@ -137,7 +137,7 @@ export function applyInferenceRules(
         results.push(inferred(
           'Hypertension',
           'High blood pressure',
-          'cardiovascular',
+          'cardio',
           'heart',
           `Diastolic BP ${m.value_numeric} ${m.unit} (≥90 mmHg threshold)`,
         ))
@@ -151,7 +151,7 @@ export function applyInferenceRules(
         results.push(inferred(
           'Hyperlipidaemia',
           'High cholesterol',
-          'cardiovascular',
+          'cardio',
           'blood vessels',
           `LDL ${m.value_numeric} ${m.unit} (≥160 mg/dL threshold)`,
         ))
@@ -164,7 +164,7 @@ export function applyInferenceRules(
         results.push(inferred(
           'Hyperlipidaemia',
           'High cholesterol',
-          'cardiovascular',
+          'cardio',
           'blood vessels',
           `Total cholesterol ${m.value_numeric} ${m.unit} (≥240 mg/dL threshold)`,
         ))
@@ -183,7 +183,7 @@ export function applyInferenceRules(
           results.push(inferred(
             'Anaemia',
             'Anaemia',
-            'immune',
+            'lymph',
             'blood',
             `Hemoglobin ${m.value_numeric} ${m.unit} (below ${threshold} g/dL threshold)`,
           ))
@@ -197,7 +197,7 @@ export function applyInferenceRules(
         results.push(inferred(
           'Chronic kidney disease',
           'Chronic kidney disease',
-          'urinary',
+          'renal',
           'kidney',
           `eGFR ${m.value_numeric} ${m.unit} (<60 mL/min/1.73m² threshold)`,
         ))

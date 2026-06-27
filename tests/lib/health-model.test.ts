@@ -1,13 +1,13 @@
 import { SYSTEM_COLORS, type OrgSystem, type Condition } from '@/model/health'
 
 const ALL_SYSTEMS: OrgSystem[] = [
-  'cardiovascular', 'respiratory', 'digestive', 'musculoskeletal',
-  'nervous', 'endocrine', 'urinary', 'reproductive', 'immune', 'integumentary',
+  'integ', 'muscle', 'skeletal', 'cardio', 'lymph',
+  'neuro', 'pulm', 'gi', 'renal', 'endo', 'repro',
 ]
 
 describe('health model', () => {
-  it('defines all 10 organ systems', () => {
-    expect(ALL_SYSTEMS).toHaveLength(10)
+  it('defines all 11 organ systems', () => {
+    expect(ALL_SYSTEMS).toHaveLength(11)
   })
 
   it('has a color defined for every organ system', () => {
@@ -21,7 +21,7 @@ describe('health model', () => {
       id: '1',
       name: 'Hypertension',
       organ: 'heart',
-      system: 'cardiovascular',
+      system: 'cardio',
       date: '2022-03-15',
       status: 'documented',
       evidence: 'BP 145/92 recorded on 2022-03-15',
