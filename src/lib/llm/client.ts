@@ -120,3 +120,28 @@ export async function updateModelChain(
     [SETTINGS_KEY, JSON.stringify(models)],
   )
 }
+
+// ── Session chat helper ───────────────────────────────────────────────────────
+// For condition-scoped educational chat. The system prompt is constructed by
+// the caller (bodymap screen) and must not contain full health record context.
+// Returns the assistant reply string, or throws on total failure.
+
+export async function getChatCompletion(
+  userMessage: string,
+  systemPrompt: string,
+  apiKey: string = '',
+): Promise<string> {
+  const result = await callLLMWithFallback<string>({
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage },
+    ],
+    apiKey,
+    temperature: 0.4,
+    label: 'chat',
+  })
+  if (!result.ok || !result.content) {
+    throw new Error(result.failures.join('; ') || 'No response from LLM')
+  }
+  return result.content
+}
