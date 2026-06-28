@@ -1,10 +1,13 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
 import {
   CREATE_TABLES_SQL,
+  ALTER_COLUMNS_SQL,
   type ConditionRow,
   type ConditionLocalNameRow,
-  type ConditionRecordRow,
 } from './schema'
+import type {
+  ConditionRecord, DesignCondition, SupportedLang, SystemId,
+} from '@/model/conditions'
 
 // ── UUID ──────────────────────────────────────────────────────────────────────
 
@@ -19,6 +22,15 @@ function uuid(): string {
 
 export async function initDatabase(db: SQLiteDatabase): Promise<void> {
   await db.execAsync(CREATE_TABLES_SQL)
+  // Backfill columns on databases created before these were added. SQLite throws
+  // "duplicate column name" if the column already exists — swallow it per-statement.
+  for (const stmt of ALTER_COLUMNS_SQL) {
+    try {
+      await db.execAsync(stmt)
+    } catch {
+      // column already present — safe to ignore
+    }
+  }
 }
 
 // ── Facilities ────────────────────────────────────────────────────────────────
@@ -358,14 +370,75 @@ export async function insertConditionRecord(
   return id
 }
 
+// Design-layer read: maps the stored row onto the ConditionRecord shape used by
+// the body-map records carousel (record_type → type, title → label, color, date).
 export async function getConditionRecords(
   db: SQLiteDatabase,
   conditionId: string,
-): Promise<ConditionRecordRow[]> {
-  return db.getAllAsync<ConditionRecordRow>(
-    'SELECT * FROM condition_records WHERE condition_id = ? ORDER BY date ASC',
+): Promise<ConditionRecord[]> {
+  const rows = await db.getAllAsync<{
+    id: string
+    record_type: string
+    title: string | null
+    date: string | null
+    color: string | null
+  }>(
+    'SELECT id, record_type, title, color, date FROM condition_records WHERE condition_id = ? ORDER BY created_at ASC',
     [conditionId],
   )
+  return rows.map((r) => ({
+    id: r.id,
+    type: r.record_type as ConditionRecord['type'],
+    label: r.title ?? '',
+    date: r.date ?? '',
+    color: r.color ?? '#FFFFFF',
+  }))
+}
+
+// ── Design-layer Conditions ───────────────────────────────────────────────────
+
+// Returns localized condition names keyed by language for one condition.
+// Empty object when the condition is unknown.
+export async function getLocalNamesForCondition(
+  db: SQLiteDatabase,
+  condId: string,
+): Promise<Partial<Record<SupportedLang, string>>> {
+  const rows = await db.getAllAsync<ConditionLocalNameRow>(
+    'SELECT condition_id, lang, name FROM condition_localnames WHERE condition_id = ?',
+    [condId],
+  )
+  const out: Partial<Record<SupportedLang, string>> = {}
+  for (const r of rows) out[r.lang as SupportedLang] = r.name
+  return out
+}
+
+// Returns all seeded conditions mapped onto the DesignCondition shape the body
+// map renders. English label comes from name_common; medName from name_medical.
+export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition[]> {
+  const rows = await db.getAllAsync<ConditionRow & {
+    cx: number | null
+    cy: number | null
+    year_frac: number | null
+  }>('SELECT * FROM conditions ORDER BY year_frac ASC')
+
+  const result: DesignCondition[] = []
+  for (const row of rows) {
+    const localNames = await getLocalNamesForCondition(db, row.id)
+    result.push({
+      id: row.id,
+      system: row.system as SystemId,
+      label: row.name_common ?? row.name_medical,
+      medName: row.name_medical,
+      localNames,
+      date: row.date_diagnosed ?? row.date_onset ?? '',
+      yearFrac: row.year_frac ?? 0,
+      cx: row.cx ?? 0,
+      cy: row.cy ?? 0,
+      note: row.notes ?? '',
+      evidence: row.evidence ?? '',
+    })
+  }
+  return result
 }
 
 export async function getConditionsByDateRange(

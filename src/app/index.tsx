@@ -162,14 +162,16 @@ export default function UploadScreen() {
 
             {/* Bottom strip */}
             <View style={styles.uploadStrip}>
-              <Text style={styles.uploadStripText}>PDF · JPG · PNG · HEIC</Text>
+              <Text style={styles.uploadStripText}>
+                Health records, discharge forms, lab results, imaging reports, etc.
+              </Text>
             </View>
           </View>
 
           {/* Privacy badge */}
           <View style={styles.privacyBadge}>
             <View style={styles.lockDot} />
-            <Text style={styles.privacyText}>Private — never leaves your device</Text>
+            <Text style={styles.privacyText}>YOUR DATA NEVER LEAVE YOUR DEVICE</Text>
           </View>
 
           {/* OR divider */}
@@ -186,6 +188,9 @@ export default function UploadScreen() {
 
           {/* Footer */}
           <Text style={styles.footer}>No account. No cloud. Works offline.</Text>
+
+          {/* Sample data preview */}
+          <Text style={styles.samplePreview}>9 conditions | 7 organ systems | 2015 — 2024</Text>
 
           <View style={{ height: 80 }} />
         </ScrollView>
@@ -290,10 +295,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#EDE6FA',
   },
   uploadStripText: {
-    fontFamily: 'SourceCodePro',
-    fontSize: 11,
+    fontFamily: 'BarlowCondensed-Regular',
+    fontSize: 13,
     color: C.aquaDark,
-    letterSpacing: 0.5,
+    letterSpacing: 0.3,
+    textAlign: 'center',
+    paddingHorizontal: 12,
   },
 
   // Icons
@@ -381,6 +388,8 @@ const styles = StyleSheet.create({
     fontFamily: 'SourceCodePro',
     fontSize: 11,
     color: C.privacyText,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
 
   // OR divider
@@ -419,6 +428,14 @@ const styles = StyleSheet.create({
     color: C.aquaDark,
     textAlign: 'center',
     letterSpacing: 0.3,
+  },
+  samplePreview: {
+    fontFamily: 'BarlowCondensed-Regular',
+    fontSize: 11,
+    color: C.aquaDark,
+    opacity: 0.6,
+    textAlign: 'center',
+    marginTop: 8,
   },
 
   // QS wordmark

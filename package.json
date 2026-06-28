@@ -40,8 +40,10 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@testing-library/react-native": "^14.0.1",
     "@types/jest": "^30.0.0",
     "@types/react": "~19.2.2",
+    "cross-env": "^10.1.0",
     "jest-expo": "^56.0.5",
     "typescript": "~6.0.3"
   },
@@ -52,7 +54,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "test": "jest --coverage",
+    "test": "cross-env NODE_OPTIONS=--max-old-space-size=4096 jest --coverage",
     "test:watch": "jest --watch",
     "typecheck": "tsc --noEmit"
   },

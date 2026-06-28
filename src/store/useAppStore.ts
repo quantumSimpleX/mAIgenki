@@ -1,9 +1,11 @@
 import { create } from 'zustand'
-import { ALL_SYSTEMS, ChatMessage, DesignCondition, SupportedLang, SystemId } from '@/model/conditions'
+import {
+  ALL_SYSTEMS, ChatMessage, ConditionRecord, DesignCondition,
+  SupportedLang, SystemId,
+} from '@/model/conditions'
 
 type Screen = 'upload' | 'analyzing' | 'bodymap'
 type TimeDisplayMode = 'date' | 'age'
-type BodyMapMode = 'body' | 'list'
 
 type AppState = {
   screen: Screen
@@ -28,9 +30,12 @@ type AppState = {
   chatInputVal: string
   chatLoading: boolean
   condDateOverrides: Record<string, string>
-  selectedRecords: string[]
-  lightboxRecord: string | null
-  bodyMapMode: BodyMapMode
+  selectedRecords: ConditionRecord[]
+  lightboxRecord: ConditionRecord | null
+  editingCondDate: string | null
+  editDateInput: string
+  dragging: boolean
+  uploadBtnsHovered: boolean
 }
 
 type AppActions = {
@@ -58,13 +63,19 @@ type AppActions = {
   setChatLoading: (loading: boolean) => void
   clearChat: () => void
   setCondDateOverride: (id: string, date: string) => void
-  setSelectedRecords: (records: string[]) => void
-  setLightboxRecord: (r: string | null) => void
+  setSelectedRecords: (records: ConditionRecord[]) => void
+  setLightboxRecord: (r: ConditionRecord | null) => void
+  startEditDate: (condId: string, date: string) => void
+  setEditDateInput: (val: string) => void
+  confirmEditDate: () => void
+  cancelEditDate: () => void
+  openHealthChat: () => void
+  setUploadBtnsHovered: (h: boolean) => void
+  setDragging: (d: boolean) => void
   startAnalyze: () => void
-  setBodyMapMode: (mode: BodyMapMode) => void
 }
 
-export const useAppStore = create<AppState & AppActions>((set) => ({
+export const useAppStore = create<AppState & AppActions>((set, get) => ({
   screen: 'upload',
   dragOver: false,
   analyzeProgress: 0,
@@ -89,7 +100,10 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   condDateOverrides: {},
   selectedRecords: [],
   lightboxRecord: null,
-  bodyMapMode: 'body',
+  editingCondDate: null,
+  editDateInput: '',
+  dragging: false,
+  uploadBtnsHovered: false,
 
   setScreen: (screen) => set({ screen }),
   setDragOver: (dragOver) => set({ dragOver }),
@@ -102,8 +116,36 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   })),
   setActiveSystems: (activeSystems) => set({ activeSystems }),
   setCurrentYear: (currentYear) => set({ currentYear }),
-  selectCondition: (c) => set({ selectedCondition: c, sheetOpen: c !== null, chatOpen: false, chatMessages: [] }),
-  closeSheet: () => set({ sheetOpen: false, selectedCondition: null, chatOpen: false, chatMessages: [] }),
+  selectCondition: (c) => {
+    if (!c) {
+      set({ selectedCondition: null, sheetOpen: false })
+      return
+    }
+    set({
+      selectedCondition: c,
+      sheetOpen: true,
+      currentYear: c.yearFrac,
+      timeRailActive: true,
+      selectedRecords: [],
+      lightboxRecord: null,
+      chatMessages: [],
+      chatOpen: false,
+    })
+  },
+  closeSheet: () => {
+    set({ sheetOpen: false })
+    setTimeout(() => {
+      // Only clear if a new sheet wasn't opened in the meantime
+      if (!get().sheetOpen) {
+        set({
+          selectedCondition: null,
+          chatOpen: false,
+          chatMessages: [],
+          editingCondDate: null,
+        })
+      }
+    }, 340)
+  },
   toggleLegend: () => set((s) => ({ legendOpen: !s.legendOpen })),
   toggleTimeDisplayMode: () => set((s) => ({
     timeDisplayMode: s.timeDisplayMode === 'date' ? 'age' : 'date',
@@ -125,6 +167,27 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   })),
   setSelectedRecords: (selectedRecords) => set({ selectedRecords }),
   setLightboxRecord: (lightboxRecord) => set({ lightboxRecord }),
+  startEditDate: (condId, date) => set({ editingCondDate: condId, editDateInput: date }),
+  setEditDateInput: (editDateInput) => set({ editDateInput }),
+  confirmEditDate: () => {
+    const { editingCondDate, editDateInput } = get()
+    if (editingCondDate) {
+      set((s) => ({
+        condDateOverrides: { ...s.condDateOverrides, [editingCondDate]: editDateInput },
+      }))
+    }
+    set({ editingCondDate: null, editDateInput: '' })
+  },
+  cancelEditDate: () => set({ editingCondDate: null, editDateInput: '' }),
+  openHealthChat: () => set({
+    sheetOpen: true,
+    chatOpen: true,
+    selectedCondition: null,
+    chatMessages: [],
+    selectedRecords: [],
+    lightboxRecord: null,
+  }),
+  setUploadBtnsHovered: (uploadBtnsHovered) => set({ uploadBtnsHovered }),
+  setDragging: (dragging) => set({ dragging }),
   startAnalyze: () => set({ screen: 'analyzing', analyzeProgress: 0, analyzePhase: 0 }),
-  setBodyMapMode: (bodyMapMode) => set({ bodyMapMode }),
 }))

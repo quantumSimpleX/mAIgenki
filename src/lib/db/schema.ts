@@ -173,6 +173,9 @@ export const CREATE_TABLES_SQL = `
     laterality TEXT,
     render_x REAL,
     render_y REAL,
+    cx REAL,
+    cy REAL,
+    year_frac REAL,
     status TEXT NOT NULL DEFAULT 'documented',
     severity TEXT,
     chronicity TEXT,
@@ -242,6 +245,7 @@ export const CREATE_TABLES_SQL = `
     image_uri TEXT,
     chart_json TEXT,
     table_json TEXT,
+    color TEXT,
     date TEXT,
     source_file TEXT,
     notes TEXT,
@@ -253,3 +257,13 @@ export const CREATE_TABLES_SQL = `
     value TEXT NOT NULL
   );
 `
+
+// SQLite has no `ADD COLUMN IF NOT EXISTS`. Each of these is run inside a
+// try/catch on init so an already-migrated DB ignores the duplicate-column error.
+export const ALTER_COLUMNS_SQL: string[] = [
+  `ALTER TABLE conditions ADD COLUMN evidence TEXT`,
+  `ALTER TABLE conditions ADD COLUMN cx REAL`,
+  `ALTER TABLE conditions ADD COLUMN cy REAL`,
+  `ALTER TABLE conditions ADD COLUMN year_frac REAL`,
+  `ALTER TABLE condition_records ADD COLUMN color TEXT`,
+]

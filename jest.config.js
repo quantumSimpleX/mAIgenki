@@ -1,7 +1,10 @@
 module.exports = {
   preset: 'jest-expo',
-  testMatch: ['**/tests/**/*.test.ts', '**/tests/**/*.test.tsx'],
-  collectCoverageFrom: ['src/lib/**/*.{ts,tsx}'],
+  testMatch: [
+    '**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx',
+    '**/tests/**/*.test.ts', '**/tests/**/*.test.tsx',
+  ],
+  collectCoverageFrom: ['src/lib/**/*.{ts,tsx}', 'src/model/**/*.{ts,tsx}', 'src/store/**/*.{ts,tsx}'],
   coverageThreshold: {
     global: { lines: 80 },
   },
