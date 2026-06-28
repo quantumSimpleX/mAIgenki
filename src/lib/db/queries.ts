@@ -1,5 +1,10 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
-import { CREATE_TABLES_SQL, type ConditionRow } from './schema'
+import {
+  CREATE_TABLES_SQL,
+  type ConditionRow,
+  type ConditionLocalNameRow,
+  type ConditionRecordRow,
+} from './schema'
 
 // ── UUID ──────────────────────────────────────────────────────────────────────
 
@@ -279,6 +284,89 @@ export async function getSetting(
 }
 
 // ── Queries ───────────────────────────────────────────────────────────────────
+
+export async function getAllConditions(db: SQLiteDatabase): Promise<ConditionRow[]> {
+  return db.getAllAsync<ConditionRow>(
+    `SELECT * FROM conditions ORDER BY COALESCE(date_diagnosed, date_onset) ASC`,
+  )
+}
+
+export async function getConditionsByRecord(
+  db: SQLiteDatabase,
+  recordId: string,
+): Promise<ConditionRow[]> {
+  return db.getAllAsync<ConditionRow>(
+    `SELECT * FROM conditions WHERE record_id = ? ORDER BY COALESCE(date_diagnosed, date_onset) ASC`,
+    [recordId],
+  )
+}
+
+// ── Condition Local Names ─────────────────────────────────────────────────────
+
+export async function upsertConditionLocalName(
+  db: SQLiteDatabase,
+  conditionId: string,
+  lang: string,
+  name: string,
+): Promise<void> {
+  await db.runAsync(
+    'INSERT OR REPLACE INTO condition_localnames (condition_id, lang, name) VALUES (?, ?, ?)',
+    [conditionId, lang, name],
+  )
+}
+
+export async function getConditionLocalNames(
+  db: SQLiteDatabase,
+  conditionId: string,
+): Promise<ConditionLocalNameRow[]> {
+  return db.getAllAsync<ConditionLocalNameRow>(
+    'SELECT * FROM condition_localnames WHERE condition_id = ?',
+    [conditionId],
+  )
+}
+
+// ── Condition Records ─────────────────────────────────────────────────────────
+
+type ConditionRecordInput = {
+  conditionId: string
+  recordType: string
+  title?: string | null
+  imageUri?: string | null
+  chartJson?: string | null
+  tableJson?: string | null
+  date?: string | null
+  sourceFile?: string | null
+  notes?: string | null
+}
+
+export async function insertConditionRecord(
+  db: SQLiteDatabase,
+  input: ConditionRecordInput,
+): Promise<string> {
+  const id = uuid()
+  await db.runAsync(
+    `INSERT INTO condition_records
+       (id, condition_id, record_type, title, image_uri, chart_json, table_json, date, source_file, notes)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      id, input.conditionId, input.recordType,
+      input.title ?? null, input.imageUri ?? null,
+      input.chartJson ?? null, input.tableJson ?? null,
+      input.date ?? null, input.sourceFile ?? null, input.notes ?? null,
+    ],
+  )
+  return id
+}
+
+export async function getConditionRecords(
+  db: SQLiteDatabase,
+  conditionId: string,
+): Promise<ConditionRecordRow[]> {
+  return db.getAllAsync<ConditionRecordRow>(
+    'SELECT * FROM condition_records WHERE condition_id = ? ORDER BY date ASC',
+    [conditionId],
+  )
+}
 
 export async function getConditionsByDateRange(
   db: SQLiteDatabase,

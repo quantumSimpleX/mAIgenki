@@ -100,6 +100,26 @@ export type MedicationRow = {
   created_at: string
 }
 
+export type ConditionLocalNameRow = {
+  condition_id: string
+  lang: string
+  name: string
+}
+
+export type ConditionRecordRow = {
+  id: string
+  condition_id: string
+  record_type: string
+  title: string | null
+  image_uri: string | null
+  chart_json: string | null
+  table_json: string | null
+  date: string | null
+  source_file: string | null
+  notes: string | null
+  created_at: string
+}
+
 export type SettingRow = {
   key: string
   value: string
@@ -204,6 +224,27 @@ export const CREATE_TABLES_SQL = `
     provider_id TEXT REFERENCES providers(id),
     facility_id TEXT REFERENCES facilities(id),
     evidence TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS condition_localnames (
+    condition_id TEXT NOT NULL REFERENCES conditions(id),
+    lang TEXT NOT NULL,
+    name TEXT NOT NULL,
+    PRIMARY KEY (condition_id, lang)
+  );
+
+  CREATE TABLE IF NOT EXISTS condition_records (
+    id TEXT PRIMARY KEY,
+    condition_id TEXT NOT NULL REFERENCES conditions(id),
+    record_type TEXT NOT NULL,
+    title TEXT,
+    image_uri TEXT,
+    chart_json TEXT,
+    table_json TEXT,
+    date TEXT,
+    source_file TEXT,
+    notes TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );
 
