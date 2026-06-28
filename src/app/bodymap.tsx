@@ -6,7 +6,9 @@ import {
   TouchableOpacity, View,
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
-import Svg, { Circle, Ellipse, Path } from 'react-native-svg'
+import Svg, { Circle, Ellipse, Path as SvgPath } from 'react-native-svg'
+
+const QS_PATH = 'M153.3,240.9L265.1,95.7L158.9,0L0,95.7l114,145.4l-32.7,42.2L27,350.9h106.8h106.8l-54.3-67.7L153.3,240.9z M63.2,94.3l82.1-49.4l-20,159.9l-72.1-92h77.1l2.3-18.5H63.2z M212.4,112.7L142.1,204L162,45l54.6,49.2h-54.3l-2.3,18.5H212.4z M133.8,319.6H92.4l13.4-16.6l0.2-0.2l0.2-0.2l27.7-35.7l27.7,35.7l0.2,0.2l0.2,0.2l13.4,16.6H133.8z'
 import { router } from 'expo-router'
 import { useAppStore } from '@/store/useAppStore'
 import {
@@ -208,21 +210,21 @@ function BodySvg({
       {/* Head */}
       <Ellipse cx={130} cy={46} rx={34} ry={38} stroke="rgba(255,255,255,0.18)" strokeWidth={1.5} fill="rgba(255,255,255,0.03)" />
       {/* Neck */}
-      <Path d="M114 82 L114 102 M146 82 L146 102" stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} />
+      <SvgPath d="M114 82 L114 102 M146 82 L146 102" stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} />
       {/* Torso */}
       <Path
         d="M82 102 Q62 118 59 168 L54 288 Q54 312 82 318 L82 392 Q82 410 100 410 L160 410 Q178 410 178 392 L178 318 Q206 312 206 288 L201 168 Q198 118 178 102 Z"
         stroke="rgba(255,255,255,0.14)" strokeWidth={1.5} fill="rgba(255,255,255,0.03)"
       />
       {/* Arms */}
-      <Path d="M82 108 Q52 130 42 208 Q38 228 46 242 Q52 252 64 246 Q72 236 74 214 L78 152"
+      <SvgPath d="M82 108 Q52 130 42 208 Q38 228 46 242 Q52 252 64 246 Q72 236 74 214 L78 152"
         stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} fill="transparent" />
-      <Path d="M178 108 Q208 130 218 208 Q222 228 214 242 Q208 252 196 246 Q188 236 186 214 L182 152"
+      <SvgPath d="M178 108 Q208 130 218 208 Q222 228 214 242 Q208 252 196 246 Q188 236 186 214 L182 152"
         stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} fill="transparent" />
       {/* Legs */}
-      <Path d="M100 410 L92 498 Q90 520 104 520 Q118 520 120 498 L122 420"
+      <SvgPath d="M100 410 L92 498 Q90 520 104 520 Q118 520 120 498 L122 420"
         stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} fill="transparent" />
-      <Path d="M160 410 L168 498 Q170 520 156 520 Q142 520 140 498 L138 420"
+      <SvgPath d="M160 410 L168 498 Q170 520 156 520 Q142 520 140 498 L138 420"
         stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} fill="transparent" />
 
       {/* Organ system tints */}
@@ -257,7 +259,7 @@ function BodySvg({
         <Ellipse cx={130} cy={220} rx={26} ry={60} fill={SYSTEM_META.muscle.color} opacity={0.06} />
       )}
       {activeSystems.includes('skeletal') && (
-        <Path d="M120 102 L120 392 M140 102 L140 392" stroke={SYSTEM_META.skeletal.color} strokeWidth={1} opacity={0.15} />
+        <SvgPath d="M120 102 L120 392 M140 102 L140 392" stroke={SYSTEM_META.skeletal.color} strokeWidth={1} opacity={0.15} />
       )}
       {activeSystems.includes('lymph') && (
         <>
@@ -771,7 +773,9 @@ function UploadShortcuts() {
         style={styles.qsWordmark}
         onPress={() => setUploadPanelOpen(!uploadPanelOpen)}
       >
-        <Text style={styles.qsWordmarkText}>QS</Text>
+        <Svg width={17} height={22} viewBox="0 0 265.1 350.9">
+          <SvgPath fill="rgba(250,250,247,0.9)" d={QS_PATH} />
+        </Svg>
       </TouchableOpacity>
     </View>
   )
@@ -1229,7 +1233,6 @@ const styles = StyleSheet.create({
   },
   uploadShortcutIcon: { fontSize: 14 },
   qsWordmark: { opacity: 0.3 },
-  qsWordmarkText: { fontFamily: 'BourbonGrotesque', fontSize: 17, color: C.ink, letterSpacing: 2 },
 
   // Backdrop
   backdrop: {

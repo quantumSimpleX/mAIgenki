@@ -1,6 +1,7 @@
 import { router } from 'expo-router'
 import { StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import Svg, { Path } from 'react-native-svg'
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { useAppStore } from '@/store/useAppStore'
@@ -64,11 +65,16 @@ function ImageIcon({ color }: { color: string }) {
 
 // ── QS Wordmark ───────────────────────────────────────────────────────────────
 
+// QS simplex mark SVG path (icon-black.svg, scaled to ~24px tall)
+const QS_PATH = 'M153.3,240.9L265.1,95.7L158.9,0L0,95.7l114,145.4l-32.7,42.2L27,350.9h106.8h106.8l-54.3-67.7L153.3,240.9z M63.2,94.3l82.1-49.4l-20,159.9l-72.1-92h77.1l2.3-18.5H63.2z M212.4,112.7L142.1,204L162,45l54.6,49.2h-54.3l-2.3,18.5H212.4z M133.8,319.6H92.4l13.4-16.6l0.2-0.2l0.2-0.2l27.7-35.7l27.7,35.7l0.2,0.2l0.2,0.2l13.4,16.6H133.8z'
+
 function QSWordmark() {
   return (
     <View style={styles.qsWrap} pointerEvents="none">
       <Text style={styles.qsBuiltBy}>BUILT BY</Text>
-      <Text style={styles.qsText}>QS</Text>
+      <Svg width={17} height={22} viewBox="0 0 265.1 350.9">
+        <Path fill="rgba(10,14,20,0.9)" d={QS_PATH} />
+      </Svg>
     </View>
   )
 }
@@ -434,12 +440,6 @@ const styles = StyleSheet.create({
     color: C.qsLabel,
     letterSpacing: 0.8,
     textTransform: 'uppercase',
-    marginBottom: 2,
-  },
-  qsText: {
-    fontFamily: 'BourbonGrotesque',
-    fontSize: 22,
-    color: C.ink,
-    letterSpacing: 2,
+    marginBottom: 4,
   },
 })
