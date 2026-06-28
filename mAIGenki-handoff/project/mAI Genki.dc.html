@@ -1,0 +1,1631 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+
+<helmet>
+  <style>
+    @font-face { font-family:'MOMCAKE'; src:url('./fonts/MOMCAKE-Bold.otf') format('opentype'); font-weight:700; font-display:swap; }
+    @font-face { font-family:'MOMCAKE'; src:url('./fonts/MOMCAKE-Thin.otf') format('opentype'); font-weight:100; font-display:swap; }
+    @font-face { font-family:'Source Code Pro'; src:url('./fonts/SourceCodePro-Regular.otf.woff2') format('woff2'); font-weight:400; font-display:swap; }
+    @font-face { font-family:'Bourbon Grotesque'; src:url('./fonts/BourbonGrotesque-Regular.otf') format('opentype'); font-weight:400; font-display:swap; }
+    @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@300;400;500;600;700&display=swap');
+    * { box-sizing:border-box; margin:0; padding:0; }
+    html,body { background:#0A0C14; }
+
+    @keyframes pulse-ring {
+      0%   { transform:scale(1);   opacity:0.25; }
+      70%  { transform:scale(2.4); opacity:0; }
+      100% { transform:scale(2.4); opacity:0; }
+    }
+    @keyframes scan-line {
+      0%   { transform:translateY(0px); opacity:0.9; }
+      100% { transform:translateY(340px); opacity:0; }
+    }
+    @keyframes fade-up {
+      from { opacity:0; transform:translateY(12px); }
+      to   { opacity:1; transform:translateY(0); }
+    }
+    @keyframes dot-blink {
+      0%,100% { opacity:0.3; } 50% { opacity:1; }
+    }
+    @keyframes glow-pulse {
+      0%,100% { opacity:0.6; } 50% { opacity:1; }
+    }
+    @keyframes body-reveal {
+      from { stroke-dashoffset:3000; }
+      to   { stroke-dashoffset:0; }
+    }
+
+    input[type=range] {
+      -webkit-appearance:none; appearance:none;
+      width:100%; height:2px; border-radius:999px;
+      background:rgba(255,255,255,0.12); outline:none; cursor:pointer;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance:none;
+      width:18px; height:18px; border-radius:50%;
+      background:#1FC3A4; cursor:pointer;
+      border:2.5px solid #0A0C14;
+      box-shadow:0 0 0 3px rgba(31,195,164,0.3);
+    }
+    input[type=range].range-v {
+      writing-mode:vertical-lr; direction:rtl;
+      -webkit-appearance:none; appearance:none;
+      width:2px; height:100%; border-radius:999px;
+      background:rgba(255,255,255,0.1); outline:none; cursor:pointer;
+    }
+    input[type=range].range-v::-webkit-slider-thumb {
+      -webkit-appearance:none;
+      width:14px; height:14px; border-radius:50%;
+      background:#1FC3A4; cursor:pointer;
+      border:2px solid #0A0C14;
+      box-shadow:0 0 0 2px rgba(31,195,164,0.35);
+    }
+
+    .organ-layer { transition:opacity 280ms cubic-bezier(0.16,1,0.3,1); }
+    .sys-chip { transition:all 220ms cubic-bezier(0.16,1,0.3,1); }
+    .upload-cta:active { transform:scale(0.97); }
+  </style>
+</helmet>
+
+<!-- Root -->
+<div style="min-height:100vh; background:#0A0C14; display:flex; align-items:center; justify-content:center; padding:40px 20px;">
+
+  <!-- Phone shell -->
+  <div style="position:relative; width:390px; flex-shrink:0; background:#111318; border-radius:50px; overflow:hidden; box-shadow:0 0 0 1px rgba(255,255,255,0.08), 0 32px 80px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(255,255,255,0.04);">
+
+    <!-- Status bar -->
+    <div style="height:52px; display:flex; align-items:flex-end; justify-content:space-between; padding:0 28px 10px; background:inherit;">
+      <span style="font-family:'Barlow Condensed',sans-serif; font-size:14px; font-weight:600; color:rgba(255,255,255,0.7);">9:41</span>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <!-- Signal -->
+        <svg width="16" height="12" viewBox="0 0 16 12" fill="rgba(255,255,255,0.7)">
+          <rect x="0" y="8" width="3" height="4" rx="1"/>
+          <rect x="4.5" y="5.5" width="3" height="6.5" rx="1"/>
+          <rect x="9" y="3" width="3" height="9" rx="1"/>
+          <rect x="13.5" y="0" width="2.5" height="12" rx="1"/>
+        </svg>
+        <!-- Battery -->
+        <svg width="22" height="12" viewBox="0 0 22 12" fill="none">
+          <rect x="0.5" y="0.5" width="17" height="11" rx="3" stroke="rgba(255,255,255,0.7)" stroke-width="1"/>
+          <rect x="2" y="2" width="11" height="8" rx="1.5" fill="rgba(255,255,255,0.7)"/>
+          <path d="M19 4v4a2 2 0 000-4z" fill="rgba(255,255,255,0.7)"/>
+        </svg>
+      </div>
+    </div>
+
+    <!-- Screen area — 390×780 -->
+    <div style="height:780px; position:relative; overflow:hidden;">
+
+      <!-- ═══════════ UPLOAD SCREEN ═══════════ -->
+      <div style="position:absolute; inset:0; display:flex; flex-direction:column; background:#FAFAF7; transition:opacity 400ms, transform 400ms cubic-bezier(0.16,1,0.3,1);" style="{{ uploadScreenStyle }}">
+
+        <!-- Logo bar -->
+        <div style="padding:18px 24px 0; display:flex; align-items:center; justify-content:space-between;">
+          <!-- App name: mAI Genki -->
+          <div style="display:flex; align-items:center; gap:0;">
+            <span style="font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:18px; letter-spacing:-0.01em; color:#0A0E14;">m</span><span style="font-family:'MOMCAKE',sans-serif; font-weight:700; font-size:20px; letter-spacing:0.02em; color:#8A60EB; line-height:1; vertical-align:baseline;">AI</span><span style="font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:18px; letter-spacing:-0.01em; color:#0A0E14;"> Genki</span>
+          </div>
+
+        </div>
+
+        <div style="flex:1; display:flex; flex-direction:column; padding:28px 28px 32px;">
+
+          <!-- Hero text -->
+          <div style="margin-bottom:20px; animation:fade-up 0.5s cubic-bezier(0.16,1,0.3,1) both;">
+            <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:11px; letter-spacing:0.18em; text-transform:uppercase; color:#7042D6; margin-bottom:10px;">Your body. Your records.</div>
+            <div style="font-family:'MOMCAKE',sans-serif; font-weight:700; font-size:42px; line-height:0.95; letter-spacing:-0.03em; color:#0A0E14; margin-bottom:14px;">YOUR<br/>WELLNESS<br/>STORY</div>
+            <div style="font-family:'Barlow Condensed',sans-serif; font-weight:400; font-size:16px; line-height:1.55; color:#5A6573; max-width:280px; text-wrap:pretty;">Upload health PDFs. Every condition mapped to anatomy — across time.</div>
+          </div>
+
+          <!-- Single upload box, 3 icons -->
+          <div style="border:1.5px dashed #CDD2D9; border-radius:8px; background:#fff; margin-bottom:20px; overflow:hidden;"
+            onDragOver="{{ onDragOver }}"
+            onDragLeave="{{ onDragLeave }}"
+            onDrop="{{ onDrop }}"
+          >
+            <div style="display:flex;">
+
+              <!-- Drop PDFs -->
+              <div onClick="{{ onUploadClick }}" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:22px 8px 16px; cursor:pointer;">
+                <div style="width:52px; height:52px; border-radius:10px; background:#8A60EB12; display:flex; align-items:center; justify-content:center;">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#8A60EB" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                    <line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+                  </svg>
+                </div>
+                <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:12px; color:#0A0E14; text-align:center; white-space:nowrap;">Drop in PDFs</div>
+              </div>
+
+              <!-- Take a photo -->
+              <div onClick="{{ onUploadClick }}" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:22px 8px 16px; cursor:pointer;">
+                <div style="width:52px; height:52px; border-radius:10px; background:#1FC3A412; display:flex; align-items:center; justify-content:center;">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#1FC3A4" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                    <circle cx="12" cy="13" r="4"/>
+                  </svg>
+                </div>
+                <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:12px; color:#0A0E14; text-align:center; white-space:nowrap;">Take a photo</div>
+              </div>
+
+              <!-- Choose image -->
+              <div onClick="{{ onUploadClick }}" style="flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:22px 8px 16px; cursor:pointer;">
+                <div style="width:52px; height:52px; border-radius:10px; background:#8A60EB12; display:flex; align-items:center; justify-content:center;">
+                  <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#8A60EB" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                    <circle cx="8.5" cy="8.5" r="1.5"/>
+                    <polyline points="21 15 16 10 5 21"/>
+                  </svg>
+                </div>
+                <div style="font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:12px; color:#0A0E14; text-align:center; white-space:nowrap;">Choose image</div>
+              </div>
+
+            </div>
+            <!-- File types line -->
+            <div style="border-top:1px solid #E6E9ED; padding:10px 16px; text-align:center;">
+              <span style="font-family:'Barlow Condensed',sans-serif; font-weight:400; font-size:13px; color:#1A9E8A;">Health records, discharge forms, lab results, imaging reports, etc.</span>
+            </div>
+          </div>
+
+          <!-- Privacy badge -->
+          <div style="display:flex; justify-content:center; margin-bottom:20px;">
+            <div style="font-family:'Source Code Pro',monospace; font-size:10px; color:#6B3FBF; letter-spacing:0.05em; padding:4px 10px; border:1px solid #C4A8F0; border-radius:4px;">YOUR DATA NEVER LEAVE YOUR DEVICE</div>
+          </div>
+
+          <!-- Demo CTA -->
+          <button class="upload-cta" onClick="{{ onUploadClick }}" style="width:100%; padding:16px; background:#0A0E14; border:none; border-radius:8px; font-family:'Barlow Condensed',sans-serif; font-weight:600; font-size:16px; letter-spacing:0.05em; color:#FAFAF7; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:10px; transition:transform 120ms;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            Try with sample records
+          </button>
+
+          <div style="margin-top:14px; font-family:'Barlow Condensed',sans-serif; font-size:13px; color:#1A9E8A; text-align:center; line-height:1.5;">No account. No cloud. Works offline.</div>
+
+          <!-- QS wordmark lower-right on upload, with "Built by" -->
+          <div style="position:absolute; bottom:20px; right:20px; display:flex; flex-direction:column; align-items:flex-end; gap:4px; opacity:0.4;">
+            <span style="font-family:'Barlow Condensed',sans-serif; font-size:13px; font-weight:500; letter-spacing:0.12em; text-transform:uppercase; color:#A6ADB7;">Built by</span>
+            <div style="display:flex; align-items:center; gap:1px;">
+              <!-- Q mark SVG acts as the "Q" in QUANTUM -->
+              <svg viewBox="0 0 392 391.3" style="height:28px;width:28px;display:block;flex-shrink:0;" aria-hidden="true">
+                <path fill="#0A0E14" d="M369.8,138.5c14.3,53.6,4,108.3-24.6,151.2l46.8,46.8l-54.4,54.8l-47.2-47.2c-16.3,10.3-34.1,18.7-54,24.2c-100.4,27-203.6-32.5-230.2-132.1C-20.3,136.1,39.3,33.3,139.7,6.4C239.7-20.2,342.8,38.9,369.8,138.5z"/>
+                <path fill="#FAFAF7" d="M199.2,226.5l78.7-102.2l-74.8-67.4L91.3,124.3l80.2,102.3l-23,29.7l-38.2,47.6h75.2h75.2l-38.2-47.7L199.2,226.5z M135.8,123.3l57.8-34.8l-14.1,112.6l-50.8-64.8H183l1.6-13L135.8,123.3L135.8,123.3z M240.8,136.3l-49.5,64.3l14-111.9l38.4,34.6h-38.2l-1.6,13H240.8z M185.5,281.9h-29.1l9.4-11.7l0.1-0.1l0.1-0.1l19.5-25.1l19.5,25.1l0.1,0.1l0.1,0.1l9.4,11.7H185.5z"/>
+              </svg>
+              <!-- Two-row wordmark — exact QSWordmark.jsx formula at size=28 -->
+              <div style="display:flex; flex-direction:column; gap:0; font-size:14px; line-height:0.78; letter-spacing:0.06em; white-space:nowrap; color:#0A0E14;">
+                <div style="display:flex; align-items:baseline; transform:translateY(4px);">
+                  <span style="font-family:'MOMCAKE',sans-serif; font-weight:700;">UANTUM</span>
+                </div>
+                <div style="display:flex; align-items:baseline; padding-left:10px;">
+                  <span style="font-family:'MOMCAKE',sans-serif; font-weight:700;">SIMPLE</span><span style="font-family:'Bourbon Grotesque',sans-serif; font-weight:400; font-size:17.8px; letter-spacing:0.8px;">X</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Sample conditions preview -->
+          <div style="margin-top:24px; display:flex; gap:8px; flex-wrap:wrap;">
+            <div style="font-family:'Barlow Condensed',sans-serif; font-size:11px; color:#7E8794; padding:4px 10px; border:1px solid #E6E9ED; border-radius:999px;">9 conditions</div>
+            <div style="font-family:'Barlow Condensed',sans-serif; font-size:11px; color:#7E8794; padding:4px 10px; border:1px solid #E6E9ED; border-radius:999px;">7 organ systems</div>
+            <div style="font-family:'Barlow Condensed',sans-serif; font-size:11px; color:#7E8794; padding:4px 10px; border:1px solid #E6E9ED; border-radius:999px;">2015 — 2024</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══════════ ANALYZING SCREEN ═══════════ -->
+      <div style="{{ analyzingScreenStyle }}">
+
+        <!-- Brand mark -->
+        <div style="display:flex; align-items:center; gap:0; margin-bottom:40px; animation:fade-up 0.4s both;">
+          <span style="font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:17px; letter-spacing:-0.01em; color:rgba(255,255,255,0.7);">m</span><span style="font-family:'MOMCAKE',sans-serif; font-weight:700; font-size:20px; letter-spacing:0.02em; color:#8A60EB; line-height:1; vertical-align:baseline;">AI</span><span style="font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:17px; letter-spacing:-0.01em; color:rgba(255,255,255,0.7);"> Genki</span>
+        </div>
+
+        <!-- Body reveal SVG -->
+        <div style="position:relative; width:190px; height:320px; margin-bottom:36px;">
+          <svg viewBox="0 0 190 320" style="width:100%;height:100%;overflow:visible;">
+            <!-- Scanning line -->
+            <line x1="0" y1="0" x2="190" y2="0" stroke="#1FC3A4" stroke-width="1.5" opacity="0.8" style="animation:scan-line 2s cubic-bezier(0.16,1,0.3,1) 0.3s infinite;"/>
+            <!-- Horizontal glow from scan -->
+            <rect x="0" y="-4" width="190" height="8" fill="url(#scanGrad)" opacity="0.4" style="animation:scan-line 2s cubic-bezier(0.16,1,0.3,1) 0.3s infinite;"/>
+            <defs>
+              <linearGradient id="scanGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                <stop offset="0%" stop-color="#1FC3A4" stop-opacity="0"/>
+                <stop offset="50%" stop-color="#1FC3A4" stop-opacity="1"/>
+                <stop offset="100%" stop-color="#1FC3A4" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+
+            <!-- Body outline stroke-animated -->
+            <g stroke="rgba(138,96,235,0.6)" stroke-width="1.2" fill="none"
+               style="stroke-dasharray:3000; animation:body-reveal 2.2s cubic-bezier(0.16,1,0.3,1) 0.1s forwards;">
+              <ellipse cx="95" cy="36" rx="26" ry="30"/>
+              <path d="M 80 64 L 110 64 L 113 82 L 77 82"/>
+              <path d="M 57 82 Q 40 90 36 128 L 34 202 Q 34 222 52 230 L 56 285 L 80 285 L 80 230 Q 95 224 95 224 Q 110 224 110 230 L 110 285 L 134 285 L 134 230 Q 152 222 156 202 L 154 128 Q 150 90 133 82 Z"/>
+              <path d="M 57 82 Q 37 92 24 122 L 16 188 L 34 194 L 40 126 Q 50 100 60 90"/>
+              <path d="M 133 82 Q 153 92 166 122 L 174 188 L 156 194 L 150 126 Q 140 100 130 90"/>
+              <line x1="56" y1="285" x2="48" y2="318" stroke-linecap="round"/>
+              <line x1="80" y1="285" x2="76" y2="318" stroke-linecap="round"/>
+              <line x1="110" y1="285" x2="114" y2="318" stroke-linecap="round"/>
+              <line x1="134" y1="285" x2="142" y2="318" stroke-linecap="round"/>
+            </g>
+
+            <!-- Condition dots appearing -->
+            <circle cx="95" cy="125" r="4.5" fill="#E05A5A" style="animation:dot-blink 1.4s 0.8s infinite;"/>
+            <circle cx="74" cy="145" r="3.5" fill="#6BA4E8" style="animation:dot-blink 1.4s 1.2s infinite;"/>
+            <circle cx="116" cy="145" r="3.5" fill="#6BA4E8" style="animation:dot-blink 1.4s 1.5s infinite;"/>
+            <circle cx="85" cy="80" r="3" fill="#8A60EB" style="animation:dot-blink 1.4s 1.8s infinite;"/>
+            <circle cx="88" cy="200" r="3" fill="#1FC3A4" style="animation:dot-blink 1.4s 2.0s infinite;"/>
+            <circle cx="64" cy="215" r="3" fill="#1FC3A4" style="animation:dot-blink 1.4s 2.3s infinite;"/>
+            <circle cx="95" cy="75" r="3" fill="#EAB308" style="animation:dot-blink 1.4s 2.6s infinite;"/>
+          </svg>
+        </div>
+
+        <!-- Phase label -->
+        <div style="text-align:center; margin-bottom:24px; animation:fade-up 0.5s 0.2s both;">
+          <div style="font-family:'Barlow Condensed',sans-serif; font-weight:500; font-size:20px; color:#FAFAF7; margin-bottom:6px;">{{ analyzePhaseLabel }}</div>
+          <div style="font-family:'Source Code Pro',monospace; font-size:12px; color:#3A434F; letter-spacing:0.04em;">{{ analyzeProgressDisplay }}% — processing on-device</div>
+        </div>
+
+        <!-- Progress track -->
+        <div style="width:220px; height:2px; background:rgba(255,255,255,0.08); border-radius:999px; overflow:hidden;">
+          {{ progressBarEl }}
+        </div>
+
+        <!-- Phase steps -->
+        <div style="display:flex; gap:6px; margin-top:28px;">
+          {{ phaseDotsEl }}
+        </div>
+
+      </div>
+
+      <!-- ═══════════ BODY MAP SCREEN ═══════════ -->
+      <div style="{{ bodyMapScreenStyle }}">
+
+        <!-- Top bar -->
+        <div style="padding:10px 20px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid rgba(255,255,255,0.06); flex-shrink:0;">
+          <!-- App name: mAI Genki (dark) — tap to toggle legend -->
+          <div style="display:flex; align-items:center; gap:6px; cursor:pointer;" onClick="{{ onToggleLegend }}">
+            <div style="display:flex; align-items:center; gap:0;">
+              <span style="font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:18px; letter-spacing:-0.01em; color:rgba(255,255,255,0.9);">m</span><span style="font-family:'MOMCAKE',sans-serif; font-weight:700; font-size:20px; letter-spacing:0.02em; color:#8A60EB; line-height:1; vertical-align:baseline;">AI</span><span style="font-family:'Barlow Condensed',sans-serif; font-weight:700; font-size:18px; letter-spacing:-0.01em; color:rgba(255,255,255,0.9);"> Genki</span>
+            </div>
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none" style="opacity:0.4; transform:{{ chevronTransform }}; transition:transform 300ms cubic-bezier(0.16,1,0.3,1); flex-shrink:0;">
+              <path d="M2 4L5 7L8 4" stroke="rgba(255,255,255,0.8)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+          <div style="display:flex; align-items:center; gap:7px;">
+
+            <div onClick="{{ onDatePillClick }}" style="font-family:'Source Code Pro',monospace; font-size:11px; color:rgba(255,255,255,0.4); border:1px solid rgba(255,255,255,0.1); border-radius:4px; padding:3px 9px; letter-spacing:0.03em; cursor:pointer; user-select:none;" title="Toggle date / age">{{ currentYearLabel }}</div>
+            <!-- Gear icon -->
+            <div onClick="{{ onGearClick }}" style="width:26px; height:26px; display:flex; align-items:center; justify-content:center; cursor:pointer; border-radius:4px; border:1px solid rgba(255,255,255,0.08); opacity:{{ gearOpacity }}; transition:opacity 200ms;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.7)" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="3"/>
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+              </svg>
+            </div>
+          </div>
+        </div>
+
+        <!-- Body canvas — full height, right timeline overlay -->
+        <div style="flex:1; position:relative; overflow:hidden;">
+          <!-- Ambient glow -->
+          <div style="position:absolute; inset:0; background:radial-gradient(ellipse 65% 60% at 50% 42%, rgba(138,96,235,0.07) 0%, transparent 70%); pointer-events:none;"></div>
+
+
+          <!-- LEFT: System toggle panel — absolute overlay, just below nav -->
+          <div style="{{ legendPanelStyle }}">
+            {{ systemTogglesList }}
+          </div>
+
+          <!-- RIGHT: Vertical time axis -->
+          {{ timeRailEl }}
+
+          <!-- Body SVG — full height, centered -->
+          <svg viewBox="0 0 260 460" style="position:absolute; top:2.5%; left:0; right:14px; width:auto; height:95%; overflow:visible;">
+
+            <!-- Ghost silhouette -->
+            <g opacity="{{ integOpacity }}" fill="#4F46E5">
+              <ellipse cx="130" cy="52" rx="36" ry="42"/>
+              <rect x="113" y="90" width="34" height="26" rx="2"/>
+              <path d="M 78 116 Q 56 124 50 168 L 48 275 Q 48 298 70 306 L 76 396 L 105 396 L 105 306 Q 128 300 130 300 Q 132 300 155 306 L 155 396 L 184 396 L 184 306 Q 210 298 212 275 L 210 168 Q 204 124 182 116 Z"/>
+              <path d="M 78 116 Q 52 124 36 164 L 26 268 L 48 274 L 56 172 Q 68 138 82 126 Z"/>
+              <path d="M 182 116 Q 208 124 224 164 L 234 268 L 212 274 L 204 172 Q 192 138 178 126 Z"/>
+              <path d="M 76 396 L 68 455 L 102 455 L 105 396 Z"/>
+              <path d="M 155 396 L 155 455 L 192 455 L 184 396 Z"/>
+            </g>
+
+            <!-- ── CARDIOVASCULAR ── -->
+            <g class="organ-layer" opacity="{{ cardioOpacity }}">
+              <path d="M 123 162 C 112 148 97 156 97 172 C 97 188 123 204 123 204 C 123 204 149 188 149 172 C 149 156 134 148 123 162" fill="#EF4444" opacity="0.78"/>
+              <path d="M 130 196 Q 130 148 118 122" stroke="#EF4444" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.35"/>
+              <path d="M 149 172 Q 168 165 178 175 Q 186 185 180 195 Q 170 205 158 200" stroke="#EF4444" stroke-width="3" fill="none" opacity="0.35"/>
+            </g>
+
+            <!-- ── RESPIRATORY ── -->
+            <g class="organ-layer" opacity="{{ pulmOpacity }}">
+              <path d="M 136 142 Q 160 136 174 154 Q 186 172 184 212 Q 180 240 162 246 Q 145 248 138 228 Q 131 208 133 174 Z" fill="#06B6D4" opacity="0.62"/>
+              <path d="M 124 142 Q 100 136 86 154 Q 74 172 76 212 Q 80 240 98 246 Q 115 248 122 228 Q 129 208 127 174 Z" fill="#06B6D4" opacity="0.62"/>
+              <path d="M 130 100 L 130 142" stroke="#06B6D4" stroke-width="5" stroke-linecap="round" opacity="0.45"/>
+              <path d="M 130 142 L 136 142" stroke="#06B6D4" stroke-width="3" fill="none" opacity="0.4"/>
+              <path d="M 130 142 L 124 142" stroke="#06B6D4" stroke-width="3" fill="none" opacity="0.4"/>
+            </g>
+
+            <!-- ── NEUROLOGICAL ── -->
+            <g class="organ-layer" opacity="{{ neuroOpacity }}">
+              <ellipse cx="130" cy="48" rx="29" ry="31" fill="#EAB308" opacity="0.68"/>
+              <path d="M 113 40 Q 122 33 130 31 Q 138 33 147 40" stroke="rgba(10,14,20,0.5)" stroke-width="1.5" fill="none"/>
+              <path d="M 108 52 Q 119 46 130 46 Q 141 46 152 52" stroke="rgba(10,14,20,0.5)" stroke-width="1.5" fill="none"/>
+              <path d="M 112 62 Q 122 58 130 58 Q 138 58 148 62" stroke="rgba(10,14,20,0.4)" stroke-width="1.2" fill="none"/>
+              <rect x="127" y="90" width="6" height="265" rx="3" fill="#EAB308" opacity="0.2"/>
+            </g>
+
+            <!-- ── SKELETAL ── -->
+            <g class="organ-layer" opacity="{{ skeletalOpacity }}">
+              <!-- Clavicles -->
+              <path d="M 80 119 L 130 130" stroke="#94A3B8" stroke-width="4.5" stroke-linecap="round" opacity="0.7"/>
+              <path d="M 180 119 L 130 130" stroke="#94A3B8" stroke-width="4.5" stroke-linecap="round" opacity="0.7"/>
+              <!-- Ribs -->
+              <path d="M 82 148 Q 62 157 58 173" stroke="#94A3B8" stroke-width="2" fill="none" opacity="0.35"/>
+              <path d="M 82 163 Q 60 174 58 191" stroke="#94A3B8" stroke-width="2" fill="none" opacity="0.3"/>
+              <path d="M 82 178 Q 62 190 60 207" stroke="#94A3B8" stroke-width="2" fill="none" opacity="0.25"/>
+              <path d="M 178 148 Q 198 157 202 173" stroke="#94A3B8" stroke-width="2" fill="none" opacity="0.35"/>
+              <path d="M 178 163 Q 200 174 202 191" stroke="#94A3B8" stroke-width="2" fill="none" opacity="0.3"/>
+              <path d="M 178 178 Q 198 190 200 207" stroke="#94A3B8" stroke-width="2" fill="none" opacity="0.25"/>
+              <!-- Pelvis -->
+              <path d="M 80 394 Q 130 378 180 394 L 190 418 Q 158 434 130 434 Q 102 434 70 418 Z" fill="#94A3B8" opacity="0.35"/>
+              <!-- Kneecaps -->
+              <circle cx="87" cy="448" r="11" fill="#94A3B8" opacity="0.42"/>
+              <circle cx="173" cy="448" r="11" fill="#94A3B8" opacity="0.42"/>
+              <!-- Spine segments -->
+              <rect x="127" y="230" width="6" height="4" rx="1" fill="#94A3B8" opacity="0.4"/>
+              <rect x="127" y="242" width="6" height="4" rx="1" fill="#94A3B8" opacity="0.38"/>
+              <rect x="127" y="254" width="6" height="4" rx="1" fill="#94A3B8" opacity="0.36"/>
+              <rect x="127" y="266" width="6" height="4" rx="1" fill="#94A3B8" opacity="0.34"/>
+              <rect x="127" y="278" width="6" height="4" rx="1" fill="#94A3B8" opacity="0.32"/>
+              <rect x="127" y="290" width="6" height="4" rx="1" fill="#94A3B8" opacity="0.3"/>
+              <rect x="127" y="302" width="6" height="4" rx="1" fill="#94A3B8" opacity="0.28"/>
+            </g>
+
+            <!-- ── MUSCULAR ── -->
+            <g class="organ-layer" opacity="{{ muscleOpacity }}">
+              <!-- Deltoids -->
+              <ellipse cx="72" cy="138" rx="14" ry="16" fill="#F472B6" opacity="0.52"/>
+              <ellipse cx="188" cy="138" rx="14" ry="16" fill="#F472B6" opacity="0.52"/>
+              <!-- Pectorals -->
+              <path d="M 100 140 Q 100 162 118 168 Q 128 168 130 160 Q 112 155 110 140 Z" fill="#F472B6" opacity="0.45"/>
+              <path d="M 160 140 Q 160 162 142 168 Q 132 168 130 160 Q 148 155 150 140 Z" fill="#F472B6" opacity="0.45"/>
+              <!-- Biceps (upper arms) -->
+              <path d="M 56 160 Q 44 182 46 210 Q 56 208 60 185 Q 66 170 68 155 Z" fill="#F472B6" opacity="0.48"/>
+              <path d="M 204 160 Q 216 182 214 210 Q 204 208 200 185 Q 194 170 192 155 Z" fill="#F472B6" opacity="0.48"/>
+              <!-- Forearms -->
+              <path d="M 46 212 Q 38 240 40 268 Q 50 266 52 240 Q 54 216 56 212 Z" fill="#F472B6" opacity="0.38"/>
+              <path d="M 214 212 Q 222 240 220 268 Q 210 266 208 240 Q 206 216 204 212 Z" fill="#F472B6" opacity="0.38"/>
+              <!-- Abs -->
+              <rect x="120" y="220" width="9" height="12" rx="3" fill="#F472B6" opacity="0.32"/>
+              <rect x="131" y="220" width="9" height="12" rx="3" fill="#F472B6" opacity="0.32"/>
+              <rect x="120" y="236" width="9" height="12" rx="3" fill="#F472B6" opacity="0.28"/>
+              <rect x="131" y="236" width="9" height="12" rx="3" fill="#F472B6" opacity="0.28"/>
+              <rect x="120" y="252" width="9" height="12" rx="3" fill="#F472B6" opacity="0.24"/>
+              <rect x="131" y="252" width="9" height="12" rx="3" fill="#F472B6" opacity="0.24"/>
+              <!-- Quadriceps (thighs) -->
+              <path d="M 78 400 Q 70 440 74 460 Q 96 462 100 440 Q 106 418 104 398 Z" fill="#F472B6" opacity="0.44"/>
+              <path d="M 182 400 Q 190 440 186 460 Q 164 462 160 440 Q 154 418 156 398 Z" fill="#F472B6" opacity="0.44"/>
+              <!-- Calves -->
+              <path d="M 76 462 Q 70 490 74 516 Q 90 518 94 492 Q 96 468 92 462 Z" fill="#F472B6" opacity="0.36"/>
+              <path d="M 184 462 Q 190 490 186 516 Q 170 518 166 492 Q 164 468 168 462 Z" fill="#F472B6" opacity="0.36"/>
+            </g>
+
+            <!-- ── GASTROINTESTINAL ── -->
+            <g class="organ-layer" opacity="{{ giOpacity }}">
+              <path d="M 150 252 Q 192 246 203 265 Q 210 283 196 299 Q 180 310 157 306 Q 139 302 137 284 Q 135 265 150 252" fill="#F97316" opacity="0.58"/>
+              <ellipse cx="116" cy="268" rx="25" ry="21" fill="#F97316" opacity="0.62"/>
+              <path d="M 94 304 Q 177 298 180 318 Q 183 338 94 342 Q 88 354 100 364 Q 176 362 178 380 Q 180 396 130 400 Q 92 398 90 382 Q 87 366 108 360 Q 82 348 82 328 Q 82 308 94 304" fill="#F97316" opacity="0.48"/>
+            </g>
+
+            <!-- ── RENAL ── -->
+            <g class="organ-layer" opacity="{{ renalOpacity }}">
+              <ellipse cx="88" cy="290" rx="14" ry="22" fill="#84CC16" opacity="0.68"/>
+              <ellipse cx="172" cy="290" rx="14" ry="22" fill="#84CC16" opacity="0.68"/>
+              <ellipse cx="130" cy="414" rx="21" ry="16" fill="#84CC16" opacity="0.58"/>
+              <path d="M 88 312 Q 90 362 118 400" stroke="#84CC16" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.32"/>
+              <path d="M 172 312 Q 170 362 142 400" stroke="#84CC16" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.32"/>
+            </g>
+
+            <!-- ── ENDOCRINE ── -->
+            <g class="organ-layer" opacity="{{ endoOpacity }}">
+              <path d="M 115 99 Q 122 94 130 96 Q 138 94 145 99 L 147 112 Q 130 118 113 112 Z" fill="#D946EF" opacity="0.88"/>
+              <ellipse cx="88" cy="270" rx="8" ry="6" fill="#D946EF" opacity="0.6"/>
+              <ellipse cx="172" cy="270" rx="8" ry="6" fill="#D946EF" opacity="0.6"/>
+              <!-- Pancreas -->
+              <path d="M 108 280 Q 130 275 152 280 Q 155 285 150 290 Q 130 286 110 290 Q 105 285 108 280" fill="#D946EF" opacity="0.5"/>
+            </g>
+
+            <!-- ── LYMPHATIC ── -->
+            <g class="organ-layer" opacity="{{ lymphOpacity }}">
+              <!-- Thymus -->
+              <ellipse cx="130" cy="138" rx="11" ry="9" fill="#22C55E" opacity="0.52"/>
+              <!-- Spleen -->
+              <ellipse cx="172" cy="260" rx="15" ry="11" fill="#22C55E" opacity="0.58" transform="rotate(-12 172 260)"/>
+              <!-- Cervical lymph nodes -->
+              <circle cx="110" cy="98" r="4" fill="#22C55E" opacity="0.6"/>
+              <circle cx="150" cy="98" r="4" fill="#22C55E" opacity="0.6"/>
+              <!-- Axillary nodes -->
+              <circle cx="66" cy="152" r="4" fill="#22C55E" opacity="0.55"/>
+              <circle cx="194" cy="152" r="4" fill="#22C55E" opacity="0.55"/>
+              <!-- Inguinal nodes -->
+              <circle cx="100" cy="368" r="4" fill="#22C55E" opacity="0.55"/>
+              <circle cx="160" cy="368" r="4" fill="#22C55E" opacity="0.55"/>
+              <!-- Thoracic duct (dashed) -->
+              <path d="M 130 98 L 130 368" stroke="#22C55E" stroke-width="1" fill="none" stroke-dasharray="3,5" opacity="0.18"/>
+            </g>
+
+            <!-- ── REPRODUCTIVE ── -->
+            <g class="organ-layer" opacity="{{ reproOpacity }}">
+              <!-- Uterus -->
+              <path d="M 118 396 Q 118 384 130 381 Q 142 384 142 396 L 138 408 Q 130 414 122 408 Z" fill="#C0526A" opacity="0.75"/>
+              <!-- Left ovary -->
+              <ellipse cx="108" cy="388" rx="10" ry="7" fill="#C0526A" opacity="0.65"/>
+              <!-- Right ovary -->
+              <ellipse cx="152" cy="388" rx="10" ry="7" fill="#C0526A" opacity="0.65"/>
+              <!-- Fallopian tubes -->
+              <path d="M 118 392 Q 112 386 108 388" stroke="#C0526A" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.5"/>
+              <path d="M 142 392 Q 148 386 152 388" stroke="#C0526A" stroke-width="1.5" fill="none" stroke-linecap="round" opacity="0.5"/>
+            </g>
+
+            <!-- Condition hotspot dots -->
+            {{ hotspots }}
+
+          </svg>
+
+          <!-- Legend: tap hint -->
+          <div style="position:absolute; bottom:8px; left:50%; transform:translateX(-50%); font-family:'Barlow Condensed',sans-serif; font-size:11px; color:rgba(255,255,255,0.2); letter-spacing:0.06em; white-space:nowrap;">TAP A DOT FOR DETAILS</div>
+
+          <!-- QS wordmark + upload shortcuts — lower-left -->
+          <div style="position:absolute; bottom:12px; left:10px; display:flex; flex-direction:column; align-items:flex-start; gap:8px;">
+            {{ uploadBtnsEl }}
+            <div onClick="{{ onToggleUploadPanel }}" style="display:flex; align-items:center; gap:1px; opacity:0.3; cursor:pointer;" title="Toggle quick upload">
+              <svg viewBox="0 0 392 391.3" style="height:28px;width:28px;display:block;flex-shrink:0;" aria-hidden="true">
+                <path fill="#FFFFFF" d="M369.8,138.5c14.3,53.6,4,108.3-24.6,151.2l46.8,46.8l-54.4,54.8l-47.2-47.2c-16.3,10.3-34.1,18.7-54,24.2c-100.4,27-203.6-32.5-230.2-132.1C-20.3,136.1,39.3,33.3,139.7,6.4C239.7-20.2,342.8,38.9,369.8,138.5z"/>
+                <path fill="#0A0C14" d="M199.2,226.5l78.7-102.2l-74.8-67.4L91.3,124.3l80.2,102.3l-23,29.7l-38.2,47.6h75.2h75.2l-38.2-47.7L199.2,226.5z M135.8,123.3l57.8-34.8l-14.1,112.6l-50.8-64.8H183l1.6-13L135.8,123.3L135.8,123.3z M240.8,136.3l-49.5,64.3l14-111.9l38.4,34.6h-38.2l-1.6,13H240.8z M185.5,281.9h-29.1l9.4-11.7l0.1-0.1l0.1-0.1l19.5-25.1l19.5,25.1l0.1,0.1l0.1,0.1l9.4,11.7H185.5z"/>
+              </svg>
+              <!-- Two-row wordmark — exact QSWordmark.jsx formula at size=28, dark -->
+              <div style="display:flex; flex-direction:column; gap:0; font-size:14px; line-height:0.78; letter-spacing:0.06em; white-space:nowrap; color:#FAFAF7;">
+                <div style="display:flex; align-items:baseline; transform:translateY(4px);">
+                  <span style="font-family:'MOMCAKE',sans-serif; font-weight:700;">UANTUM</span>
+                </div>
+                <div style="display:flex; align-items:baseline; padding-left:10px;">
+                  <span style="font-family:'MOMCAKE',sans-serif; font-weight:700;">SIMPLE</span><span style="font-family:'Bourbon Grotesque',sans-serif; font-weight:400; font-size:17.8px; letter-spacing:0.8px;">X</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+
+        <!-- Condition detail sheet -->
+        <div style="position:absolute; inset:0; pointer-events:{{ sheetPointerEvents }}; z-index:10;">
+          <!-- Backdrop -->
+          <div onClick="{{ onCloseSheet }}" style="{{ backdropStyle }}"></div>
+          <!-- Sheet panel -->
+          <div style="{{ sheetStyle }}">
+            <!-- Handle -->
+            <div style="display:flex; justify-content:center; padding:12px 0 6px;">
+              <div style="width:34px; height:4px; background:rgba(255,255,255,0.14); border-radius:999px;"></div>
+            </div>
+            {{ sheetInnerEl }}
+          </div>
+        </div>
+
+        {{ settingsPanelEl }}
+        <!-- Full-screen record lightbox -->
+        {{ lightboxEl }}
+      </div>
+      <!-- end body map -->
+
+    </div>
+    <!-- end screen area -->
+
+    <!-- Home indicator -->
+    <div style="height:34px; display:flex; align-items:center; justify-content:center; background:inherit;">
+      <div style="width:130px; height:5px; background:rgba(255,255,255,0.25); border-radius:999px;"></div>
+    </div>
+
+  </div>
+  <!-- end phone shell -->
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{
+  &quot;$preview&quot;: { &quot;width&quot;: 430, &quot;height&quot;: 900 },
+  &quot;startScreen&quot;: { &quot;editor&quot;: &quot;enum&quot;, &quot;options&quot;: [&quot;upload&quot;,&quot;bodymap&quot;], &quot;default&quot;: &quot;upload&quot;, &quot;tsType&quot;: &quot;string&quot; }
+}">
+
+class Component extends DCLogic {
+  state = {
+    screen: 'upload',
+    dragOver: false,
+    analyzeProgress: 0,
+    analyzePhase: 0,
+    activeSystems: ['integ', 'muscle', 'skeletal', 'cardio', 'lymph', 'neuro', 'pulm', 'gi', 'renal', 'endo', 'repro'],
+    currentYear: 2024,
+    selectedCondition: null,
+    sheetOpen: false,
+    legendOpen: true,
+    timeDisplayMode: 'date',
+    timeRailActive: false,
+    timeRailDragging: false,
+    dragging: false,
+    settingsOpen: false,
+    uploadPanelOpen: true,
+    uploadBtnsHovered: false,
+    birthYear: 1985,
+    preferredLanguage: 'ja',
+    birthMonth: 'JAN',
+    chatOpen: false,
+    chatMessages: [],
+    chatInputVal: '',
+    chatLoading: false,
+    editingCondDate: null,
+    editDateInput: '',
+    condDateOverrides: {},
+    selectedRecords: [],
+    lightboxRecord: null,
+  
+  };
+
+  _railTrackRef = null;
+  _chatRef = null;
+  _railDragStartY = 0;
+  _railDidDrag = false;
+
+  _timer = null;
+
+  componentWillUnmount() {
+    if (this._timer) clearTimeout(this._timer);
+  }
+
+  toggleLegend() {
+    this.setState(s => ({ legendOpen: !s.legendOpen }));
+  }
+
+  startAnalyze() {
+    this.setState({ screen: 'analyzing', analyzeProgress: 0, analyzePhase: 0 });
+    let p = 0;
+    const tick = () => {
+      p = Math.min(100, p + Math.random() * 3.5 + 1.2);
+      const phase = p < 26 ? 0 : p < 58 ? 1 : p < 82 ? 2 : 3;
+      this.setState({ analyzeProgress: Math.floor(p), analyzePhase: phase });
+      if (p < 100) {
+        this._timer = setTimeout(tick, 65);
+      } else {
+        this._timer = setTimeout(() => this.setState({ screen: 'bodymap' }), 500);
+      }
+    };
+    this._timer = setTimeout(tick, 250);
+  }
+
+  toggleSystem(id) {
+    const s = this.state.activeSystems;
+    const next = s.includes(id) ? s.filter(x => x !== id) : [...s, id];
+    this.setState({ activeSystems: next });
+  }
+
+  selectCondition(cond) {
+    this.setState({ selectedCondition: cond, sheetOpen: true, currentYear: cond.yearFrac ?? cond.year, timeRailActive: true, chatOpen: false, chatMessages: [], chatInputVal: '', selectedRecords: [], lightboxRecord: null });
+  }
+
+  closeSheet() {
+    this.setState({ sheetOpen: false, chatOpen: false, chatMessages: [], chatInputVal: '', selectedRecords: [], lightboxRecord: null });
+    this._timer = setTimeout(() => this.setState({ selectedCondition: null }), 340);
+  }
+
+  startEditDate(condId, date) {
+    this.setState({ editingCondDate: condId, editDateInput: date });
+  }
+  confirmEditDate() {
+    const { editingCondDate, editDateInput, condDateOverrides } = this.state;
+    if (!editingCondDate) return;
+    const trimmed = editDateInput.trim();
+    this.setState({
+      editingCondDate: null,
+      editDateInput: '',
+      condDateOverrides: { ...condDateOverrides, [editingCondDate]: trimmed || condDateOverrides[editingCondDate] },
+    });
+  }
+  cancelEditDate() {
+    this.setState({ editingCondDate: null, editDateInput: '' });
+  }
+
+  componentDidUpdate(prevProps, prevState) {
+    if (this._chatRef && this.state.chatMessages.length !== prevState.chatMessages.length) {
+      this._chatRef.scrollTop = this._chatRef.scrollHeight;
+    }
+  }
+
+  sendChatMsg() {
+    const input = this.state.chatInputVal.trim();
+    if (!input || this.state.chatLoading) return;
+    const cond = this.state.selectedCondition;
+    const msgs = [...this.state.chatMessages, { role: 'user', content: input }];
+    this.setState({ chatMessages: msgs, chatInputVal: '', chatLoading: true });
+    const selRecs = this.state.selectedRecords || [];
+    const sys = `You are a concise medical information assistant for mAI Genki.${cond ? ` The user has ${cond.label} (${cond.medName || cond.label}).` : ''}${selRecs.length ? ` The user is referencing ${selRecs.length} record(s): ${selRecs.map(r => r.type + ' "' + r.label + '" (' + r.date + ')').join(', ')}. Refer specifically to these records in your answer.` : ''} Answer in 1–3 short sentences. Always recommend consulting a healthcare provider for personal decisions.`;
+    if (window.claude) {
+      let reply = '';
+      window.claude.complete(input, {
+        systemPrompt: sys,
+        onToken: (tok) => {
+          reply += tok;
+          this.setState(s => {
+            const m = [...s.chatMessages];
+            if (m.length && m[m.length - 1].role === 'assistant') { m[m.length - 1] = { role: 'assistant', content: reply }; }
+            else { m.push({ role: 'assistant', content: reply }); }
+            return { chatMessages: m, chatLoading: false };
+          });
+        },
+      });
+    } else {
+      this._timer = setTimeout(() => {
+        this.setState(s => ({
+          chatMessages: [...s.chatMessages, { role: 'assistant', content: `Ask me anything about${cond ? ' ' + cond.label : ' your health'}. (Connect AI for real answers.)` }],
+          chatLoading: false,
+        }));
+      }, 700);
+    }
+  }
+
+  renderVals() {
+    const { screen, dragOver, analyzeProgress, analyzePhase, activeSystems, currentYear, selectedCondition, sheetOpen, legendOpen, timeDisplayMode, timeRailActive, timeRailDragging, settingsOpen, uploadPanelOpen, uploadBtnsHovered, birthYear, preferredLanguage, birthMonth, chatOpen, chatMessages, chatInputVal, chatLoading, editingCondDate, editDateInput, condDateOverrides, selectedRecords, lightboxRecord } = this.state;
+
+    // 9 toggleable systems (Integumentary = body outline, always shown, no toggle)
+    const SYSTEMS = [
+      { id: 'integ',    label: 'Integumentary', color: '#4F46E5' },
+      { id: 'muscle',   label: 'Muscular',      color: '#F472B6' },
+      { id: 'skeletal', label: 'Skeletal',      color: '#94A3B8' },
+      { id: 'cardio',   label: 'Cardiovascular', color: '#EF4444' },
+      { id: 'lymph',    label: 'Lymphatic',     color: '#22C55E' },
+      { id: 'neuro',    label: 'Nervous',       color: '#EAB308' },
+      { id: 'pulm',     label: 'Respiratory',   color: '#06B6D4' },
+      { id: 'gi',       label: 'Digestive',     color: '#F97316' },
+      { id: 'renal',    label: 'Renal',         color: '#84CC16' },
+      { id: 'endo',     label: 'Endocrine',     color: '#D946EF' },
+      { id: 'repro',    label: 'Reproductive',  color: '#C0526A' },
+    ];
+
+    const CONDITIONS = [
+      {id:'eczema',system:'integ',label:'Atopic dermatitis',medName:'Atopic dermatitis with eosinophilia',localNames:{ja:'アトピー性皮膚炎',es:'Dermatitis atópica',fr:'Dermatite atopique',zh:'特应性皮炎',ko:'아토피성 피부염'},year:2013,date:'2013-MAR-17',cx:160,cy:80,note:'Chronic eczema with flares on forearms and neck. Managed with topical corticosteroids and emollients.',evidence:'Dr. Sarah Kim · Bay Area Skin & Allergy Institute · Oakland, CA, US'},
+      {id:'psoriasis',system:'integ',label:'Plaque psoriasis',medName:'Psoriasis vulgaris',localNames:{ja:'尋常性乾癬',es:'Psoriasis en placas',fr:'Psoriasis en plaques',zh:'斑块状银屑病',ko:'판상 건선'},year:2018,date:'2018-NOV-04',cx:80,cy:310,note:'Moderate plaque psoriasis on elbows and knees. On methotrexate 15mg weekly with good response.',evidence:'Dr. Meera Patel · St. Claire Medical Center · Boston, MA, US'},
+      {id:'fibro',system:'muscle',label:'Fibromyalgia',medName:'Fibromyalgia syndrome (FMS)',localNames:{ja:'線維筋痛症',es:'Fibromialgia',fr:'Fibromyalgie',zh:'纤维肌痛',ko:'섬유근육통'},year:2019,date:'2019-JUL-22',cx:100,cy:230,note:'Widespread musculoskeletal pain with fatigue and sleep disturbance. On duloxetine 60mg and graded exercise.',evidence:'Dr. Luis Torres · Northwestern Memorial Hospital · Chicago, IL, US'},
+      {id:'rotator',system:'muscle',label:'Rotator cuff tear',medName:'Partial-thickness supraspinatus tear',localNames:{ja:'腱板断裂',es:'Desgarro del manguito rotador',fr:'Rupture de la coiffe des rotateurs',zh:'肩袖撕裂',ko:'회전근개 파열'},year:2022,date:'2022-SEP-13',cx:64,cy:148,note:'Partial thickness supraspinatus tear confirmed on MRI. Conservative management — physiotherapy ongoing.',evidence:'Dr. James Nguyen · Virginia Mason Medical Center · Seattle, WA, US'},
+      {id:'disc',system:'skeletal',label:'L4–L5 disc herniation',medName:'Lumbar disc herniation L4-L5 with radiculopathy',localNames:{ja:'腰椎椎間板ヘルニア',es:'Hernia discal L4-L5',fr:'Hernie discale L4-L5',zh:'腰椎间盘突出症',ko:'요추 추간판 탈출증'},year:2020,date:'2020-AUG-11',cx:130,cy:325,note:'MRI-confirmed disc herniation with mild L5 radiculopathy. Managed with PT and NSAIDs.',evidence:'Dr. Richard Okafor · Houston Methodist Hospital · Houston, TX, US'},
+      {id:'osteo',system:'skeletal',label:'Osteopenia',medName:'Osteopenia (T-score −1.8, lumbar spine)',localNames:{ja:'骨減少症',es:'Osteopenia',fr:'Ostéopénie',zh:'骨质减少',ko:'골감소증'},year:2023,date:'2023-FEB-28',cx:130,cy:385,note:'DEXA scan T-score −1.8 at lumbar spine. Calcium + vitamin D supplementation. Follow-up in 2 years.',evidence:'Dr. Christine Lee · Oregon Health & Science University · Portland, OR, US'},
+      {id:'htn',system:'cardio',label:'Hypertension',medName:'Essential hypertension, stage 1',localNames:{ja:'高血圧',es:'Hipertensión arterial',fr:'Hypertension artérielle',zh:'高血压',ko:'고혈압'},year:2019,date:'2019-OCT-14',cx:112,cy:168,note:'Systolic BP >140 mmHg across multiple visits. Currently managed with lisinopril 10mg daily.',evidence:'Dr. Anuj Sharma · Cleveland Clinic · Cleveland, OH, US'},
+      {id:'afib',system:'cardio',label:'Atrial fibrillation',medName:'Paroxysmal atrial fibrillation',localNames:{ja:'心房細動',es:'Fibrilación auricular',fr:'Fibrillation auriculaire',zh:'心房颤动',ko:'심방세동'},year:2021,date:'2021-MAR-02',cx:135,cy:178,note:'Paroxysmal AF detected on 48-hour Holter monitor. Anticoagulated with apixaban.',evidence:'Dr. Patrick Walsh · St. Mary\'s Medical Center · New York, NY, US'},
+      {id:'lymph1',system:'lymph',label:'Reactive lymphadenopathy',medName:'Reactive cervical lymphadenopathy',localNames:{ja:'反応性リンパ節腫大',es:'Linfadenopatía reactiva',fr:'Lymphadénopathie réactionnelle',zh:'反应性淋巴结肿大',ko:'반응성 림프절 비대'},year:2016,date:'2016-JUN-09',cx:76,cy:130,note:'Bilateral cervical lymph node enlargement. Resolved following antibiotic treatment for streptococcal pharyngitis.',evidence:'Dr. Emily Brennan · Penn Medicine · Philadelphia, PA, US'},
+      {id:'mono',system:'lymph',label:'Infectious mononucleosis',medName:'EBV-associated infectious mononucleosis',localNames:{ja:'伝染性単核球症',es:'Mononucleosis infecciosa',fr:'Mononucléose infectieuse',zh:'传染性单核细胞增多症',ko:'전염성 단핵구증'},year:2014,date:'2014-SEP-03',cx:152,cy:130,note:'EBV-confirmed mononucleosis with splenomegaly. Full recovery over 6 weeks. No sports for 8 weeks.',evidence:'Dr. Thomas Park · University of Michigan Health · Ann Arbor, MI, US'},
+      {id:'migraine',system:'neuro',label:'Migraine disorder',medName:'Migraine with visual aura (ICHD-3)',localNames:{ja:'片頭痛',es:'Migraña con aura',fr:'Migraine avec aura',zh:'偏头痛',ko:'편두통'},year:2018,date:'2018-MAY-23',cx:148,cy:45,note:'Chronic migraine with visual aura, 4–6 episodes/month. On topiramate 50mg daily.',evidence:'Dr. Nina Rodriguez · Cedars-Sinai Medical Center · Los Angeles, CA, US'},
+      {id:'carpal',system:'neuro',label:'Carpal tunnel syndrome',medName:'Median nerve entrapment at the carpal tunnel',localNames:{ja:'手根管症候群',es:'Síndrome del túnel carpiano',fr:'Syndrome du canal carpien',zh:'腕管综合征',ko:'수근관 증후군'},year:2021,date:'2021-DEC-07',cx:38,cy:272,note:'Right median nerve compression confirmed on NCS. Night splints and corticosteroid injection. Awaiting surgical consult.',evidence:'Dr. Fumiko Yamamoto · El Camino Health · San Jose, CA, US'},
+      {id:'asthma',system:'pulm',label:'Asthma',medName:'Mild persistent asthma (GINA step 2)',localNames:{ja:'気管支喘息',es:'Asma',fr:'Asthme',zh:'支气管哮喘',ko:'기관지 천식'},year:2015,date:'2015-APR-18',cx:89,cy:194,note:'Mild persistent asthma, well-controlled on ICS/LABA. FEV1 88% predicted.',evidence:'Dr. Brian Chen · UCHealth Medical Center · Denver, CO, US'},
+      {id:'covid',system:'pulm',label:'COVID-19',medName:'SARS-CoV-2 infection, moderate severity',localNames:{ja:'新型コロナウイルス感染症',es:'COVID-19',fr:'COVID-19',zh:'新型冠状病毒感染',ko:'코로나19'},year:2022,date:'2022-FEB-17',cx:171,cy:194,note:'Moderate infection with 8-day course. No hospitalization. Full pulmonary recovery confirmed at 3-month follow-up.',evidence:'Dr. Marcus Johnson · St. David\'s Medical Center · Austin, TX, US'},
+      {id:'gerd',system:'gi',label:'GERD',medName:'Gastroesophageal reflux disease, erosive (LA grade B)',localNames:{ja:'胃食道逆流症',es:'Reflujo gastroesofágico',fr:'Reflux gastro-œsophagien',zh:'胃食管反流病',ko:'위식도 역류질환'},year:2016,date:'2016-MAR-30',cx:114,cy:255,note:'Erosive esophagitis (LA grade B) confirmed on EGD. On pantoprazole 40mg daily with good symptom control.',evidence:'Dr. Harpreet Singh · Emory University Hospital · Atlanta, GA, US'},
+      {id:'ibs',system:'gi',label:'Irritable bowel syndrome',medName:'Irritable bowel syndrome — mixed type (IBS-M)',localNames:{ja:'過敏性腸症候群',es:'Síndrome del intestino irritable',fr:"Syndrome de l'intestin irritable",zh:'肠易激综合征',ko:'과민성 장 증후군'},year:2017,date:'2017-AUG-15',cx:148,cy:310,note:'IBS-mixed type diagnosed per Rome IV criteria. Low-FODMAP diet with partial response. Mebeverine PRN.',evidence:'Dr. Olivia Murphy · Massachusetts General Hospital · Boston, MA, US'},
+      {id:'stones',system:'renal',label:'Kidney stones',medName:'Calcium oxalate nephrolithiasis',localNames:{ja:'尿路結石',es:'Cálculos renales',fr:'Calculs rénaux',zh:'肾结石',ko:'신장 결석'},year:2021,date:'2021-SEP-05',cx:87,cy:292,note:'4mm left ureteral calculus — calcium oxalate. Passed spontaneously. Low-oxalate diet commenced.',evidence:'Dr. Kevin Williams · Northwestern Memorial Hospital · Chicago, IL, US'},
+      {id:'uti',system:'renal',label:'Recurrent UTIs',medName:'Recurrent uncomplicated urinary tract infections',localNames:{ja:'再発性尿路感染症',es:'Infecciones urinarias recurrentes',fr:'Infections urinaires récurrentes',zh:'复发性尿路感染',ko:'반복성 요로감염'},year:2020,date:'2020-APR-11',cx:130,cy:415,note:'Three culture-confirmed UTIs in 12 months. E. coli predominant. Post-coital prophylaxis with nitrofurantoin.',evidence:'Dr. Divya Patel · Valleywise Health Medical Center · Phoenix, AZ, US'},
+      {id:'thyroid',system:'endo',label:'Hypothyroidism',medName:'Primary hypothyroidism',localNames:{ja:'甲状腺機能低下症',es:'Hipotiroidismo',fr:'Hypothyroïdie',zh:'甲状腺功能减退症',ko:'갑상선 기능 저하증'},year:2017,date:'2017-NOV-19',cx:130,cy:105,note:'TSH 8.2 mIU/L at diagnosis. On levothyroxine 75mcg daily; now euthyroid with TSH 1.4 mIU/L.',evidence:'Dr. Yuna Kim · Mayo Clinic Health System · Minneapolis, MN, US'},
+      {id:'vitd',system:'endo',label:'Vitamin D deficiency',medName:'25-OH Vitamin D deficiency (< 30 nmol/L)',localNames:{ja:'ビタミンD欠乏症',es:'Deficiencia de vitamina D',fr:'Carence en vitamine D',zh:'维生素D缺乏症',ko:'비타민D 결핍증'},year:2015,date:'2015-JUL-08',cx:162,cy:113,note:'25-OH vitamin D 14 nmol/L. Loading dose completed; now on maintenance 1000 IU daily. Annual monitoring.',evidence:'Dr. Brian Chen · UCHealth Medical Center · Denver, CO, US'},
+      {id:'fibroid',system:'repro',label:'Uterine fibroids',medName:'Uterine leiomyomata, multiple intramural',localNames:{ja:'子宮筋腫',es:'Fibromas uterinos',fr:'Fibromes utérins',zh:'子宫肌瘤',ko:'자궁 근종'},year:2020,date:'2020-JUN-22',cx:130,cy:402,note:'Multiple intramural fibroids (largest 3.2cm) on pelvic ultrasound. Managed conservatively. Annual scan.',evidence:'Dr. Adaeze Obi · George Washington University Hospital · Washington, DC, US'},
+      {id:'pcos',system:'repro',label:'Polycystic ovary syndrome',medName:'Polycystic ovary syndrome (Rotterdam criteria)',localNames:{ja:'多嚢胞性卵巣症候群',es:'Síndrome de ovario poliquístico',fr:'Syndrome des ovaires polykystiques',zh:'多囊卵巢综合征',ko:'다낭성 난소 증후군'},year:2016,date:'2016-OCT-29',cx:148,cy:392,note:'Rotterdam criteria met: oligo-ovulation, hyperandrogenism, polycystic ovaries on USS. On combined OCP.',evidence:'Dr. Sachi Nakamura · UCSF Medical Center · San Francisco, CA, US'},
+    ];
+
+    const sysMap = {};
+    SYSTEMS.forEach(s => { sysMap[s.id] = s; });
+
+    const getLocalName = (c) => c ? ((c.localNames && c.localNames[preferredLanguage]) || c.label) : '';
+
+    const visibleConditions = CONDITIONS.filter(c => activeSystems.includes(c.system) && c.year <= currentYear);
+
+    const opacity = id => activeSystems.includes(id) ? 1 : 0;
+
+    // Hotspot circles
+    const hotspots = visibleConditions.map((c) => {
+      const color = sysMap[c.system] ? sysMap[c.system].color : '#fff';
+      const isSelected = selectedCondition && selectedCondition.id === c.id;
+      return React.createElement('g', { key: c.id, onClick: () => this.selectCondition(c), style: { cursor: 'pointer' } },
+        // Ripple rings — only on selected condition
+        isSelected && React.createElement('circle', { cx: c.cx, cy: c.cy, r: 18, fill: color, opacity: 0,
+          style: { animation: 'pulse-ring 2.2s ease-out 0s infinite', transformBox: 'fill-box', transformOrigin: 'center' }
+        }),
+        isSelected && React.createElement('circle', { cx: c.cx, cy: c.cy, r: 18, fill: color, opacity: 0,
+          style: { animation: 'pulse-ring 2.2s ease-out 0.7s infinite', transformBox: 'fill-box', transformOrigin: 'center' }
+        }),
+        React.createElement('circle', { cx: c.cx, cy: c.cy, r: isSelected ? 10 : 8, fill: color, opacity: isSelected ? 1 : 0.75,
+          style: { transition: 'r 200ms, opacity 200ms' }
+        }),
+        React.createElement('circle', { cx: c.cx, cy: c.cy, r: isSelected ? 4.5 : 3.5, fill: '#fff', opacity: 0.95,
+          style: { transition: 'r 200ms' }
+        }),
+      );
+    });
+
+    // Horizontal chip toggle list below nav
+    const systemTogglesList = SYSTEMS.map(s => {
+      const active = activeSystems.includes(s.id);
+      return React.createElement('div', {
+        key: s.id,
+        onClick: () => this.toggleSystem(s.id),
+        style: {
+          display: 'flex', alignItems: 'center', gap: 6,
+          cursor: 'pointer',
+          opacity: active ? 1 : 0.28,
+          transition: 'opacity 220ms cubic-bezier(0.16,1,0.3,1)',
+        }
+      },
+        React.createElement('div', { style: {
+          width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+          background: s.color,
+          boxShadow: active ? `0 0 6px ${s.color}` : 'none',
+          transition: 'box-shadow 220ms',
+        }}),
+        React.createElement('span', { style: {
+          fontFamily: "'Barlow Condensed', sans-serif",
+          fontSize: 10, fontWeight: 500, whiteSpace: 'nowrap',
+          color: active ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.4)',
+          letterSpacing: '0.04em',
+          transition: 'color 220ms',
+        }}, s.label),
+      );
+    });
+
+    // Year ticks
+    const yearTicks = Array.from({ length: 10 }, (_, i) => {
+      const yr = 2015 + i;
+      const past = yr <= currentYear;
+      const hasCond = CONDITIONS.some(c => c.year === yr && activeSystems.includes(c.system) && yr <= currentYear);
+      return React.createElement('div', { key: yr, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flex: 1 } },
+        React.createElement('div', { style: {
+          width: hasCond ? 8 : 3, height: hasCond ? 8 : 3,
+          borderRadius: '50%',
+          background: hasCond ? '#1FC3A4' : past ? 'rgba(255,255,255,0.2)' : 'rgba(255,255,255,0.07)',
+          boxShadow: hasCond ? '0 0 6px rgba(31,195,164,0.6)' : 'none',
+          transition: 'all 220ms cubic-bezier(0.16,1,0.3,1)',
+        }}),
+        React.createElement('span', { style: {
+          fontFamily: "'Source Code Pro', monospace", fontSize: 9,
+          color: past ? 'rgba(255,255,255,0.38)' : 'rgba(255,255,255,0.12)',
+          transition: 'color 220ms',
+        }}, String(yr).slice(2)),
+      );
+    });
+
+    // Progress bar
+    const progressBarEl = React.createElement('div', { style: {
+      height: '100%', width: analyzeProgress + '%',
+      background: 'linear-gradient(90deg, #8A60EB, #1FC3A4)',
+      borderRadius: 999, transition: 'width 65ms linear',
+    }});
+
+    // Phase step dots
+    const phases = ['Reading records', 'Extracting diagnoses', 'Mapping anatomy', 'Building story'];
+    const phaseDotsEl = phases.map((p, i) =>
+      React.createElement('div', { key: i, style: {
+        display: 'flex', alignItems: 'center', gap: 5,
+        opacity: i <= analyzePhase ? 1 : 0.25,
+        transition: 'opacity 400ms',
+      }},
+        React.createElement('div', { style: {
+          width: 6, height: 6, borderRadius: '50%',
+          background: i < analyzePhase ? '#1FC3A4' : i === analyzePhase ? '#8A60EB' : 'rgba(255,255,255,0.2)',
+          flexShrink: 0,
+        }}),
+        React.createElement('span', { style: {
+          fontFamily: "'Barlow Condensed', sans-serif", fontSize: 12, fontWeight: 500,
+          color: i === analyzePhase ? '#FAFAF7' : i < analyzePhase ? '#1FC3A4' : 'rgba(255,255,255,0.3)',
+          letterSpacing: '0.04em',
+        }}, p),
+      )
+    );
+
+    const selectedSys = selectedCondition ? sysMap[selectedCondition.system] : null;
+    const selColor = selectedSys ? selectedSys.color : '#8A60EB';
+
+    // Selected system dot
+    const selectedSysDot = selectedSys
+      ? React.createElement('div', { style: { width: 8, height: 8, borderRadius: '50%', background: selColor, flexShrink: 0 } })
+      : React.createElement('div', { style: { width: 8, height: 8, borderRadius: '50%', background: 'transparent' } });
+
+    // Screen styles
+    const uploadScreenStyle = {
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column', background: '#FAFAF7',
+      opacity: screen === 'upload' ? 1 : 0,
+      pointerEvents: screen === 'upload' ? 'auto' : 'none',
+      transform: screen === 'upload' ? 'translateY(0)' : 'translateY(-12px)',
+      transition: 'opacity 380ms cubic-bezier(0.16,1,0.3,1), transform 380ms cubic-bezier(0.16,1,0.3,1)',
+    };
+
+    const analyzingScreenStyle = {
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      background: '#0A0C14', padding: '40px 28px',
+      opacity: screen === 'analyzing' ? 1 : 0,
+      pointerEvents: screen === 'analyzing' ? 'auto' : 'none',
+      transition: 'opacity 380ms cubic-bezier(0.16,1,0.3,1)',
+    };
+
+    const bodyMapScreenStyle = {
+      position: 'absolute', inset: 0,
+      display: 'flex', flexDirection: 'column', background: '#0A0C14',
+      opacity: screen === 'bodymap' ? 1 : 0,
+      pointerEvents: screen === 'bodymap' ? 'auto' : 'none',
+      transform: screen === 'bodymap' ? 'translateY(0)' : 'translateY(16px)',
+      transition: 'opacity 480ms cubic-bezier(0.16,1,0.3,1), transform 480ms cubic-bezier(0.16,1,0.3,1)',
+    };
+
+    const sheetStyle = {
+      position: 'absolute', bottom: 0, left: 0, right: 0,
+      background: '#13171F',
+      borderRadius: chatOpen ? 0 : '18px 18px 0 0',
+      border: '1px solid rgba(255,255,255,0.07)',
+      borderBottom: 'none',
+      height: chatOpen ? 780 : 400,
+      display: 'flex', flexDirection: 'column',
+      overflow: 'hidden',
+      transform: sheetOpen ? 'translateY(0)' : 'translateY(110%)',
+      transition: 'transform 420ms cubic-bezier(0.16,1,0.3,1), height 420ms cubic-bezier(0.16,1,0.3,1), border-radius 420ms cubic-bezier(0.16,1,0.3,1)',
+      ...(chatOpen ? { padding: 0 } : { padding: '0 0 28px' }),
+      zIndex: 10,
+    };
+
+    const backdropStyle = {
+      position: 'absolute', inset: 0,
+      background: 'rgba(10,12,20,0.78)',
+      opacity: sheetOpen ? 1 : 0,
+      transition: 'opacity 300ms ease',
+      backdropFilter: 'blur(6px)',
+      WebkitBackdropFilter: 'blur(6px)',
+      pointerEvents: sheetOpen ? 'auto' : 'none',
+      zIndex: 9,
+    };
+
+    const uploadZoneStyle = {
+      width: '100%', border: '1.5px dashed', borderRadius: 10,
+      borderColor: dragOver ? '#8A60EB' : '#CDD2D9',
+      background: dragOver ? '#8A60EB0A' : '#F4F5F7',
+      padding: '32px 20px',
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      cursor: 'pointer',
+      transition: 'all 220ms cubic-bezier(0.16,1,0.3,1)',
+    };
+
+    // ── TIME RAIL ──────────────────────────────────────────────────
+
+    const MONTH_IDX = {JAN:0,FEB:1,MAR:2,APR:3,MAY:4,JUN:5,JUL:6,AUG:7,SEP:8,OCT:9,NOV:10,DEC:11};
+    const parseDateFrac = (d) => {
+      if (!d) return null;
+      const parts = d.split('-');
+      const yr = parseInt(parts[0]);
+      const mo = MONTH_IDX[parts[1]] ?? 0;
+      const day = parseInt(parts[2]) || 1;
+      return yr + (mo * 30.44 + day) / 365.25;
+    };
+    CONDITIONS.forEach(c => { c.yearFrac = parseDateFrac(c.date) ?? c.year; });
+    const condYears = CONDITIONS.map(c => c.yearFrac);
+    const condMinYear = Math.min(...condYears);
+    const condMaxYear = Math.max(...condYears) + 0.5; // small padding at top
+    const yearRange = condMaxYear - condMinYear || 1;
+    const K = 2.5; // log steepness: higher = more compression of old years
+
+    // toPos: year → 0 (top/newest) … 1 (bottom/oldest)
+    const toPos = (yr) => {
+      const t = Math.max(0, Math.min(1, (yr - condMinYear) / yearRange));
+      const scaled = (Math.exp(K * t) - 1) / (Math.exp(K) - 1);
+      return 1 - scaled;
+    };
+    // fromPos: 0…1 position → year (float)
+    const fromPos = (p) => {
+      const scaled = 1 - Math.max(0, Math.min(1, p));
+      const t = Math.log(scaled * (Math.exp(K) - 1) + 1) / K;
+      return condMinYear + t * yearRange;
+    };
+
+    const MONTHS = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+    const fmtYear = (y) => {
+      const yr = Math.floor(y);
+      const mo = Math.min(11, Math.floor((y - yr) * 12));
+      return `${yr}-${MONTHS[mo]}`;
+    };
+    const fmtDisplay = (y) => {
+      if (timeDisplayMode === 'age') {
+        const birthMonthIdx = MONTHS.indexOf(birthMonth); // 0–11
+        const birthFrac = birthYear + (birthMonthIdx + 0.5) / 12;
+        const age = Math.max(0, y - birthFrac);
+        return `AGE ${age.toFixed(1)}`;
+      }
+      return fmtYear(y);
+    };
+
+    const currentYearLabel = fmtDisplay(currentYear);
+    const thumbPos = toPos(currentYear);
+    const railW = timeRailActive ? 36 : 14;
+
+    // Snap to nearest visible condition marker within threshold
+    const SNAP_THRESHOLD = 0.01;
+    const getNearestCondition = (p) => {
+      let nearest = null;
+      let minDist = SNAP_THRESHOLD;
+      CONDITIONS.forEach(c => {
+        if (!activeSystems.includes(c.system)) return;
+        const dist = Math.abs(toPos(c.yearFrac) - p);
+        if (dist < minDist) { minDist = dist; nearest = c; }
+      });
+      return nearest;
+    };
+
+    const applyRailPos = (p) => {
+      const nearest = getNearestCondition(p);
+      if (nearest) {
+        this.setState({ currentYear: nearest.yearFrac, selectedCondition: nearest });
+      } else {
+        this.setState({ currentYear: fromPos(p), selectedCondition: null, sheetOpen: false });
+      }
+    };
+
+    const onRailPointerDown = (e) => {
+      e.currentTarget.setPointerCapture(e.pointerId);
+      this._railDragStartY = e.clientY;
+      this._railDidDrag = false;
+      this.setState({ timeRailDragging: true, timeRailActive: true });
+      if (this._railTrackRef) {
+        const rect = this._railTrackRef.getBoundingClientRect();
+        const p = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+        applyRailPos(p);
+      }
+    };
+    const onRailPointerMove = (e) => {
+      if (!this.state.timeRailDragging) return;
+      if (Math.abs(e.clientY - this._railDragStartY) > 4) this._railDidDrag = true;
+      if (this._railTrackRef) {
+        const rect = this._railTrackRef.getBoundingClientRect();
+        const p = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+        applyRailPos(p);
+      }
+    };
+    const onRailPointerUp = () => {
+      if (!this._railDidDrag) {
+        this.setState(s => ({ timeRailActive: !s.timeRailActive, timeRailDragging: false }));
+      } else {
+        this.setState({ timeRailDragging: false });
+      }
+    };
+
+    // Group conditions by exact date for same-day rail stacking
+    const dateGroups = {};
+    CONDITIONS.forEach(c => { if (!dateGroups[c.date]) dateGroups[c.date] = []; dateGroups[c.date].push(c.id); });
+    const STACK_STEP = 4; // marker height 3px + 1px gap
+
+    // Condition markers: colored horizontal dashes
+    const condMarkers = CONDITIONS.map(c => {
+      const sys = SYSTEMS.find(s => s.id === c.system);
+      if (!sys) return null;
+      const pct = toPos(c.yearFrac) * 100;
+      const isActive = activeSystems.includes(c.system);
+      const isSelected = selectedCondition && selectedCondition.id === c.id;
+      const group = dateGroups[c.date] || [c.id];
+      const groupIdx = group.indexOf(c.id);
+      const stackOffset = -(group.length - 1) * STACK_STEP / 2 + groupIdx * STACK_STEP;
+      return React.createElement('div', {
+        key: c.id,
+        title: c.label,
+        onClick: (e) => { e.stopPropagation(); this.selectCondition(c); },
+        style: {
+          position: 'absolute',
+          top: `calc(${pct}% - 2px + ${stackOffset}px)`,
+          left: '50%', transform: `translateX(-50%) scaleX(${isSelected ? 1.6 : 1})`,
+          width: 10, height: isSelected ? 4 : 3, borderRadius: 2,
+          background: sys.color,
+          boxShadow: isSelected ? `0 0 10px ${sys.color}, 0 0 4px ${sys.color}` : `0 0 4px ${sys.color}66`,
+          cursor: 'pointer',
+          opacity: isActive ? 1 : 0.15,
+          transition: 'opacity 280ms, box-shadow 220ms, transform 220ms, height 220ms',
+          zIndex: isSelected ? 3 : 1,
+        },
+      });
+    }).filter(Boolean);
+
+    // Thumb dot
+    const thumbEl = React.createElement('div', {
+      style: {
+        position: 'absolute',
+        top: `calc(${thumbPos * 100}% - 4px)`,
+        left: '50%', transform: 'translateX(-50%)',
+        width: 8, height: 8, borderRadius: '50%',
+        background: '#1FC3A4',
+        boxShadow: '0 0 7px rgba(31,195,164,0.8)',
+        transition: timeRailDragging ? 'none' : 'top 180ms cubic-bezier(0.16,1,0.3,1)',
+        pointerEvents: 'none', zIndex: 2,
+      },
+    });
+
+    // Floating label (left of thumb, shown when active/dragging)
+    const labelEl = timeRailActive ? React.createElement('div', {
+      style: {
+        position: 'absolute',
+        top: `calc(${thumbPos * 100}% - 8px)`,
+        right: '100%', marginRight: 6,
+        fontFamily: "'Source Code Pro', monospace",
+        fontSize: 9, letterSpacing: '0.05em',
+        color: 'rgba(255,255,255,0.85)',
+        background: 'rgba(10,12,20,0.9)',
+        border: '1px solid rgba(255,255,255,0.12)',
+        borderRadius: 3, padding: '2px 5px',
+        whiteSpace: 'nowrap',
+        pointerEvents: 'none', zIndex: 3,
+        transition: timeRailDragging ? 'none' : 'top 180ms cubic-bezier(0.16,1,0.3,1)',
+      },
+    }, fmtDisplay(currentYear)) : null;
+
+    // Year bookend labels
+    const mkBookend = (label, isTop) => React.createElement('div', {
+      style: {
+        position: 'absolute',
+        [isTop ? 'top' : 'bottom']: 4,
+        left: 0, right: 0, textAlign: 'center',
+        fontFamily: "'Source Code Pro', monospace",
+        fontSize: 8, color: 'rgba(255,255,255,0.35)',
+        letterSpacing: '0.03em',
+        opacity: timeRailActive ? 1 : 0,
+        transition: 'opacity 200ms',
+        pointerEvents: 'none',
+      },
+    }, label);
+
+    // Center track line
+    const trackLine = React.createElement('div', {
+      style: {
+        position: 'absolute', top: 0, bottom: 0,
+        left: '50%', transform: 'translateX(-50%)',
+        width: 1, background: 'rgba(255,255,255,0.12)', borderRadius: 1,
+      },
+    });
+
+    const timeRailEl = React.createElement('div', {
+      style: {
+        position: 'absolute', top: 0, right: 0, bottom: 0,
+        width: railW, zIndex: 6,
+        background: timeRailActive ? 'rgba(10,12,20,0.5)' : 'rgba(10,12,20,0.2)',
+        transition: 'width 220ms cubic-bezier(0.16,1,0.3,1), background 220ms',
+        cursor: 'pointer', overflow: 'visible',
+      },
+      onPointerDown: onRailPointerDown,
+      onPointerMove: onRailPointerMove,
+      onPointerUp: onRailPointerUp,
+    },
+      React.createElement('div', {
+        ref: (el) => { this._railTrackRef = el; },
+        style: { position: 'absolute', top: 20, bottom: 20, left: 0, right: 0, overflow: 'visible' },
+      },
+        trackLine,
+        ...condMarkers,
+        thumbEl,
+        labelEl,
+        mkBookend(String(condMaxYear).slice(2), true),
+        mkBookend(String(condMinYear).slice(2), false),
+      )
+    );
+
+    // ── SETTINGS PANEL ───────────────────────────────────────────
+    const settingsPanelEl = React.createElement('div', {
+      style: { position:'absolute', inset:0, pointerEvents: settingsOpen ? 'auto' : 'none', zIndex:20 }
+    },
+      React.createElement('div', {
+        onClick: () => this.setState({ settingsOpen: false }),
+        style: { position:'absolute', inset:0, background:'rgba(10,12,20,0.82)', opacity: settingsOpen ? 1 : 0, transition:'opacity 300ms ease', backdropFilter:'blur(6px)', WebkitBackdropFilter:'blur(6px)', pointerEvents: settingsOpen ? 'auto' : 'none' }
+      }),
+      React.createElement('div', {
+        style: { position:'absolute', bottom:0, left:0, right:0, background:'#13171F', borderRadius:'18px 18px 0 0', border:'1px solid rgba(255,255,255,0.07)', borderBottom:'none', transform: settingsOpen ? 'translateY(0%)' : 'translateY(100%)', transition:'transform 340ms cubic-bezier(0.16,1,0.3,1)', paddingBottom:32, zIndex:10 }
+      },
+        React.createElement('div', { style:{ display:'flex', justifyContent:'center', padding:'12px 0 6px' } },
+          React.createElement('div', { style:{ width:34, height:4, background:'rgba(255,255,255,0.14)', borderRadius:999 } })
+        ),
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'6px 24px 20px' } },
+          React.createElement('span', { style:{ fontFamily:"'MOMCAKE',sans-serif", fontWeight:700, fontSize:22, letterSpacing:'-0.02em', color:'#FAFAF7' } }, 'SETTINGS'),
+          React.createElement('button', { onClick: ()=>this.setState({settingsOpen:false}), style:{ width:28, height:28, borderRadius:'50%', background:'rgba(255,255,255,0.08)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.5)', fontSize:16, lineHeight:1 } }, '×')
+        ),
+        React.createElement('div', { style:{ padding:'0 24px', display:'flex', flexDirection:'column', gap:22 } },
+          // Date of birth (YYYY-MMM, no day)
+          React.createElement('div', null,
+            React.createElement('div', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:11, letterSpacing:'0.18em', textTransform:'uppercase', color:'rgba(255,255,255,0.28)', marginBottom:6 } }, 'Date of birth'),
+            React.createElement('div', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:13, color:'rgba(255,255,255,0.22)', marginBottom:12, lineHeight:1.5 } }, 'Inferred from your records. Month and year only — no day stored.'),
+            React.createElement('div', { style:{ display:'flex', gap:8, alignItems:'center' } },
+              React.createElement('input', {
+                type:'text', inputMode:'numeric', maxLength:4, value:birthYear,
+                onChange: (e) => { const v=parseInt(e.target.value); if(!isNaN(v)&&v>=1900&&v<=2020) this.setState({birthYear:v}); },
+                style:{ fontFamily:"'Source Code Pro',monospace", fontSize:15, color:'#FAFAF7', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.15)', borderRadius:4, padding:'7px 10px', width:84, outline:'none' }
+              }),
+              React.createElement('select', {
+                value: birthMonth,
+                onChange: (e) => this.setState({ birthMonth: e.target.value }),
+                style:{ fontFamily:"'Source Code Pro',monospace", fontSize:13, color:'#FAFAF7', background:'#1A1E28', border:'1px solid rgba(255,255,255,0.15)', borderRadius:4, padding:'7px 8px', outline:'none', cursor:'pointer' }
+              },
+                ...['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'].map(m =>
+                  React.createElement('option', { key:m, value:m, style:{ background:'#13171F' } }, m)
+                )
+              ),
+              React.createElement('span', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:13, color:'rgba(255,255,255,0.25)' } }, 'birth')
+            )
+          ),
+          // Language
+          React.createElement('div', null,
+            React.createElement('div', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:11, letterSpacing:'0.18em', textTransform:'uppercase', color:'rgba(255,255,255,0.28)', marginBottom:10 } }, 'Preferred language'),
+            React.createElement('div', { style:{ maxHeight:224, overflowY:'auto', border:'1px solid rgba(255,255,255,0.1)', borderRadius:4, scrollbarWidth:'thin', scrollbarColor:'rgba(255,255,255,0.15) transparent' } },
+              ...[
+                {code:'ar', flag:'\uD83C\uDDF8\uD83C\uDDE6', label:'\u0627\u0644\u0639\u0631\u0628\u064a\u0629', en:'Arabic'},
+                {code:'zh', flag:'\uD83C\uDDE8\uD83C\uDDF3', label:'\u4e2d\u6587\uff08\u7b80\u4f53\uff09', en:'Chinese (Simplified)'},
+                {code:'zh-TW', flag:'\uD83C\uDDF9\uD83C\uDDFC', label:'\u4e2d\u6587\uff08\u7e41\u9ad4\uff09', en:'Chinese (Traditional)'},
+                {code:'nl', flag:'\uD83C\uDDF3\uD83C\uDDF1', label:'Nederlands', en:'Dutch'},
+                {code:'en', flag:'\uD83C\uDDEC\uD83C\uDDE7', label:'English', en:'English'},
+                {code:'fr', flag:'\uD83C\uDDEB\uD83C\uDDF7', label:'Fran\u00e7ais', en:'French'},
+                {code:'de', flag:'\uD83C\uDDE9\uD83C\uDDEA', label:'Deutsch', en:'German'},
+                {code:'hi', flag:'\uD83C\uDDEE\uD83C\uDDF3', label:'\u0939\u093f\u0928\u094d\u0926\u0940', en:'Hindi'},
+                {code:'id', flag:'\uD83C\uDDEE\uD83C\uDDE9', label:'Bahasa Indonesia', en:'Indonesian'},
+                {code:'it', flag:'\uD83C\uDDEE\uD83C\uDDF9', label:'Italiano', en:'Italian'},
+                {code:'ja', flag:'\uD83C\uDDEF\uD83C\uDDF5', label:'\u65e5\u672c\u8a9e', en:'Japanese'},
+                {code:'ko', flag:'\uD83C\uDDF0\uD83C\uDDF7', label:'\ud55c\uad6d\uc5b4', en:'Korean'},
+                {code:'ms', flag:'\uD83C\uDDF2\uD83C\uDDFE', label:'Bahasa Melayu', en:'Malay'},
+                {code:'pl', flag:'\uD83C\uDDF5\uD83C\uDDF1', label:'Polski', en:'Polish'},
+                {code:'pt', flag:'\uD83C\uDDE7\uD83C\uDDF7', label:'Portugu\u00eas', en:'Portuguese'},
+                {code:'ru', flag:'\uD83C\uDDF7\uD83C\uDDFA', label:'\u0420\u0443\u0441\u0441\u043a\u0438\u0439', en:'Russian'},
+                {code:'es', flag:'\uD83C\uDDEA\uD83C\uDDF8', label:'Espa\u00f1ol', en:'Spanish'},
+                {code:'th', flag:'\uD83C\uDDF9\uD83C\uDDED', label:'\u0e44\u0e17\u0e22', en:'Thai'},
+                {code:'tr', flag:'\uD83C\uDDF9\uD83C\uDDF7', label:'T\u00fcrk\u00e7e', en:'Turkish'},
+                {code:'vi', flag:'\uD83C\uDDFB\uD83C\uDDF3', label:'Ti\u1ebfng Vi\u1ec7t', en:'Vietnamese'},
+              ].map((l, i, arr) =>
+                React.createElement('div', {
+                  key: l.code,
+                  onClick: () => this.setState({ preferredLanguage: l.code }),
+                  style:{ display:'flex', alignItems:'center', gap:10, padding:'8px 12px', borderBottom: i < arr.length-1 ? '1px solid rgba(255,255,255,0.06)' : 'none', borderLeft: `3px solid ${preferredLanguage===l.code ? '#8A60EB' : 'transparent'}`, background: preferredLanguage===l.code ? 'rgba(138,96,235,0.14)' : 'transparent', cursor:'pointer', transition:'all 140ms' }
+                },
+                  React.createElement('span', { style:{ fontSize:20, lineHeight:1, flexShrink:0 } }, l.flag),
+                  React.createElement('div', { style:{ flex:1, minWidth:0 } },
+                    React.createElement('div', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, fontWeight:500, color: preferredLanguage===l.code ? '#C4A8F0' : 'rgba(255,255,255,0.72)', lineHeight:1.2 } }, l.label),
+                    React.createElement('div', { style:{ fontFamily:"'Source Code Pro',monospace", fontSize:10, color:'rgba(255,255,255,0.24)', marginTop:1 } }, l.en)
+                  ),
+                  preferredLanguage===l.code && React.createElement('svg', { width:13, height:13, viewBox:'0 0 24 24', fill:'none', stroke:'#8A60EB', strokeWidth:2.5, strokeLinecap:'round', strokeLinejoin:'round' },
+                    React.createElement('polyline', { points:'20 6 9 17 4 12' })
+                  )
+                )
+              )
+            )
+          ),
+
+        
+        )
+      )
+    );
+
+    // ── UPLOAD SHORTCUTS (above QS wordmark on body map) ─────────
+    const uploadBtnsEl = React.createElement('div', {
+      style:{ display:'flex', flexDirection:'column', gap:5, opacity: !uploadPanelOpen ? 0 : uploadBtnsHovered ? 0.85 : 0.2, pointerEvents: uploadPanelOpen ? 'auto' : 'none', transition:'opacity 200ms' },
+      onMouseEnter: () => this.setState({ uploadBtnsHovered: true }),
+      onMouseLeave: () => this.setState({ uploadBtnsHovered: false }),
+    },
+      React.createElement('div', { onClick: () => this.startAnalyze(), title:'Upload PDF',
+        style:{ width:28, height:28, borderRadius:6, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' } },
+        React.createElement('svg', { width:14, height:14, viewBox:'0 0 24 24', fill:'none', stroke:'#8A60EB', strokeWidth:1.75, strokeLinecap:'round', strokeLinejoin:'round' },
+          React.createElement('path', { d:'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' }),
+          React.createElement('polyline', { points:'14 2 14 8 20 8' }),
+          React.createElement('line', { x1:12, y1:18, x2:12, y2:12 }),
+          React.createElement('line', { x1:9, y1:15, x2:15, y2:15 })
+        )
+      ),
+      React.createElement('div', { onClick: () => this.startAnalyze(), title:'Take a photo',
+        style:{ width:28, height:28, borderRadius:6, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' } },
+        React.createElement('svg', { width:14, height:14, viewBox:'0 0 24 24', fill:'none', stroke:'#1FC3A4', strokeWidth:1.75, strokeLinecap:'round', strokeLinejoin:'round' },
+          React.createElement('path', { d:'M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z' }),
+          React.createElement('circle', { cx:12, cy:13, r:4 })
+        )
+      ),
+      React.createElement('div', { onClick: () => this.startAnalyze(), title:'Choose image',
+        style:{ width:28, height:28, borderRadius:6, background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.1)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' } },
+        React.createElement('svg', { width:14, height:14, viewBox:'0 0 24 24', fill:'none', stroke:'#8A60EB', strokeWidth:1.75, strokeLinecap:'round', strokeLinejoin:'round' },
+          React.createElement('rect', { x:3, y:3, width:18, height:18, rx:2, ry:2 }),
+          React.createElement('circle', { cx:8.5, cy:8.5, r:1.5 }),
+          React.createElement('polyline', { points:'21 15 16 10 5 21' })
+        )
+      ),
+      // AI chat button
+      React.createElement('div', {
+        onClick: () => this.setState({ sheetOpen: true, chatOpen: true, chatMessages: [], chatInputVal: '', selectedCondition: null }),
+        title: 'Ask AI about your health',
+        style:{ width:28, height:28, borderRadius:6, background:'rgba(138,96,235,0.12)', border:'1px solid rgba(138,96,235,0.3)', display:'flex', alignItems:'center', justifyContent:'center', cursor:'pointer' }
+      },
+        React.createElement('svg', { width:14, height:14, viewBox:'0 0 24 24', fill:'none', stroke:'#8A60EB', strokeWidth:1.75, strokeLinecap:'round', strokeLinejoin:'round' },
+          React.createElement('path', { d:'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' })
+        )
+      ),
+
+    );
+
+    // ── CONDITION SHEET INNER CONTENT ────────────────────────────
+    const selCond = selectedCondition;
+    const selSysObj = selCond ? sysMap[selCond.system] : null;
+    const selColor2 = selSysObj ? selSysObj.color : '#8A60EB';
+
+    // ── VISUAL RECORDS ───────────────────────────────────────────
+    const CONDITION_RECORDS = {
+      htn:      [{id:'r-htn-1',type:'TREND',label:'BP trend',date:'2019–2024',color:'#EF4444'},{id:'r-htn-2',type:'ECG',label:'12-lead ECG',date:'2022-JUL',color:'#EF4444'},{id:'r-htn-3',type:'LABS',label:'Renal panel',date:'2024-JAN',color:'#EF4444'}],
+      afib:     [{id:'r-afib-1',type:'ECG',label:'Holter strip',date:'2021-MAR',color:'#EF4444'},{id:'r-afib-2',type:'IMAGING',label:'Echocardiogram',date:'2021-APR',color:'#EF4444'}],
+      migraine: [{id:'r-mig-1',type:'IMAGING',label:'Brain MRI',date:'2018-MAY',color:'#EAB308'},{id:'r-mig-2',type:'TREND',label:'Episode log',date:'2022–2024',color:'#EAB308'}],
+      carpal:   [{id:'r-carp-1',type:'LABS',label:'Nerve conduction',date:'2021-DEC',color:'#EAB308'}],
+      asthma:   [{id:'r-asth-1',type:'SPIRO',label:'Spirometry',date:'2024-FEB',color:'#06B6D4'},{id:'r-asth-2',type:'TREND',label:'Peak flow log',date:'2023-NOV',color:'#06B6D4'}],
+      covid:    [{id:'r-cov-1',type:'IMAGING',label:'Chest CT',date:'2022-FEB',color:'#06B6D4'},{id:'r-cov-2',type:'LABS',label:'PCR / labs',date:'2022-FEB',color:'#06B6D4'},{id:'r-cov-3',type:'SPIRO',label:'3-mo follow-up',date:'2022-MAY',color:'#06B6D4'}],
+      disc:     [{id:'r-disc-1',type:'IMAGING',label:'L4–L5 MRI',date:'2020-AUG',color:'#94A3B8'},{id:'r-disc-2',type:'IMAGING',label:'X-ray lateral',date:'2022-JAN',color:'#94A3B8'}],
+      osteo:    [{id:'r-osteo-1',type:'SCAN',label:'DEXA scan',date:'2023-FEB',color:'#94A3B8'},{id:'r-osteo-2',type:'LABS',label:'Bone markers',date:'2023-MAR',color:'#94A3B8'}],
+      fibro:    [{id:'r-fibro-1',type:'LABS',label:'Inflammatory',date:'2019-JUL',color:'#F472B6'},{id:'r-fibro-2',type:'TREND',label:'Pain scores',date:'2022–2024',color:'#F472B6'}],
+      rotator:  [{id:'r-rot-1',type:'IMAGING',label:'Shoulder MRI',date:'2022-SEP',color:'#F472B6'},{id:'r-rot-2',type:'IMAGING',label:'US rotator',date:'2023-FEB',color:'#F472B6'}],
+      gerd:     [{id:'r-gerd-1',type:'IMAGING',label:'EGD photos',date:'2016-MAR',color:'#F97316'},{id:'r-gerd-2',type:'LABS',label:'H. pylori test',date:'2016-APR',color:'#F97316'}],
+      ibs:      [{id:'r-ibs-1',type:'LABS',label:'GI panel',date:'2017-AUG',color:'#F97316'},{id:'r-ibs-2',type:'TREND',label:'Symptom log',date:'2023-DEC',color:'#F97316'}],
+      stones:   [{id:'r-stone-1',type:'IMAGING',label:'KUB X-ray',date:'2021-SEP',color:'#84CC16'},{id:'r-stone-2',type:'LABS',label:'Stone analysis',date:'2021-SEP',color:'#84CC16'}],
+      uti:      [{id:'r-uti-1',type:'LABS',label:'Urine cultures',date:'2020–2024',color:'#84CC16'},{id:'r-uti-2',type:'TREND',label:'Recurrence log',date:'2020–2024',color:'#84CC16'}],
+      thyroid:  [{id:'r-thy-1',type:'LABS',label:'TSH / T4',date:'2024-MAR',color:'#D946EF'},{id:'r-thy-2',type:'IMAGING',label:'Thyroid US',date:'2019-JAN',color:'#D946EF'},{id:'r-thy-3',type:'TREND',label:'TSH trend',date:'2017–2024',color:'#D946EF'}],
+      vitd:     [{id:'r-vitd-1',type:'LABS',label:'25-OH Vit D',date:'2024-APR',color:'#D946EF'},{id:'r-vitd-2',type:'TREND',label:'Level trend',date:'2015–2024',color:'#D946EF'}],
+      lymph1:   [{id:'r-lym-1',type:'IMAGING',label:'Neck US',date:'2016-JUN',color:'#22C55E'},{id:'r-lym-2',type:'LABS',label:'CBC / diff',date:'2016-JUN',color:'#22C55E'}],
+      mono:     [{id:'r-mono-1',type:'LABS',label:'EBV antibodies',date:'2014-SEP',color:'#22C55E'},{id:'r-mono-2',type:'IMAGING',label:'Abdomen US',date:'2014-SEP',color:'#22C55E'}],
+      eczema:   [{id:'r-ecz-1',type:'IMAGING',label:'Skin photos',date:'2023-MAR',color:'#4F46E5'},{id:'r-ecz-2',type:'LABS',label:'Allergy panel',date:'2022-NOV',color:'#4F46E5'}],
+      psoriasis:[{id:'r-pso-1',type:'IMAGING',label:'Lesion photos',date:'2023-AUG',color:'#4F46E5'},{id:'r-pso-2',type:'TREND',label:'PASI score log',date:'2019–2024',color:'#4F46E5'}],
+      fibroid:  [{id:'r-fib1-1',type:'IMAGING',label:'Pelvic US',date:'2022-JUN',color:'#C0526A'},{id:'r-fib1-2',type:'IMAGING',label:'MRI pelvis',date:'2023-JAN',color:'#C0526A'}],
+      pcos:     [{id:'r-pcos-1',type:'IMAGING',label:'Ovarian US',date:'2016-OCT',color:'#C0526A'},{id:'r-pcos-2',type:'LABS',label:'Hormone panel',date:'2024-FEB',color:'#C0526A'},{id:'r-pcos-3',type:'TREND',label:'Cycle tracking',date:'2023–2024',color:'#C0526A'}],
+    };
+    const renderRecordThumb = (rec, w, h) => {
+      const c = rec.color; const bg = 'rgba(0,0,0,0.38)';
+      if (rec.type === 'TREND') return React.createElement('svg', { width:w||66, height:h||42, viewBox:'0 0 66 42', fill:'none', style:{display:'block'} },
+        React.createElement('rect', { width:66, height:42, fill:bg }),
+        React.createElement('line', { x1:0, y1:21, x2:66, y2:21, stroke:'rgba(255,255,255,0.06)', strokeWidth:0.5 }),
+        React.createElement('line', { x1:0, y1:10, x2:66, y2:10, stroke:'rgba(255,255,255,0.06)', strokeWidth:0.5 }),
+        React.createElement('line', { x1:0, y1:32, x2:66, y2:32, stroke:'rgba(255,255,255,0.06)', strokeWidth:0.5 }),
+        React.createElement('path', { d:'M 4 32 C 11 32 13 25 17 17 S 25 9 31 15 S 43 27 49 17 S 59 7 64 11', stroke:c, strokeWidth:1.5, fill:'none', strokeLinecap:'round' }),
+        React.createElement('path', { d:'M 4 32 C 11 32 13 25 17 17 S 25 9 31 15 S 43 27 49 17 S 59 7 64 11 V 40 H 4 Z', fill:c, opacity:0.12 })
+      );
+      if (rec.type === 'ECG') return React.createElement('svg', { width:w||66, height:h||42, viewBox:'0 0 66 42', fill:'none', style:{display:'block'} },
+        React.createElement('rect', { width:66, height:42, fill:bg }),
+        React.createElement('line', { x1:0, y1:21, x2:66, y2:21, stroke:'rgba(255,255,255,0.06)', strokeWidth:0.5 }),
+        React.createElement('path', { d:'M 1 21 L 9 21 L 11 19 L 13 21 L 17 21 L 20 5 L 23 37 L 26 21 L 31 21 L 33 18 L 35 21 L 43 21 L 45 19 L 47 21 L 51 21 L 54 5 L 57 37 L 60 21 L 65 21', stroke:c, strokeWidth:1.2, fill:'none', strokeLinecap:'round', strokeLinejoin:'round' })
+      );
+      if (rec.type === 'IMAGING') return React.createElement('svg', { width:w||66, height:h||42, viewBox:'0 0 66 42', fill:'none', style:{display:'block'} },
+        React.createElement('rect', { width:66, height:42, fill:'rgba(0,0,0,0.55)' }),
+        React.createElement('ellipse', { cx:33, cy:21, rx:15, ry:17, fill:c, opacity:0.2 }),
+        React.createElement('ellipse', { cx:33, cy:21, rx:8, ry:10, fill:c, opacity:0.15 }),
+        React.createElement('line', { x1:0, y1:15, x2:66, y2:15, stroke:c, strokeWidth:0.5, opacity:0.3 }),
+        React.createElement('rect', { x:2, y:2, width:10, height:5, rx:0.5, fill:'rgba(255,255,255,0.07)' })
+      );
+      if (rec.type === 'LABS') return React.createElement('svg', { width:w||66, height:h||42, viewBox:'0 0 66 42', fill:'none', style:{display:'block'} },
+        React.createElement('rect', { width:66, height:42, fill:bg }),
+        React.createElement('rect', { x:7, y:6, width:52, height:5, rx:1, fill:'rgba(255,255,255,0.06)' }),
+        React.createElement('rect', { x:7, y:6, width:35, height:5, rx:1, fill:c, opacity:0.72 }),
+        React.createElement('rect', { x:7, y:15, width:52, height:5, rx:1, fill:'rgba(255,255,255,0.06)' }),
+        React.createElement('rect', { x:7, y:15, width:43, height:5, rx:1, fill:c, opacity:0.55 }),
+        React.createElement('rect', { x:7, y:24, width:52, height:5, rx:1, fill:'rgba(255,255,255,0.06)' }),
+        React.createElement('rect', { x:7, y:24, width:27, height:5, rx:1, fill:c, opacity:0.45 }),
+        React.createElement('rect', { x:7, y:33, width:52, height:5, rx:1, fill:'rgba(255,255,255,0.06)' }),
+        React.createElement('rect', { x:7, y:33, width:39, height:5, rx:1, fill:c, opacity:0.62 })
+      );
+      if (rec.type === 'SPIRO') return React.createElement('svg', { width:w||66, height:h||42, viewBox:'0 0 66 42', fill:'none', style:{display:'block'} },
+        React.createElement('rect', { width:66, height:42, fill:bg }),
+        React.createElement('line', { x1:7, y1:37, x2:61, y2:37, stroke:'rgba(255,255,255,0.1)', strokeWidth:0.5 }),
+        React.createElement('line', { x1:7, y1:5, x2:7, y2:37, stroke:'rgba(255,255,255,0.1)', strokeWidth:0.5 }),
+        React.createElement('path', { d:'M 10 31 C 17 6 38 5 50 13 C 57 18 59 30 57 35 C 50 42 15 42 10 31 Z', stroke:c, strokeWidth:1.3, fill:c, fillOpacity:0.12 })
+      );
+      if (rec.type === 'SCAN') return React.createElement('svg', { width:w||66, height:h||42, viewBox:'0 0 66 42', fill:'none', style:{display:'block'} },
+        React.createElement('rect', { width:66, height:42, fill:'rgba(0,0,0,0.5)' }),
+        React.createElement('ellipse', { cx:33, cy:9, rx:8, ry:8, stroke:c, strokeWidth:0.8, fill:'none', opacity:0.6 }),
+        React.createElement('path', { d:'M 26 17 L 40 17 L 42 31 L 24 31 Z', stroke:c, strokeWidth:0.8, fill:'none', opacity:0.5 }),
+        React.createElement('line', { x1:33, y1:31, x2:29, y2:41, stroke:c, strokeWidth:0.8, opacity:0.4 }),
+        React.createElement('line', { x1:33, y1:31, x2:37, y2:41, stroke:c, strokeWidth:0.8, opacity:0.4 }),
+        React.createElement('rect', { x:55, y:6, width:6, height:30, rx:1, fill:c, opacity:0.5 })
+      );
+      return React.createElement('div', { style:{ width:w||66, height:h||42, background:bg } });
+    };
+    const condRecords = selCond ? (CONDITION_RECORDS[selCond.id] || []) : [];
+
+    // ── LIGHTBOX (full screen, body-map level) ──────────────────────────
+    const lightboxEl = lightboxRecord ? React.createElement('div', {
+      onClick: () => this.setState({ lightboxRecord: null }),
+      style: { position:'absolute', inset:0, background:'rgba(7,9,14,0.97)', zIndex:100, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:14, padding:'24px 16px' }
+    },
+      React.createElement('div', { style:{ width:'100%', display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:4 } },
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, minWidth:0 } },
+          React.createElement('span', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:10, fontWeight:600, letterSpacing:'0.16em', textTransform:'uppercase', color:lightboxRecord.color, padding:'2px 7px', border:`1px solid ${lightboxRecord.color}55`, borderRadius:3, flexShrink:0 } }, lightboxRecord.type),
+          React.createElement('span', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, fontWeight:600, color:'rgba(255,255,255,0.85)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' } }, lightboxRecord.label)
+        ),
+        React.createElement('button', { onClick: e => { e.stopPropagation(); this.setState({ lightboxRecord: null }); }, style:{ width:28, height:28, borderRadius:'50%', background:'rgba(255,255,255,0.1)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.6)', fontSize:18, lineHeight:1, flexShrink:0 } }, '×')
+      ),
+      React.createElement('div', { style:{ width:'100%', borderRadius:8, overflow:'hidden', border:`1px solid ${lightboxRecord.color}33` } },
+        renderRecordThumb(lightboxRecord, 358, 226)
+      ),
+      React.createElement('div', { style:{ fontFamily:"'Source Code Pro',monospace", fontSize:11, color:'rgba(255,255,255,0.28)', letterSpacing:'0.04em', marginTop:2 } }, lightboxRecord.date),
+      React.createElement('button', {
+        onClick: e => { e.stopPropagation(); this.setState(s => { const arr = s.selectedRecords||[]; const has = arr.some(r=>r.id===lightboxRecord.id); return { selectedRecords: has ? arr.filter(r=>r.id!==lightboxRecord.id) : [...arr, lightboxRecord], lightboxRecord: null }; }); },
+        style:{ marginTop:6, padding:'10px 28px', background: (selectedRecords||[]).some(r=>r.id===lightboxRecord.id) ? `${lightboxRecord.color}2A` : 'rgba(255,255,255,0.07)', border:`1px solid ${(selectedRecords||[]).some(r=>r.id===lightboxRecord.id) ? lightboxRecord.color : 'rgba(255,255,255,0.15)'}`, borderRadius:6, fontFamily:"'Barlow Condensed',sans-serif", fontSize:13, fontWeight:600, letterSpacing:'0.06em', color: (selectedRecords||[]).some(r=>r.id===lightboxRecord.id) ? lightboxRecord.color : 'rgba(255,255,255,0.65)', cursor:'pointer', transition:'all 180ms' }
+      }, (selectedRecords||[]).some(r=>r.id===lightboxRecord.id) ? '\u2713 In chat' : 'Add to chat'),
+      React.createElement('div', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:10, color:'rgba(255,255,255,0.15)', letterSpacing:'0.1em', textTransform:'uppercase', marginTop:4 } }, 'Tap anywhere to close')
+    ) : null;
+
+    const sheetInnerEl = React.createElement('div', {
+      style: chatOpen
+        ? { position:'relative', display:'flex', flexDirection:'column', flex:1, overflow:'hidden' }
+        : { padding:'6px 24px 4px' }
+    },
+      // ─ Compressed header (chatOpen)
+      chatOpen && React.createElement('div', {
+        style:{ padding:'8px 20px 10px', borderBottom:'1px solid rgba(255,255,255,0.07)', flexShrink:0, display:'flex', alignItems:'center', justifyContent:'space-between', gap:8 }
+      },
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, flex:1, minWidth:0 } },
+          selSysObj && React.createElement('div', { style:{ width:8, height:8, borderRadius:'50%', background:selColor2, flexShrink:0, boxShadow:`0 0 6px ${selColor2}80` } }),
+          React.createElement('div', { style:{ minWidth:0 } },
+            React.createElement('div', { style:{ fontFamily:"'MOMCAKE',sans-serif", fontWeight:700, fontSize:16, letterSpacing:'-0.02em', color:'#FAFAF7', lineHeight:1.1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' } },
+              selCond ? getLocalName(selCond) : 'Health assistant'
+            ),
+            selCond && React.createElement('div', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:11, color:'rgba(255,255,255,0.28)', marginTop:1, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' } },
+              `(${selCond.label}, ${selCond.medName})`
+            )
+          )
+        ),
+        React.createElement('button', {
+          onClick: () => this.closeSheet(),
+          style:{ width:28, height:28, borderRadius:'50%', background:'rgba(255,255,255,0.08)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.45)', fontSize:14, flexShrink:0 }
+        }, '↓')
+      ),
+
+
+      // ─ Records carousel (chatOpen)
+      chatOpen && condRecords.length > 0 && React.createElement('div', {
+        style: { flexShrink:0, overflowX:'auto', padding:'10px 14px', display:'flex', gap:9, borderBottom:'1px solid rgba(255,255,255,0.07)', scrollbarWidth:'none', WebkitOverflowScrolling:'touch', scrollSnapType:'x mandatory' }
+      },
+        ...condRecords.map(rec => {
+          const isSel = (selectedRecords || []).some(r => r.id === rec.id);
+          return React.createElement('div', {
+            key: rec.id,
+            onClick: () => this.setState({ lightboxRecord: rec, selectedRecords: [rec] }),
+            style: { flexShrink:0, width:117, cursor:'pointer', position:'relative', border:`1.5px solid ${isSel ? rec.color : 'rgba(255,255,255,0.1)'}`, borderRadius:6, background: isSel ? `${rec.color}18` : 'rgba(255,255,255,0.04)', overflow:'hidden', boxShadow: isSel ? `0 0 12px ${rec.color}55` : 'none', transition:'all 200ms cubic-bezier(0.16,1,0.3,1)', scrollSnapAlign:'start' }
+          },
+            renderRecordThumb(rec, 117, 74),
+            React.createElement('div', { style:{ position:'absolute', top:0, left:0, right:0, height:74, border:`2px solid ${isSel ? rec.color : 'transparent'}`, background: isSel ? `${rec.color}1A` : 'transparent', pointerEvents:'none', transition:'all 200ms cubic-bezier(0.16,1,0.3,1)', borderRadius:'4px 4px 0 0' } }),
+            React.createElement('div', { style:{ padding:'4px 8px 6px' } },
+              React.createElement('div', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:10, fontWeight:600, letterSpacing:'0.08em', textTransform:'uppercase', color: isSel ? rec.color : 'rgba(255,255,255,0.6)', lineHeight:1.2, marginBottom:2, whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' } }, rec.label),
+              React.createElement('div', { style:{ fontFamily:"'Source Code Pro',monospace", fontSize:8.5, color:'rgba(255,255,255,0.25)', letterSpacing:'0.02em', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' } }, rec.date)
+            ),
+            // Selection circle (bottom-right corner)
+            React.createElement('div', {
+              onClick: e => { e.stopPropagation(); this.setState(s => { const arr = s.selectedRecords||[]; const has = arr.some(r=>r.id===rec.id); return { selectedRecords: has ? arr.filter(r=>r.id!==rec.id) : [...arr, rec] }; }); },
+              style: { position:'absolute', top:5, right:5, width:18, height:18, borderRadius:'50%', border:`1.5px solid ${isSel ? rec.color : 'rgba(255,255,255,0.35)'}`, background: isSel ? rec.color : 'rgba(0,0,0,0.5)', display:'flex', alignItems:'center', justifyContent:'center', transition:'all 180ms cubic-bezier(0.16,1,0.3,1)', boxShadow: isSel ? `0 0 6px ${rec.color}88` : 'none', cursor:'pointer' }
+            },
+              isSel && React.createElement('svg', { width:9, height:9, viewBox:'0 0 24 24', fill:'none', stroke:'#fff', strokeWidth:3, strokeLinecap:'round', strokeLinejoin:'round' },
+                React.createElement('polyline', { points:'20 6 9 17 4 12' })
+              )
+            )
+          );
+        })
+      ),
+
+      // ─ Full condition details (!chatOpen)
+      !chatOpen && selCond && React.createElement('div', null,
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:14 } },
+          React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8 } },
+            React.createElement('div', { style:{ width:8, height:8, borderRadius:'50%', background:selColor2, flexShrink:0 } }),
+            React.createElement('span', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:11, letterSpacing:'0.18em', textTransform:'uppercase', color:selColor2 } }, selSysObj ? selSysObj.label : '')
+          ),
+          React.createElement('button', { onClick: () => this.closeSheet(), style:{ width:28, height:28, borderRadius:'50%', background:'rgba(255,255,255,0.08)', border:'none', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.5)', fontSize:16, lineHeight:1 } }, '×')
+        ),
+        React.createElement('div', { style:{ marginBottom:10 } },
+          React.createElement('div', { style:{ fontFamily:"'MOMCAKE',sans-serif", fontWeight:700, fontSize:26, letterSpacing:'-0.02em', lineHeight:1.05, color:'#FAFAF7' } }, getLocalName(selCond)),
+          React.createElement('div', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:12, color:'rgba(255,255,255,0.3)', marginTop:4, lineHeight:1.4 } },
+            preferredLanguage !== 'en' ? `(${selCond.label}, ${selCond.medName})` : selCond.medName
+          )
+        ),
+        editingCondDate === selCond.id
+          ? React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:6, marginBottom:14 } },
+              React.createElement('input', {
+                type:'text', value:editDateInput, autoFocus:true,
+                onChange: (e) => this.setState({ editDateInput: e.target.value }),
+                onKeyDown: (e) => { if(e.key==='Enter') this.confirmEditDate(); if(e.key==='Escape') this.cancelEditDate(); },
+                style:{ fontFamily:"'Source Code Pro',monospace", fontSize:12, color:'#1FC3A4', background:'rgba(31,195,164,0.08)', border:'1px solid rgba(31,195,164,0.4)', borderRadius:4, padding:'4px 8px', outline:'none', width:160, letterSpacing:'0.04em' }
+              }),
+              React.createElement('button', { onClick:()=>this.confirmEditDate(), title:'Save', style:{ width:24, height:24, borderRadius:4, background:'rgba(31,195,164,0.18)', border:'1px solid rgba(31,195,164,0.35)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', color:'#1FC3A4', fontSize:13, flexShrink:0 } }, '✓'),
+              React.createElement('button', { onClick:()=>this.cancelEditDate(), title:'Cancel', style:{ width:24, height:24, borderRadius:4, background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', color:'rgba(255,255,255,0.4)', fontSize:13, flexShrink:0 } }, '×')
+            )
+          : React.createElement('div', { style:{ display:'inline-flex', alignItems:'center', gap:6, marginBottom:14 } },
+              React.createElement('div', { style:{ display:'inline-flex', alignItems:'center', gap:6, background:'rgba(31,195,164,0.1)', border:'1px solid rgba(31,195,164,0.22)', borderRadius:4, padding:'4px 10px' } },
+                React.createElement('svg', { width:11, height:11, viewBox:'0 0 24 24', fill:'none', stroke:'#1FC3A4', strokeWidth:2, strokeLinecap:'round', strokeLinejoin:'round' },
+                  React.createElement('rect', { x:3, y:4, width:18, height:18, rx:2 }),
+                  React.createElement('line', { x1:16, y1:2, x2:16, y2:6 }),
+                  React.createElement('line', { x1:8, y1:2, x2:8, y2:6 }),
+                  React.createElement('line', { x1:3, y1:10, x2:21, y2:10 })
+                ),
+                React.createElement('span', { style:{ fontFamily:"'Source Code Pro',monospace", fontSize:12, color:'#1FC3A4', letterSpacing:'0.04em' } }, `First noted ${condDateOverrides[selCond.id] || selCond.date}`)
+              ),
+              React.createElement('button', {
+                onClick: () => this.startEditDate(selCond.id, condDateOverrides[selCond.id] || selCond.date),
+                title: 'Edit date',
+                style:{ alignSelf:'stretch', padding:'0 8px', borderRadius:4, background:'transparent', border:'1px solid rgba(255,255,255,0.1)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, opacity:0.5, transition:'opacity 200ms' }
+              },
+                React.createElement('svg', { width:11, height:11, viewBox:'0 0 24 24', fill:'none', stroke:'rgba(255,255,255,0.8)', strokeWidth:2, strokeLinecap:'round', strokeLinejoin:'round' },
+                  React.createElement('path', { d:'M12 20h9' }),
+                  React.createElement('path', { d:'M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z' })
+                )
+              )
+            ),
+        React.createElement('div', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:400, fontSize:15, lineHeight:1.6, color:'#8A9BAD', marginBottom:14 } }, selCond.note),
+        React.createElement('div', { style:{ borderTop:'1px solid rgba(255,255,255,0.07)', paddingTop:12, display:'flex', alignItems:'flex-start', gap:8 } },
+          React.createElement('div', { style:{ display:'flex', gap:10, alignItems:'flex-start', flex:1, minWidth:0 } },
+
+            React.createElement('div', { style:{ minWidth:0 } },
+              (() => {
+                const evParts = selCond.evidence.split(' · ');
+                const evDoc  = evParts[0] || '';
+                const evInst = evParts[1] || '';
+                const evLoc  = evParts[2] || '';
+                const monoSm = { fontFamily:"'Source Code Pro',monospace", fontSize:10, color:'rgba(255,255,255,0.32)', letterSpacing:'0.02em', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' };
+                return React.createElement(React.Fragment, null,
+                  React.createElement('div', { style:{ display:'flex', alignItems:'baseline', gap:6, marginBottom:2, flexWrap:'wrap' } },
+                    React.createElement('span', { style:{ fontFamily:"'Barlow Condensed',sans-serif", fontWeight:600, fontSize:10, letterSpacing:'0.18em', textTransform:'uppercase', color:'rgba(255,255,255,0.2)', flexShrink:0 } }, 'Source'),
+                    React.createElement('span', { style:{ ...monoSm, color:'rgba(255,255,255,0.22)' } }, '·'),
+                    React.createElement('span', { style:{ ...monoSm } }, evLoc)
+                  ),
+                  React.createElement('div', { style:{ ...monoSm, marginBottom:1 } }, evInst),
+                  React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8 } },
+                    React.createElement('span', { style:{ ...monoSm, fontSize:13, color:'rgba(255,255,255,0.65)', fontWeight:700 } }, evDoc),
+                    React.createElement('div', { style:{ display:'flex', gap:10, alignItems:'center' } },
+                      React.createElement('button', { title:'Email doctor', style:{ background:'none', border:'none', padding:0, cursor:'pointer', display:'flex', alignItems:'center' } },
+                        React.createElement('svg', { width:15, height:15, viewBox:'0 0 24 24', fill:'none', stroke:'#1FC3A4', strokeWidth:2, strokeLinecap:'round', strokeLinejoin:'round' },
+                          React.createElement('path', { d:'M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z' }),
+                          React.createElement('polyline', { points:'22,6 12,13 2,6' })
+                        )
+                      ),
+                      React.createElement('button', { title:'Call doctor', style:{ background:'none', border:'none', padding:0, cursor:'pointer', display:'flex', alignItems:'center' } },
+                        React.createElement('svg', { width:15, height:15, viewBox:'0 0 24 24', fill:'none', stroke:'#1FC3A4', strokeWidth:2, strokeLinecap:'round', strokeLinejoin:'round' },
+                          React.createElement('path', { d:'M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.41 2 2 0 0 1 3.6 1.22h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.88a16 16 0 0 0 6 6l.96-.96a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z' })
+                        )
+                      )
+                    )
+                  )
+                );
+              })()
+            )
+          ),
+          React.createElement('button', {
+            onClick: () => this.setState({ chatOpen: true, chatMessages: [] }),
+            title: 'Ask AI about this condition',
+            style:{ width:36, height:36, borderRadius:8, background:'rgba(138,96,235,0.15)', border:'1px solid rgba(138,96,235,0.3)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, transition:'background 200ms' }
+          },
+            React.createElement('svg', { width:15, height:15, viewBox:'0 0 24 24', fill:'none', stroke:'#8A60EB', strokeWidth:1.75, strokeLinecap:'round', strokeLinejoin:'round' },
+              React.createElement('path', { d:'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' })
+            )
+          )
+        )
+      ),
+
+      // ─ Chat window (chatOpen)
+      chatOpen && React.createElement('div', { style:{ display:'flex', flexDirection:'column', flex:1, overflow:'hidden' } },
+        React.createElement('div', {
+          ref: (el) => { this._chatRef = el; },
+          style:{ flex:1, overflowY:'auto', padding:'10px 16px', display:'flex', flexDirection:'column', gap:8 }
+        },
+          chatMessages.length === 0 && React.createElement('div', {
+            style:{ fontFamily:"'Barlow Condensed',sans-serif", fontSize:14, color:'rgba(255,255,255,0.22)', textAlign:'center', marginTop:20, lineHeight:1.7, padding:'0 8px' }
+          }, selCond ? `Ask anything about ${getLocalName(selCond)}.` : 'Ask about your health records, conditions, or medications.'),
+          ...chatMessages.map((m, i) => React.createElement('div', {
+            key: i,
+            style:{ alignSelf: m.role==='user' ? 'flex-end' : 'flex-start', maxWidth:'86%', background: m.role==='user' ? 'rgba(138,96,235,0.18)' : 'rgba(255,255,255,0.07)', border: m.role==='user' ? '1px solid rgba(138,96,235,0.3)' : '1px solid rgba(255,255,255,0.09)', borderRadius: m.role==='user' ? '12px 12px 2px 12px' : '12px 12px 12px 2px', padding:'8px 11px', fontFamily:"'Barlow Condensed',sans-serif", fontSize:13, lineHeight:1.55, color: m.role==='user' ? '#FAFAF7' : 'rgba(255,255,255,0.75)' }
+          }, m.content)),
+          chatLoading && React.createElement('div', { style:{ alignSelf:'flex-start', display:'flex', gap:4, padding:'8px 12px', background:'rgba(255,255,255,0.07)', border:'1px solid rgba(255,255,255,0.09)', borderRadius:'12px 12px 12px 2px' } },
+            ...[0,1,2].map(i => React.createElement('div', { key:i, style:{ width:5, height:5, borderRadius:'50%', background:'rgba(255,255,255,0.45)', animation:`dot-blink 1.4s ${i*0.2}s infinite` } }))
+          )
+        ),
+        React.createElement('div', { style:{ padding:'8px 14px 14px', display:'flex', gap:8, flexShrink:0, borderTop:'1px solid rgba(255,255,255,0.07)' } },
+          React.createElement('input', {
+            type:'text', placeholder: selectedRecords.length === 1 ? `Ask about ${selectedRecords[0].label}…` : selectedRecords.length > 1 ? `Ask about ${selectedRecords.length} records…` : 'Ask a question…', value:chatInputVal,
+            onChange: (e) => this.setState({ chatInputVal: e.target.value }),
+            onKeyDown: (e) => { if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); this.sendChatMsg(); } },
+            style:{ flex:1, fontFamily:"'Barlow Condensed',sans-serif", fontSize:13, color:'#FAFAF7', background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.12)', borderRadius:6, padding:'8px 11px', outline:'none' }
+          }),
+          React.createElement('button', {
+            onClick: () => this.sendChatMsg(),
+            disabled: !chatInputVal.trim() || chatLoading,
+            style:{ width:34, height:34, borderRadius:6, background: chatInputVal.trim()&&!chatLoading ? '#8A60EB' : 'rgba(255,255,255,0.07)', border:'none', cursor: chatInputVal.trim() ? 'pointer' : 'default', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, transition:'background 200ms' }
+          },
+            React.createElement('svg', { width:13, height:13, viewBox:'0 0 24 24', fill:'none', stroke:'rgba(255,255,255,0.7)', strokeWidth:2, strokeLinecap:'round', strokeLinejoin:'round' },
+              React.createElement('line', { x1:22, y1:2, x2:11, y2:13 }),
+              React.createElement('polygon', { points:'22 2 15 22 11 13 2 9 22 2' })
+            )
+          )
+        )
+      )
+    );
+
+    return {
+      // Screen styles
+      uploadScreenStyle, analyzingScreenStyle, bodyMapScreenStyle, sheetStyle, backdropStyle, uploadZoneStyle,
+
+      // Analyze
+      analyzePhaseLabel: ['Reading records...', 'Extracting diagnoses...', 'Mapping to anatomy...', 'Building your health story...'][analyzePhase] || 'Reading records...',
+      analyzeProgressDisplay: analyzeProgress,
+      progressBarEl, phaseDotsEl,
+
+      // Body map
+      visibleCount: visibleConditions.length,
+      currentYear,
+      currentYearLabel,
+      timeRailEl,
+      hotspots, systemTogglesList,
+
+      // Organ opacities
+      cardioOpacity: opacity('cardio'),
+      pulmOpacity:   opacity('pulm'),
+      neuroOpacity:  opacity('neuro'),
+      skeletalOpacity: opacity('skeletal'),
+      muscleOpacity:   opacity('muscle'),
+      giOpacity:     opacity('gi'),
+      renalOpacity:  opacity('renal'),
+      endoOpacity:   opacity('endo'),
+      lymphOpacity:  opacity('lymph'),
+      reproOpacity:  opacity('repro'),
+
+      // Sheet
+      sheetPointerEvents: sheetOpen ? 'auto' : 'none',
+      selectedSysDot,
+      selectedSysColor: selColor,
+      selectedSysLabel: selectedSys ? selectedSys.label : '',
+      selectedCondLabel: selectedCondition ? selectedCondition.label : '',
+      selectedCondYear:  selectedCondition ? (selectedCondition.date || String(selectedCondition.year)) : '',
+      selectedCondNote:  selectedCondition ? selectedCondition.note : '',
+      selectedCondEvidence: selectedCondition ? selectedCondition.evidence : '',
+
+      // Legend
+      legendOpen,
+      chevronTransform: legendOpen ? 'rotate(0deg)' : 'rotate(-90deg)',
+      onToggleLegend: () => this.toggleLegend(),
+      integOpacity: activeSystems.includes('integ') ? 0.18 : 0,
+      legendPanelStyle: {
+        position: 'absolute', top: 0, left: 0, zIndex: 6,
+        display: 'flex', flexDirection: 'column', gap: 5,
+        padding: legendOpen ? '8px 12px 8px 10px' : '0 12px 0 10px',
+        background: 'rgba(10,12,20,0.72)',
+        borderRight: '1px solid rgba(255,255,255,0.07)',
+        borderBottom: '1px solid rgba(255,255,255,0.07)',
+        borderRadius: '0 6px 6px 0',
+        backdropFilter: 'blur(8px)',
+        WebkitBackdropFilter: 'blur(8px)',
+        maxHeight: legendOpen ? '400px' : '0',
+        overflow: 'hidden',
+        transition: 'max-height 320ms cubic-bezier(0.16,1,0.3,1), padding 320ms cubic-bezier(0.16,1,0.3,1)',
+      },
+
+      // Handlers
+      onDragOver:    e => { e.preventDefault(); this.setState({ dragOver: true }); },
+      onDragLeave:   () => this.setState({ dragOver: false }),
+      onDrop:        e => { e.preventDefault(); this.setState({ dragOver: false }); this.startAnalyze(); },
+      onUploadClick: () => this.startAnalyze(),
+      onGearClick:   () => this.setState({ settingsOpen: true }),
+      onDatePillClick: () => this.setState(s => ({ timeDisplayMode: s.timeDisplayMode === 'date' ? 'age' : 'date' })),
+      onToggleUploadPanel: () => this.setState(s => ({ uploadPanelOpen: !s.uploadPanelOpen })),
+
+      gearOpacity:   settingsOpen ? 1 : 0.45,
+      onCloseSheet:  () => this.closeSheet(),
+      settingsPanelEl,
+      uploadBtnsEl,
+      lightboxEl,
+      sheetInnerEl,
+    };
+  }
+}
+
+</script>
+</body>
+</html>
