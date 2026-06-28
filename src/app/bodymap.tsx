@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   Animated, Dimensions, Easing, GestureResponderEvent,
-  KeyboardAvoidingView, Platform, PanResponder,
+  KeyboardAvoidingView, Platform,
   Pressable, ScrollView, StyleSheet, Text, TextInput,
   TouchableOpacity, View,
 } from 'react-native'
@@ -367,22 +367,20 @@ function BodySvg({
         <Ellipse cx={130} cy={240} rx={58} ry={140} fill={SYSTEM_META.integ.color} opacity={0.04} />
       )}
 
+      {/* Condition hotspot dots — G wrapper ensures onPress works on web */}
       {visibleConds.map((c) => {
         const isSelected = selectedCondition?.id === c.id
-        const color = SYSTEM_META[c.system].color
+        const color = SYSTEM_META[c.system]?.color ?? '#fff'
         return (
-          <Circle
-            key={c.id}
-            cx={c.cx} cy={c.cy} r={isSelected ? 10 : 8}
-            fill={color} fillOpacity={isSelected ? 1 : 0.75}
-            stroke={C.bg} strokeWidth={1.5}
-            onPress={() => onConditionPress(c)}
-          />
+          <G key={c.id} onPress={() => onConditionPress(c)}>
+            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 10 : 8}
+              fill={color} fillOpacity={isSelected ? 1 : 0.75}
+              stroke={C.bg} strokeWidth={1.5} />
+            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 4.5 : 3.5}
+              fill="#fff" fillOpacity={0.95} />
+          </G>
         )
       })}
-      {visibleConds.filter((c) => c.id === selectedCondition?.id).map((c) => (
-        <Circle key={`dot-${c.id}`} cx={c.cx} cy={c.cy} r={4.5} fill="rgba(255,255,255,0.9)" />
-      ))}
     </Svg>
   )
 }
@@ -401,16 +399,22 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
 
   const [railH, setRailH] = useState(SH * 0.6)
   const widthAnim = useRef(new Animated.Value(RAIL_W_INACTIVE)).current
+  const didDrag = useRef(false)
+  const wasActiveOnGrant = useRef(false)
   const YEAR_BOOKENDS = [MIN_YEAR, MAX_YEAR]
 
+  function animateWidth(toValue: number) {
+    Animated.timing(widthAnim, { toValue, duration: 220, useNativeDriver: false }).start()
+  }
   function activateRail() {
-    Animated.timing(widthAnim, { toValue: RAIL_W_ACTIVE, duration: 220, useNativeDriver: false }).start()
+    animateWidth(RAIL_W_ACTIVE)
     setTimeRailActive(true)
   }
   function deactivateRail() {
-    Animated.timing(widthAnim, { toValue: RAIL_W_INACTIVE, duration: 220, useNativeDriver: false }).start()
+    animateWidth(RAIL_W_INACTIVE)
     setTimeRailActive(false)
   }
+
   function snapToNearest(posY: number) {
     const rawYear = fromVertPos(posY, railH)
     const visible = conditions.filter((c) => activeSystems.includes(c.system))
@@ -430,26 +434,34 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
     setCurrentYear(minDist < threshold ? nearestFrac : Math.max(MIN_YEAR, Math.min(MAX_YEAR, rawYear)))
   }
 
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: (e: GestureResponderEvent) => {
-        activateRail()
-        snapToNearest(e.nativeEvent.locationY)
-      },
-      onPanResponderMove: (e: GestureResponderEvent) => snapToNearest(e.nativeEvent.locationY),
-      onPanResponderRelease: () => deactivateRail(),
-    })
-  ).current
-
   const thumbTop = toVertPos(currentYear, railH)
 
   return (
     <Animated.View
       style={[styles.railWrap, { width: widthAnim }]}
       onLayout={(e) => setRailH(e.nativeEvent.layout.height)}
-      {...panResponder.panHandlers}
+      onStartShouldSetResponder={() => true}
+      onMoveShouldSetResponder={() => true}
+      onResponderGrant={(e: GestureResponderEvent) => {
+        wasActiveOnGrant.current = timeRailActive
+        didDrag.current = false
+        activateRail()
+        snapToNearest(e.nativeEvent.locationY)
+      }}
+      onResponderMove={(e: GestureResponderEvent) => {
+        didDrag.current = true
+        snapToNearest(e.nativeEvent.locationY)
+      }}
+      onResponderRelease={() => {
+        if (!didDrag.current && wasActiveOnGrant.current) {
+          // tap on already-active rail: collapse it
+          deactivateRail()
+        } else if (didDrag.current) {
+          deactivateRail()
+        }
+        // tap on inactive rail: grant already activated it, leave it active
+      }}
+      onResponderTerminate={() => deactivateRail()}
     >
       <View style={styles.railTrack} />
       {conditions
@@ -465,7 +477,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
                 styles.railDash,
                 {
                   top: top - 1.5,
-                  backgroundColor: SYSTEM_META[c.system].color,
+                  backgroundColor: SYSTEM_META[c.system]?.color ?? '#fff',
                   opacity: isSelected ? 1 : 0.7,
                 },
               ]}
