@@ -2,6 +2,7 @@ import { router } from 'expo-router'
 import { StyleSheet, Text, TouchableOpacity, View, ScrollView } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import * as DocumentPicker from 'expo-document-picker'
+import * as ImagePicker from 'expo-image-picker'
 import { useAppStore } from '@/store/useAppStore'
 
 const C = {
@@ -12,9 +13,15 @@ const C = {
   purple: '#7042D6',
   purpleLight: '#8A60EB',
   purpleTint: '#F0EAFB',
-  uploadBg: '#F5F0FD',
+  aqua: '#1FC3A4',
+  aquaDark: '#1A9E8A',
   white: '#FFFFFF',
+  privacyText: '#6B3FBF',
+  privacyBorder: '#C4A8F0',
+  qsLabel: '#A6ADB7',
 }
+
+// ── Logo ──────────────────────────────────────────────────────────────────────
 
 function Logo() {
   return (
@@ -26,46 +33,52 @@ function Logo() {
   )
 }
 
-function UploadIcon() {
+// ── Upload zone icons (inline SVG-style views) ────────────────────────────────
+
+function PdfIcon({ color }: { color: string }) {
   return (
-    <View style={styles.uploadIconWrap}>
-      <View style={styles.uploadIconDoc}>
-        <View style={styles.uploadIconDocFold} />
-        <View style={styles.uploadIconArrow} />
-      </View>
+    <View style={[styles.iconBox, { borderColor: color }]}>
+      <View style={[styles.iconBoxFold, { backgroundColor: C.bg }]} />
+      <View style={[styles.iconArrow, { borderColor: color }]} />
     </View>
   )
 }
 
-function PrivacyBadge() {
+function CameraIcon({ color }: { color: string }) {
   return (
-    <View style={styles.privacyBadge}>
-      <View style={styles.lockDot} />
-      <Text style={styles.privacyText}>Private — never leaves your device</Text>
+    <View style={[styles.iconBox, { borderColor: color, borderRadius: 8 }]}>
+      <View style={[styles.cameraLens, { borderColor: color }]} />
+      <View style={[styles.cameraNotch, { backgroundColor: color, opacity: 0.6 }]} />
     </View>
   )
 }
 
-function SamplePill({ label }: { label: string }) {
+function ImageIcon({ color }: { color: string }) {
   return (
-    <View style={styles.samplePill}>
-      <Text style={styles.samplePillText}>{label}</Text>
+    <View style={[styles.iconBox, { borderColor: color, borderRadius: 8 }]}>
+      <View style={[styles.imageSun, { backgroundColor: color, opacity: 0.7 }]} />
+      <View style={[styles.imageMountain, { borderBottomColor: color, opacity: 0.6 }]} />
     </View>
   )
 }
+
+// ── QS Wordmark ───────────────────────────────────────────────────────────────
 
 function QSWordmark() {
   return (
     <View style={styles.qsWrap} pointerEvents="none">
+      <Text style={styles.qsBuiltBy}>BUILT BY</Text>
       <Text style={styles.qsText}>QS</Text>
     </View>
   )
 }
 
+// ── Screen ────────────────────────────────────────────────────────────────────
+
 export default function UploadScreen() {
   const startAnalyze = useAppStore((s) => s.startAnalyze)
 
-  async function handlePickFile() {
+  async function handlePickPdf() {
     const result = await DocumentPicker.getDocumentAsync({
       type: 'application/pdf',
       copyToCacheDirectory: true,
@@ -75,9 +88,25 @@ export default function UploadScreen() {
     router.push('/analyzing')
   }
 
-  function handleDemo() {
+  async function handleCamera() {
+    const result = await ImagePicker.launchCameraAsync({ quality: 0.85 })
+    if (result.canceled) return
     startAnalyze()
     router.push('/analyzing')
+  }
+
+  async function handlePickImage() {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.85,
+    })
+    if (result.canceled) return
+    startAnalyze()
+    router.push('/analyzing')
+  }
+
+  function handleDemo() {
+    router.push('/bodymap')
   }
 
   return (
@@ -97,83 +126,108 @@ export default function UploadScreen() {
           <Text style={styles.eyebrow}>YOUR BODY. YOUR RECORDS.</Text>
 
           {/* Headline */}
-          <Text style={styles.headline}>YOUR{'\n'}WELLNESS{'\n'}STORY</Text>
+          <Text style={styles.headline}>{'YOUR\nWELLNESS\nSTORY'}</Text>
 
-          {/* Body */}
-          <Text style={styles.body}>
-            Upload health record PDFs. Every condition mapped to anatomy — across time.
+          {/* Sub */}
+          <Text style={styles.sub}>
+            Upload health PDFs. Every condition mapped to anatomy — across time.
           </Text>
 
-          {/* Upload zone */}
-          <TouchableOpacity style={styles.uploadZone} onPress={handlePickFile} activeOpacity={0.8}>
-            <UploadIcon />
-            <Text style={styles.uploadTitle}>Drop PDF here</Text>
-            <Text style={styles.uploadSub}>or tap to choose</Text>
-            <PrivacyBadge />
-          </TouchableOpacity>
+          {/* Upload zone — 3 columns */}
+          <View style={styles.uploadZone}>
+            <View style={styles.uploadCols}>
+              {/* PDF */}
+              <TouchableOpacity style={styles.uploadCol} onPress={handlePickPdf} activeOpacity={0.7}>
+                <PdfIcon color={C.purpleLight} />
+                <Text style={styles.uploadColLabel}>Drop PDFs</Text>
+              </TouchableOpacity>
 
-          {/* Or choose image */}
-          <TouchableOpacity style={styles.secondaryBtn} onPress={handlePickFile} activeOpacity={0.8}>
-            <Text style={styles.secondaryBtnText}>Choose image / scan</Text>
-          </TouchableOpacity>
+              <View style={styles.uploadDivider} />
 
-          {/* CTA */}
-          <TouchableOpacity style={styles.demoBtn} onPress={handleDemo} activeOpacity={0.85}>
-            <Text style={styles.demoBtnText}>Try with sample records</Text>
-          </TouchableOpacity>
+              {/* Camera */}
+              <TouchableOpacity style={styles.uploadCol} onPress={handleCamera} activeOpacity={0.7}>
+                <CameraIcon color={C.aqua} />
+                <Text style={[styles.uploadColLabel, { color: C.aquaDark }]}>Take a photo</Text>
+              </TouchableOpacity>
 
-          {/* Sample pills */}
-          <View style={styles.pillRow}>
-            <SamplePill label="22 conditions" />
-            <SamplePill label="11 organ systems" />
-            <SamplePill label="2013 — 2024" />
+              <View style={styles.uploadDivider} />
+
+              {/* Image */}
+              <TouchableOpacity style={styles.uploadCol} onPress={handlePickImage} activeOpacity={0.7}>
+                <ImageIcon color={C.purpleLight} />
+                <Text style={styles.uploadColLabel}>Choose image</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Bottom strip */}
+            <View style={styles.uploadStrip}>
+              <Text style={styles.uploadStripText}>PDF · JPG · PNG · HEIC</Text>
+            </View>
           </View>
 
-          {/* Sub copy */}
-          <Text style={styles.subCopy}>No account. No cloud. Works offline.</Text>
+          {/* Privacy badge */}
+          <View style={styles.privacyBadge}>
+            <View style={styles.lockDot} />
+            <Text style={styles.privacyText}>Private — never leaves your device</Text>
+          </View>
+
+          {/* OR divider */}
+          <View style={styles.orRow}>
+            <View style={styles.orLine} />
+            <Text style={styles.orText}>OR</Text>
+            <View style={styles.orLine} />
+          </View>
+
+          {/* Demo CTA */}
+          <TouchableOpacity style={styles.demoBtn} onPress={handleDemo} activeOpacity={0.85}>
+            <Text style={styles.demoBtnText}>Explore demo data</Text>
+          </TouchableOpacity>
+
+          {/* Footer */}
+          <Text style={styles.footer}>No account. No cloud. Works offline.</Text>
 
           <View style={{ height: 80 }} />
         </ScrollView>
       </SafeAreaView>
 
-      {/* QS wordmark — absolute overlay */}
+      {/* QS wordmark — absolute lower-right */}
       <QSWordmark />
     </View>
   )
 }
 
+// ── Styles ────────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   safe: { flex: 1 },
-  nav: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
+
+  nav: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 8 },
   logoRow: { flexDirection: 'row', alignItems: 'baseline' },
   logoM: {
-    fontFamily: 'MOMCAKE-Thin',
-    fontSize: 20,
+    fontFamily: 'BarlowCondensed-Bold',
+    fontSize: 18,
     color: C.ink,
-    letterSpacing: -0.5,
+    letterSpacing: 0,
   },
   logoAI: {
     fontFamily: 'MOMCAKE-Bold',
     fontSize: 20,
     color: C.purpleLight,
-    letterSpacing: -0.5,
+    lineHeight: 20,
   },
   logoGenki: {
-    fontFamily: 'MOMCAKE-Thin',
-    fontSize: 20,
+    fontFamily: 'BarlowCondensed-Bold',
+    fontSize: 18,
     color: C.ink,
-    letterSpacing: -0.5,
   },
+
   scroll: { flex: 1 },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 16 },
+  scrollContent: { paddingHorizontal: 20, paddingTop: 20 },
+
   eyebrow: {
+    fontFamily: 'BarlowCondensed-SemiBold',
     fontSize: 11,
-    fontWeight: '600',
     color: C.purple,
     letterSpacing: 1.2,
     textTransform: 'uppercase',
@@ -185,145 +239,202 @@ const styles = StyleSheet.create({
     lineHeight: 40,
     color: C.ink,
     letterSpacing: -1,
-    marginBottom: 16,
+    marginBottom: 14,
   },
-  body: {
+  sub: {
+    fontFamily: 'BarlowCondensed-Regular',
     fontSize: 16,
     color: C.inkMuted,
-    lineHeight: 23,
-    marginBottom: 28,
+    lineHeight: 22,
+    marginBottom: 24,
   },
+
+  // Upload zone
   uploadZone: {
     borderWidth: 1.5,
     borderColor: C.border,
     borderStyle: 'dashed',
-    borderRadius: 16,
-    backgroundColor: C.uploadBg,
-    paddingVertical: 36,
-    paddingHorizontal: 20,
-    alignItems: 'center',
+    borderRadius: 8,
+    backgroundColor: '#F5F0FD',
     marginBottom: 12,
+    overflow: 'hidden',
   },
-  uploadIconWrap: { marginBottom: 12 },
-  uploadIconDoc: {
-    width: 40,
-    height: 50,
-    borderRadius: 6,
-    backgroundColor: C.purpleTint,
+  uploadCols: {
+    flexDirection: 'row',
+    paddingTop: 24,
+    paddingBottom: 20,
+  },
+  uploadCol: {
+    flex: 1,
+    alignItems: 'center',
+    gap: 10,
+  },
+  uploadDivider: {
+    width: 1,
+    backgroundColor: C.border,
+    marginVertical: 8,
+    opacity: 0.5,
+  },
+  uploadColLabel: {
+    fontFamily: 'BarlowCondensed-SemiBold',
+    fontSize: 13,
+    color: C.purple,
+    textAlign: 'center',
+  },
+  uploadStrip: {
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+    paddingVertical: 8,
+    alignItems: 'center',
+    backgroundColor: '#EDE6FA',
+  },
+  uploadStripText: {
+    fontFamily: 'SourceCodePro',
+    fontSize: 11,
+    color: C.aquaDark,
+    letterSpacing: 0.5,
+  },
+
+  // Icons
+  iconBox: {
+    width: 36,
+    height: 44,
     borderWidth: 1.5,
-    borderColor: C.purpleLight,
+    borderRadius: 5,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
+    backgroundColor: 'rgba(255,255,255,0.5)',
   },
-  uploadIconDocFold: {
+  iconBoxFold: {
     position: 'absolute',
     top: 0,
     right: 0,
+    width: 10,
+    height: 10,
+    borderBottomLeftRadius: 3,
+  },
+  iconArrow: {
     width: 12,
     height: 12,
-    backgroundColor: C.bg,
-    borderBottomLeftRadius: 4,
-  },
-  uploadIconArrow: {
-    width: 14,
-    height: 14,
     borderTopWidth: 2,
     borderLeftWidth: 2,
-    borderColor: C.purpleLight,
     transform: [{ rotate: '225deg' }],
     marginTop: 4,
   },
-  uploadTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: C.ink,
-    marginBottom: 4,
+  cameraLens: {
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    borderWidth: 1.5,
   },
-  uploadSub: {
-    fontSize: 13,
-    color: C.inkMuted,
-    marginBottom: 16,
+  cameraNotch: {
+    position: 'absolute',
+    top: 6,
+    left: 8,
+    width: 6,
+    height: 4,
+    borderRadius: 2,
   },
+  imageSun: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    position: 'absolute',
+    top: 10,
+    right: 9,
+  },
+  imageMountain: {
+    width: 0,
+    height: 0,
+    borderLeftWidth: 10,
+    borderRightWidth: 10,
+    borderBottomWidth: 12,
+    borderLeftColor: 'transparent',
+    borderRightColor: 'transparent',
+    position: 'absolute',
+    bottom: 8,
+    left: 6,
+  },
+
+  // Privacy badge
   privacyBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: C.white,
-    paddingHorizontal: 10,
+    alignSelf: 'center',
+    paddingHorizontal: 12,
     paddingVertical: 5,
     borderRadius: 20,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.privacyBorder,
+    marginBottom: 20,
   },
   lockDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#22C55E',
+    backgroundColor: C.privacyText,
   },
   privacyText: {
+    fontFamily: 'SourceCodePro',
+    fontSize: 11,
+    color: C.privacyText,
+  },
+
+  // OR divider
+  orRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 16,
+  },
+  orLine: { flex: 1, height: 1, backgroundColor: C.border },
+  orText: {
+    fontFamily: 'BarlowCondensed-SemiBold',
     fontSize: 11,
     color: C.inkMuted,
-    fontWeight: '500',
+    letterSpacing: 1,
   },
-  secondaryBtn: {
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 10,
-    paddingVertical: 13,
-    alignItems: 'center',
-    marginBottom: 20,
-    backgroundColor: C.white,
-  },
-  secondaryBtnText: {
-    fontSize: 15,
-    color: C.inkMuted,
-    fontWeight: '500',
-  },
+
+  // Demo CTA
   demoBtn: {
     backgroundColor: C.purple,
     borderRadius: 10,
     paddingVertical: 15,
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 20,
   },
   demoBtnText: {
-    fontSize: 15,
-    fontWeight: '600',
+    fontFamily: 'BarlowCondensed-Bold',
+    fontSize: 16,
     color: C.white,
-    letterSpacing: 0.2,
-  },
-  pillRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 14,
-  },
-  samplePill: {
-    paddingHorizontal: 12,
-    paddingVertical: 5,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.white,
-  },
-  samplePillText: {
-    fontSize: 12,
-    color: C.inkMuted,
-    fontWeight: '500',
-  },
-  subCopy: {
-    fontSize: 12,
-    color: C.border,
-    textAlign: 'center',
     letterSpacing: 0.5,
   },
+
+  footer: {
+    fontFamily: 'BarlowCondensed-Regular',
+    fontSize: 13,
+    color: C.aquaDark,
+    textAlign: 'center',
+    letterSpacing: 0.3,
+  },
+
+  // QS wordmark
   qsWrap: {
     position: 'absolute',
     bottom: 24,
     right: 20,
-    opacity: 0.25,
+    alignItems: 'center',
+    opacity: 0.4,
+  },
+  qsBuiltBy: {
+    fontFamily: 'BarlowCondensed-Regular',
+    fontSize: 9,
+    color: C.qsLabel,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 2,
   },
   qsText: {
     fontFamily: 'BourbonGrotesque',

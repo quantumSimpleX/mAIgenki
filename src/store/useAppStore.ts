@@ -3,6 +3,7 @@ import { ALL_SYSTEMS, ChatMessage, DesignCondition, SupportedLang, SystemId } fr
 
 type Screen = 'upload' | 'analyzing' | 'bodymap'
 type TimeDisplayMode = 'date' | 'age'
+type BodyMapMode = 'body' | 'list'
 
 type AppState = {
   screen: Screen
@@ -29,6 +30,7 @@ type AppState = {
   condDateOverrides: Record<string, string>
   selectedRecords: string[]
   lightboxRecord: string | null
+  bodyMapMode: BodyMapMode
 }
 
 type AppActions = {
@@ -59,6 +61,7 @@ type AppActions = {
   setSelectedRecords: (records: string[]) => void
   setLightboxRecord: (r: string | null) => void
   startAnalyze: () => void
+  setBodyMapMode: (mode: BodyMapMode) => void
 }
 
 export const useAppStore = create<AppState & AppActions>((set) => ({
@@ -86,6 +89,7 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   condDateOverrides: {},
   selectedRecords: [],
   lightboxRecord: null,
+  bodyMapMode: 'body',
 
   setScreen: (screen) => set({ screen }),
   setDragOver: (dragOver) => set({ dragOver }),
@@ -122,4 +126,5 @@ export const useAppStore = create<AppState & AppActions>((set) => ({
   setSelectedRecords: (selectedRecords) => set({ selectedRecords }),
   setLightboxRecord: (lightboxRecord) => set({ lightboxRecord }),
   startAnalyze: () => set({ screen: 'analyzing', analyzeProgress: 0, analyzePhase: 0 }),
+  setBodyMapMode: (bodyMapMode) => set({ bodyMapMode }),
 }))
