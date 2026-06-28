@@ -587,14 +587,7 @@ export default function BodyMapScreen() {
   const {
     activeSystems, selectCondition,
     currentYear, sheetOpen, settingsOpen, condDateOverrides,
-  } = useAppStore((s) => ({
-    activeSystems: s.activeSystems,
-    selectCondition: s.selectCondition,
-    currentYear: s.currentYear,
-    sheetOpen: s.sheetOpen,
-    settingsOpen: s.settingsOpen,
-    condDateOverrides: s.condDateOverrides,
-  }))
+  } = useAppStore()
 
   const handleConditionPress = useCallback((c: DesignCondition) => {
     selectCondition(c)
