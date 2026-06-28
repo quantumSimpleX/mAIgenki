@@ -3,14 +3,7 @@ import { Stack } from 'expo-router'
 import { useFonts } from 'expo-font'
 import { StatusBar } from 'expo-status-bar'
 import { View } from 'react-native'
-import { SQLiteProvider } from 'expo-sqlite'
-import { initDatabase } from '@/lib/db/queries'
-import { seedDemoData } from '@/lib/db/seed'
-
-async function onDatabaseInit(db: Parameters<typeof initDatabase>[0]) {
-  await initDatabase(db)
-  await seedDemoData(db)
-}
+import { DatabaseProvider } from '@/lib/db/provider'
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -28,13 +21,13 @@ export default function RootLayout() {
   }
 
   return (
-    <SQLiteProvider databaseName="maigenki.db" onInit={onDatabaseInit}>
+    <DatabaseProvider>
       <StatusBar style="light" />
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="index" />
         <Stack.Screen name="analyzing" />
         <Stack.Screen name="bodymap" />
       </Stack>
-    </SQLiteProvider>
+    </DatabaseProvider>
   )
 }

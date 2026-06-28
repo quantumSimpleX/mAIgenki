@@ -263,26 +263,25 @@ function LegendPanel() {
   return (
     <Animated.View style={[styles.legendPanel, { maxHeight: maxH }]} pointerEvents={legendOpen ? 'auto' : 'none'}>
       <View style={styles.legendInner}>
-        {ALL_SYSTEMS.map((id, idx) => {
+        {ALL_SYSTEMS.map((id) => {
           const active = activeSystems.includes(id)
           const meta = SYSTEM_META[id]
-          const isAlwaysOn = idx === 0
           return (
             <TouchableOpacity
               key={id}
               style={styles.legendRow}
-              onPress={isAlwaysOn ? undefined : () => toggleSystem(id)}
-              activeOpacity={isAlwaysOn ? 1 : 0.7}
+              onPress={() => toggleSystem(id)}
+              activeOpacity={0.7}
             >
               <View style={[
                 styles.legendDot,
                 { backgroundColor: meta.color },
-                (!active || isAlwaysOn) && { opacity: 0.3 },
+                !active && { opacity: 0.3 },
               ]} />
-              <Text style={[styles.legendLabel, (!active || isAlwaysOn) && { opacity: 0.4 }]}>
+              <Text style={[styles.legendLabel, !active && { opacity: 0.4 }]}>
                 {meta.label}
               </Text>
-              {active && !isAlwaysOn && <View style={[styles.legendGlow, { backgroundColor: meta.color }]} />}
+              {active && <View style={[styles.legendGlow, { backgroundColor: meta.color }]} />}
             </TouchableOpacity>
           )
         })}
@@ -389,6 +388,7 @@ function BodySvg({
 
 const RAIL_W_INACTIVE = 14
 const RAIL_W_ACTIVE = 36
+const IS_WEB = Platform.OS === 'web'
 
 function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const {
@@ -398,10 +398,17 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   } = useAppStore()
 
   const [railH, setRailH] = useState(SH * 0.6)
-  const widthAnim = useRef(new Animated.Value(RAIL_W_INACTIVE)).current
+  const widthAnim = useRef(new Animated.Value(IS_WEB ? RAIL_W_ACTIVE : RAIL_W_INACTIVE)).current
   const didDrag = useRef(false)
   const wasActiveOnGrant = useRef(false)
+  const railRef = useRef<View>(null)
+  const railTopRef = useRef(0)
   const YEAR_BOOKENDS = [MIN_YEAR, MAX_YEAR]
+
+  // On web the rail is always expanded — never collapses.
+  useEffect(() => {
+    if (IS_WEB) setTimeRailActive(true)
+  }, [setTimeRailActive])
 
   function animateWidth(toValue: number) {
     Animated.timing(widthAnim, { toValue, duration: 220, useNativeDriver: false }).start()
@@ -411,35 +418,66 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
     setTimeRailActive(true)
   }
   function deactivateRail() {
+    if (IS_WEB) return // web rail stays open
     animateWidth(RAIL_W_INACTIVE)
     setTimeRailActive(false)
   }
 
   function snapToNearest(posY: number) {
-    const rawYear = fromVertPos(posY, railH)
+    // Clamp the cursor to the rail so the thumb tracks the mouse exactly while dragging.
+    const clampedY = Math.max(0, Math.min(railH, posY))
+    const rawYear = fromVertPos(clampedY, railH)
     const visible = conditions.filter((c) => activeSystems.includes(c.system))
     if (visible.length === 0) {
-      setCurrentYear(Math.max(MIN_YEAR, Math.min(MAX_YEAR, rawYear)))
+      setCurrentYear(rawYear)
       return
     }
-    let nearest = visible[0]
-    let minDist = Infinity
+    // Proximity is measured in pixels against each marker's on-rail position, so
+    // the snap zone is visually uniform on the log-scaled rail (free-dragging
+    // everywhere else). Snap only when within 1% of the rail height of a marker.
+    let nearestFrac = visible[0].yearFrac
+    let minPxDist = Infinity
     for (const c of visible) {
       const cFrac = condDateOverrides[c.id] ? parseFloat(condDateOverrides[c.id]) : c.yearFrac
-      const dist = Math.abs(cFrac - rawYear)
-      if (dist < minDist) { minDist = dist; nearest = c }
+      const pxDist = Math.abs(toVertPos(cFrac, railH) - clampedY)
+      if (pxDist < minPxDist) { minPxDist = pxDist; nearestFrac = cFrac }
     }
-    const threshold = (MAX_YEAR - MIN_YEAR) * 0.01
-    const nearestFrac = condDateOverrides[nearest.id] ? parseFloat(condDateOverrides[nearest.id]) : nearest.yearFrac
-    setCurrentYear(minDist < threshold ? nearestFrac : Math.max(MIN_YEAR, Math.min(MAX_YEAR, rawYear)))
+    const threshold = railH * 0.01
+    setCurrentYear(minPxDist <= threshold ? nearestFrac : rawYear)
+  }
+
+  // Window-level drag listeners (web). react-native-web's responder stops
+  // emitting onResponderMove once the cursor leaves the narrow rail, so we
+  // listen on window instead: the thumb follows the mouse anywhere on screen
+  // until the button is released. snapRef keeps the latest closure (railH etc.).
+  const snapRef = useRef(snapToNearest)
+  snapRef.current = snapToNearest
+  function beginWebDrag() {
+    if (!IS_WEB) return
+    railRef.current?.measureInWindow((_x, y) => { railTopRef.current = y })
+    const onMove = (ev: MouseEvent) => {
+      didDrag.current = true
+      snapRef.current(ev.clientY - railTopRef.current)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }
 
   const thumbTop = toVertPos(currentYear, railH)
 
   return (
     <Animated.View
+      ref={railRef}
       style={[styles.railWrap, { width: widthAnim }]}
       onLayout={(e) => setRailH(e.nativeEvent.layout.height)}
+      // box-only keeps THIS view as the responder target so locationY stays
+      // relative to the rail; otherwise on web the cursor moving over child
+      // dashes/thumb retargets the event and locationY jumps (discontinuous drag).
+      pointerEvents="box-only"
       onStartShouldSetResponder={() => true}
       onMoveShouldSetResponder={() => true}
       onResponderGrant={(e: GestureResponderEvent) => {
@@ -447,8 +485,13 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
         didDrag.current = false
         activateRail()
         snapToNearest(e.nativeEvent.locationY)
+        // On web, take over the drag at the window level so it keeps following
+        // the mouse even when the cursor leaves the rail (until mouseup).
+        beginWebDrag()
       }}
-      onResponderMove={(e: GestureResponderEvent) => {
+      // Native uses the responder move; web is driven by window listeners
+      // (beginWebDrag) so the drag continues outside the rail bounds.
+      onResponderMove={IS_WEB ? undefined : (e: GestureResponderEvent) => {
         didDrag.current = true
         snapToNearest(e.nativeEvent.locationY)
       }}

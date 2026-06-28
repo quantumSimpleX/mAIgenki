@@ -86,7 +86,7 @@ Condition detail and Settings are **bottom sheets** within `bodymap.tsx`, not se
 
 ### Body Map Screen (`bodymap.tsx`)
 - NavBar at top: back arrow | "Health Story" title | settings gear icon
-- Legend panel (left side): 11 colored system chips, toggleable
+- Legend panel (left side): 11 colored system chips, all independently toggleable — including Integumentary (toggling it off fades the ghost body silhouette to 0 opacity). Per design handoff, no layer is locked always-on.
 - BodySvg: SVG anatomy (viewBox="0 0 260 460"), organ highlight paths per system + condition dots
 - Time rail: **vertical, right side**, log-scale (K=2.5), tick marks 14px inactive / 36px active
 - Tab switcher: **Body Map | Timeline** tabs to switch bodyMapMode
@@ -102,7 +102,7 @@ These are the canonical system IDs, display names, and colors. They are the sour
 
 | ID | Display Name | Color | Key anatomy |
 |---|---|---|---|
-| `integ` | Integumentary | `#4F46E5` (indigo) | Skin layer outline |
+| `integ` | Integumentary | `#4F46E5` (indigo) | Skin layer outline (ghost silhouette; toggleable like all other systems) |
 | `muscle` | Muscular | `#F472B6` (pink) | Major muscle groups |
 | `skeletal` | Skeletal | `#94A3B8` (slate) | Spine, major bones, joints |
 | `cardio` | Circulatory | `#EF4444` (red) | Heart, major vessels |
