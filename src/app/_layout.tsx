@@ -20,7 +20,7 @@ export default function RootLayout() {
     'BarlowCondensed-Regular': require('@expo-google-fonts/barlow-condensed/400Regular/BarlowCondensed_400Regular.ttf'),
     'BarlowCondensed-SemiBold': require('@expo-google-fonts/barlow-condensed/600SemiBold/BarlowCondensed_600SemiBold.ttf'),
     'BarlowCondensed-Bold': require('@expo-google-fonts/barlow-condensed/700Bold/BarlowCondensed_700Bold.ttf'),
-    'SourceCodePro': require('@expo-google-fonts/source-code-pro/400Regular/SourceCodePro_400Regular.ttf'),
+    'SourceCodePro': require('../../assets/fonts/SourceCodePro-Regular.ttf'),
   })
 
   if (!fontsLoaded) {
