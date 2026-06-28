@@ -16,6 +16,7 @@ export default function RootLayout() {
   const [fontsLoaded] = useFonts({
     'MOMCAKE-Bold': require('../../assets/fonts/MOMCAKE-Bold.otf'),
     'MOMCAKE-Thin': require('../../assets/fonts/MOMCAKE-Thin.otf'),
+    'BourbonGrotesque': require('../../assets/fonts/BourbonGrotesque-Regular.otf'),
     'BarlowCondensed-Regular': require('@expo-google-fonts/barlow-condensed/400Regular/BarlowCondensed_400Regular.ttf'),
     'BarlowCondensed-SemiBold': require('@expo-google-fonts/barlow-condensed/600SemiBold/BarlowCondensed_600SemiBold.ttf'),
     'BarlowCondensed-Bold': require('@expo-google-fonts/barlow-condensed/700Bold/BarlowCondensed_700Bold.ttf'),

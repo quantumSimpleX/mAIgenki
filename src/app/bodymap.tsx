@@ -7,8 +7,7 @@ import {
 } from 'react-native'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, { Circle, Ellipse, Path as SvgPath } from 'react-native-svg'
-
-const QS_PATH = 'M153.3,240.9L265.1,95.7L158.9,0L0,95.7l114,145.4l-32.7,42.2L27,350.9h106.8h106.8l-54.3-67.7L153.3,240.9z M63.2,94.3l82.1-49.4l-20,159.9l-72.1-92h77.1l2.3-18.5H63.2z M212.4,112.7L142.1,204L162,45l54.6,49.2h-54.3l-2.3,18.5H212.4z M133.8,319.6H92.4l13.4-16.6l0.2-0.2l0.2-0.2l27.7-35.7l27.7,35.7l0.2,0.2l0.2,0.2l13.4,16.6H133.8z'
+import { QSWordmark } from '@/components/QSWordmark'
 import { router } from 'expo-router'
 import { useAppStore } from '@/store/useAppStore'
 import {
@@ -773,9 +772,7 @@ function UploadShortcuts() {
         style={styles.qsWordmark}
         onPress={() => setUploadPanelOpen(!uploadPanelOpen)}
       >
-        <Svg width={17} height={22} viewBox="0 0 265.1 350.9">
-          <SvgPath fill="rgba(250,250,247,0.9)" d={QS_PATH} />
-        </Svg>
+        <QSWordmark size={28} onDark={true} />
       </TouchableOpacity>
     </View>
   )
