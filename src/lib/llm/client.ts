@@ -83,10 +83,13 @@ export async function callLLMWithFallback<T = string>(
       why = 'returned content failed validation'
     }
 
+    // A model failing is an expected part of walking the fallback chain — record
+    // it for the caller (returned in `failures`) without warning per model. Only
+    // a total wipeout (every model failed) is worth a single console warning.
     failures.push(`${model}: ${why}`)
-    console.warn(`[${label}] model failed —`, model, why)
   }
 
+  console.warn(`[${label}] all models failed —`, failures.join('; '))
   return { ok: false, model: null, content: null, value: null, failures }
 }
 

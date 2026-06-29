@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { ComponentProps, useCallback, useEffect, useRef, useState } from 'react'
 import {
   Animated, Dimensions, Easing, GestureResponderEvent,
   KeyboardAvoidingView, Platform,
@@ -18,7 +18,15 @@ import {
 } from '@/model/conditions'
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
 
-const { height: SH } = Dimensions.get('window')
+const { width: SW, height: SH } = Dimensions.get('window')
+const IS_WEB = Platform.OS === 'web'
+// Desktop web renders this mobile-first UI at tiny phone sizes; scale the whole
+// chrome (fonts + the containers that wrap them) 2× so text is accessible.
+// fs() = font sizes, sc() = spacing/dimensions. Mobile is left untouched (S=1).
+const IS_DESKTOP = IS_WEB && SW >= 768
+const S = IS_DESKTOP ? 2 : 1
+const fs = (n: number) => (S === 1 ? n : Math.round(n * S))
+const sc = (n: number) => (S === 1 ? n : Math.round(n * S))
 
 const C = {
   bg: '#0A0C14',
@@ -71,7 +79,7 @@ const DISCLAIMER = 'Educational only. Not medical advice. Never a substitute for
 
 // ─── Small SVG icons ──────────────────────────────────────────────────────────
 
-function MailIcon({ color = C.aqua, size = 15 }: { color?: string; size?: number }) {
+function MailIcon({ color = C.aqua, size = fs(15) }: { color?: string; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <Rect x={3} y={5} width={18} height={14} rx={2} stroke={color} strokeWidth={1.8} />
@@ -80,7 +88,7 @@ function MailIcon({ color = C.aqua, size = 15 }: { color?: string; size?: number
   )
 }
 
-function PhoneIcon({ color = C.aqua, size = 15 }: { color?: string; size?: number }) {
+function PhoneIcon({ color = C.aqua, size = fs(15) }: { color?: string; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <SvgPath
@@ -91,7 +99,7 @@ function PhoneIcon({ color = C.aqua, size = 15 }: { color?: string; size?: numbe
   )
 }
 
-function ChatBubbleIcon({ color = '#fff', size = 14 }: { color?: string; size?: number }) {
+function ChatBubbleIcon({ color = '#fff', size = fs(14) }: { color?: string; size?: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <SvgPath
@@ -247,13 +255,13 @@ function NavBar() {
 
 function LegendPanel() {
   const { activeSystems, toggleSystem, legendOpen } = useAppStore()
-  const maxH = useRef(new Animated.Value(legendOpen ? 320 : 0)).current
+  const maxH = useRef(new Animated.Value(legendOpen ? sc(320) : 0)).current
 
   const prevOpen = useRef(legendOpen)
   if (prevOpen.current !== legendOpen) {
     prevOpen.current = legendOpen
     Animated.timing(maxH, {
-      toValue: legendOpen ? 320 : 0,
+      toValue: legendOpen ? sc(320) : 0,
       duration: 320,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
@@ -261,7 +269,7 @@ function LegendPanel() {
   }
 
   return (
-    <Animated.View style={[styles.legendPanel, { maxHeight: maxH }]} pointerEvents={legendOpen ? 'auto' : 'none'}>
+    <Animated.View style={[styles.legendPanel, { maxHeight: maxH, pointerEvents: legendOpen ? 'auto' : 'none' }]}>
       <View style={styles.legendInner}>
         {ALL_SYSTEMS.map((id) => {
           const active = activeSystems.includes(id)
@@ -366,12 +374,21 @@ function BodySvg({
         <Ellipse cx={130} cy={240} rx={58} ry={140} fill={SYSTEM_META.integ.color} opacity={0.04} />
       )}
 
-      {/* Condition hotspot dots — G wrapper ensures onPress works on web */}
+      {/* Condition hotspot dots. On web pass a raw onClick (flows through to the
+          DOM <g>) instead of onPress — onPress makes react-native-svg attach its
+          touchable responder handlers, which leak to the DOM as "Unknown event
+          handler property". On native, use onPress. */}
       {visibleConds.map((c) => {
         const isSelected = selectedCondition?.id === c.id
         const color = SYSTEM_META[c.system]?.color ?? '#fff'
+        // Web: onPress:null keeps react-native-svg from attaching its touchable
+        // responder handlers (which leak to the DOM), while onClick passes
+        // straight through to the <g> so the click still fires. Native: onPress.
+        const pressProps = (IS_WEB
+          ? { onPress: null, onClick: () => onConditionPress(c) }
+          : { onPress: () => onConditionPress(c) }) as unknown as ComponentProps<typeof G>
         return (
-          <G key={c.id} onPress={() => onConditionPress(c)}>
+          <G key={c.id} {...pressProps}>
             <Circle cx={c.cx} cy={c.cy} r={isSelected ? 10 : 8}
               fill={color} fillOpacity={isSelected ? 1 : 0.75}
               stroke={C.bg} strokeWidth={1.5} />
@@ -386,9 +403,8 @@ function BodySvg({
 
 // ─── Vertical Time Rail ──────────────────────────────────────────────────────
 
-const RAIL_W_INACTIVE = 14
-const RAIL_W_ACTIVE = 36
-const IS_WEB = Platform.OS === 'web'
+const RAIL_W_INACTIVE = sc(14)
+const RAIL_W_ACTIVE = sc(36)
 
 function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const {
@@ -452,9 +468,17 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   // until the button is released. snapRef keeps the latest closure (railH etc.).
   const snapRef = useRef(snapToNearest)
   snapRef.current = snapToNearest
-  function beginWebDrag() {
+  const activateRef = useRef(activateRail)
+  activateRef.current = activateRail
+
+  // Web drag is driven entirely by DOM listeners (no RN responder props, which
+  // react-native-web does not consume on Animated.View and would leak to the
+  // DOM as "Unknown event handler property"). mousedown starts the drag; window
+  // move/up keep it following the cursor anywhere on screen until release.
+  useEffect(() => {
     if (!IS_WEB) return
-    railRef.current?.measureInWindow((_x, y) => { railTopRef.current = y })
+    const node = railRef.current as unknown as HTMLElement | null
+    if (!node?.addEventListener) return
     const onMove = (ev: MouseEvent) => {
       didDrag.current = true
       snapRef.current(ev.clientY - railTopRef.current)
@@ -463,9 +487,21 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
-    window.addEventListener('mousemove', onMove)
-    window.addEventListener('mouseup', onUp)
-  }
+    const onDown = (ev: MouseEvent) => {
+      didDrag.current = false
+      railTopRef.current = node.getBoundingClientRect().top
+      activateRef.current()
+      snapRef.current(ev.clientY - railTopRef.current)
+      window.addEventListener('mousemove', onMove)
+      window.addEventListener('mouseup', onUp)
+    }
+    node.addEventListener('mousedown', onDown)
+    return () => {
+      node.removeEventListener('mousedown', onDown)
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
 
   const thumbTop = toVertPos(currentYear, railH)
 
@@ -474,37 +510,29 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       ref={railRef}
       style={[styles.railWrap, { width: widthAnim }]}
       onLayout={(e) => setRailH(e.nativeEvent.layout.height)}
-      // box-only keeps THIS view as the responder target so locationY stays
-      // relative to the rail; otherwise on web the cursor moving over child
-      // dashes/thumb retargets the event and locationY jumps (discontinuous drag).
-      pointerEvents="box-only"
-      onStartShouldSetResponder={() => true}
-      onMoveShouldSetResponder={() => true}
-      onResponderGrant={(e: GestureResponderEvent) => {
-        wasActiveOnGrant.current = timeRailActive
-        didDrag.current = false
-        activateRail()
-        snapToNearest(e.nativeEvent.locationY)
-        // On web, take over the drag at the window level so it keeps following
-        // the mouse even when the cursor leaves the rail (until mouseup).
-        beginWebDrag()
-      }}
-      // Native uses the responder move; web is driven by window listeners
-      // (beginWebDrag) so the drag continues outside the rail bounds.
-      onResponderMove={IS_WEB ? undefined : (e: GestureResponderEvent) => {
-        didDrag.current = true
-        snapToNearest(e.nativeEvent.locationY)
-      }}
-      onResponderRelease={() => {
-        if (!didDrag.current && wasActiveOnGrant.current) {
-          // tap on already-active rail: collapse it
-          deactivateRail()
-        } else if (didDrag.current) {
-          deactivateRail()
-        }
-        // tap on inactive rail: grant already activated it, leave it active
-      }}
-      onResponderTerminate={() => deactivateRail()}
+      // Responder props are native-only: react-native-web does not consume them
+      // on Animated.View (they would leak to the DOM as "Unknown event handler
+      // property"). Web drag is handled by the DOM mousedown/window listeners in
+      // the effect above instead.
+      {...(IS_WEB ? {} : {
+        onStartShouldSetResponder: () => true,
+        onMoveShouldSetResponder: () => true,
+        onResponderGrant: (e: GestureResponderEvent) => {
+          wasActiveOnGrant.current = timeRailActive
+          didDrag.current = false
+          activateRail()
+          snapToNearest(e.nativeEvent.locationY)
+        },
+        onResponderMove: (e: GestureResponderEvent) => {
+          didDrag.current = true
+          snapToNearest(e.nativeEvent.locationY)
+        },
+        // tap on already-active rail collapses it; drag also collapses on release
+        onResponderRelease: () => {
+          if (didDrag.current || wasActiveOnGrant.current) deactivateRail()
+        },
+        onResponderTerminate: () => deactivateRail(),
+      })}
     >
       <View style={styles.railTrack} />
       {conditions
@@ -572,10 +600,12 @@ function RecordsCarousel({ records }: { records: ConditionRecord[] }) {
                 backgroundColor: isSel ? rec.color + '18' : 'rgba(255,255,255,0.04)',
                 borderColor: isSel ? rec.color : 'rgba(255,255,255,0.12)',
               },
-              isSel && { shadowColor: rec.color, shadowRadius: 8, shadowOpacity: 0.4, elevation: 4 },
+              isSel && (IS_WEB
+                ? { boxShadow: `0 0 ${sc(8)}px ${rec.color}` }
+                : { shadowColor: rec.color, shadowRadius: 8, shadowOpacity: 0.4, elevation: 4 }),
             ]}
           >
-            {renderRecordThumb(rec, 117, 44)}
+            {renderRecordThumb(rec, sc(117), sc(44))}
             <View style={styles.recordCardFooter}>
               <Text style={styles.recordCardLabel} numberOfLines={1}>{rec.label}</Text>
               <Text style={styles.recordCardDate} numberOfLines={1}>{rec.date}</Text>
@@ -596,7 +626,7 @@ function RecordsCarousel({ records }: { records: ConditionRecord[] }) {
               ]}
             >
               {isSel && (
-                <Svg width={9} height={9} viewBox="0 0 12 12">
+                <Svg width={sc(9)} height={sc(9)} viewBox="0 0 12 12">
                   <SvgPath d="M2 6 L5 9 L10 3" stroke="#fff" strokeWidth={2} fill="none" />
                 </Svg>
               )}
@@ -633,7 +663,8 @@ function ConditionSheet() {
       toValue: sheetOpen ? 0 : 1,
       duration: 420,
       easing: Easing.bezier(0.16, 1, 0.3, 1),
-      useNativeDriver: true,
+      // '%' output range below can't run on the native driver; JS-driven here.
+      useNativeDriver: false,
     }).start()
   }
 
@@ -646,7 +677,9 @@ function ConditionSheet() {
     }
   }, [chatOpen, sheetOpen])
 
-  const sheetH = chatOpen ? 780 : 400
+  const sheetH = chatOpen
+    ? Math.min(sc(780), SH * 0.92)
+    : Math.min(sc(400), SH * 0.8)
   const translateY = sheetTranslateY.interpolate({
     inputRange: [0, 1],
     outputRange: ['0%', '110%'],
@@ -703,22 +736,35 @@ function ConditionSheet() {
           borderTopRightRadius: chatOpen ? 0 : 18,
           paddingBottom: insets.bottom + 12,
           transform: [{ translateY }],
+          pointerEvents: sheetOpen ? 'auto' : 'none',
         },
       ]}
-      pointerEvents={sheetOpen ? 'auto' : 'none'}
     >
       <View style={styles.sheetHandle} />
 
-      {/* Compact header */}
+      {/* Header. Chat mode keeps the condition name (compressed); the detail
+          card shows only the organ-system label here, since the condition name
+          appears once in the large title below — no repeating it. */}
       <View style={styles.sheetHeader}>
         {meta && <View style={[styles.sysDot, { backgroundColor: meta.color }]} />}
         <View style={{ flex: 1 }}>
-          <Text style={styles.sheetCondName} numberOfLines={1}>
-            {selectedCondition ? localName : 'Health assistant'}
-          </Text>
-          {selectedCondition && (
-            <Text style={styles.sheetCondSub} numberOfLines={1}>
-              {preferredLanguage !== 'en' ? `${selectedCondition.label} · ` : ''}{selectedCondition.medName}
+          {chatOpen ? (
+            <>
+              <Text style={styles.sheetCondName} numberOfLines={1}>
+                {selectedCondition ? localName : 'Health assistant'}
+              </Text>
+              {selectedCondition && (
+                <Text style={styles.sheetCondSub} numberOfLines={1}>
+                  {preferredLanguage !== 'en' ? `${selectedCondition.label} · ` : ''}{selectedCondition.medName}
+                </Text>
+              )}
+            </>
+          ) : (
+            <Text
+              style={[styles.sheetSysLabel, meta && { color: meta.color }]}
+              numberOfLines={1}
+            >
+              {meta ? meta.label.toUpperCase() : 'HEALTH ASSISTANT'}
             </Text>
           )}
         </View>
@@ -729,8 +775,15 @@ function ConditionSheet() {
 
       {!chatOpen && selectedCondition && (
         <>
+          {/* Common name in the preferred language; English common + full name
+              beneath (only when the preferred language isn't English, where the
+              title already is the English common name). */}
           <Text style={styles.sheetCondNameLarge}>{localName}</Text>
-          <Text style={styles.sheetCondSubEn}>{selectedCondition.medName}</Text>
+          <Text style={styles.sheetCondSubEn}>
+            {preferredLanguage !== 'en'
+              ? `${selectedCondition.label} · ${selectedCondition.medName}`
+              : selectedCondition.medName}
+          </Text>
 
           {/* Inline date editor */}
           <View style={styles.sheetDateRow}>
@@ -865,7 +918,7 @@ function RecordLightbox() {
           </TouchableOpacity>
         </View>
         <View style={styles.lightboxThumb}>
-          {renderRecordThumb(rec, 358, 226)}
+          {renderRecordThumb(rec, sc(358), sc(226))}
         </View>
         <Text style={styles.lightboxLabel}>{rec.label}</Text>
         <Text style={styles.lightboxDate}>{rec.date}</Text>
@@ -905,17 +958,16 @@ function SettingsSheet() {
       toValue: settingsOpen ? 1 : 0,
       duration: 280,
       easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
+      useNativeDriver: !IS_WEB,
     }).start()
   }
 
-  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [500, 0] })
+  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [sc(500), 0] })
   const MONTHS_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
 
   return (
     <Animated.View
-      style={[styles.settingsSheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY }] }]}
-      pointerEvents={settingsOpen ? 'auto' : 'none'}
+      style={[styles.settingsSheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY }], pointerEvents: settingsOpen ? 'auto' : 'none' }]}
     >
       <View style={styles.sheetHandle} />
       <View style={styles.settingsHeader}>
@@ -989,32 +1041,32 @@ function UploadShortcuts() {
           onHoverOut={() => setUploadBtnsHovered(false)}
         >
           <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
-            <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+            <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
               <SvgPath d="M7 3h7l4 4v14H7z" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
               <SvgPath d="M14 3v4h4" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
             </Svg>
           </TouchableOpacity>
           <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
-            <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+            <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
               <Rect x={3} y={7} width={18} height={13} rx={2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
               <Circle cx={12} cy={13} r={3.2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
               <SvgPath d="M8 7l1.5-2h5L16 7" stroke={C.aqua} strokeWidth={1.6} fill="none" />
             </Svg>
           </TouchableOpacity>
           <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
-            <Svg width={16} height={16} viewBox="0 0 24 24" fill="none">
+            <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
               <Rect x={3} y={4} width={18} height={16} rx={2} stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
               <Circle cx={8.5} cy={9} r={1.6} fill={C.purpleLight} />
               <SvgPath d="M5 18l5-5 4 3 3-3 4 4" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
             </Svg>
           </TouchableOpacity>
           <TouchableOpacity style={styles.uploadShortcutChat} onPress={openHealthChat}>
-            <ChatBubbleIcon color={C.purpleLight} size={14} />
+            <ChatBubbleIcon color={C.purpleLight} size={fs(14)} />
           </TouchableOpacity>
         </Pressable>
       )}
       <TouchableOpacity style={styles.qsWordmark} onPress={() => setUploadPanelOpen(!uploadPanelOpen)}>
-        <QSWordmark size={28} onDark={true} />
+        <QSWordmark size={fs(28)} onDark={true} />
       </TouchableOpacity>
     </View>
   )
@@ -1083,22 +1135,22 @@ const styles = StyleSheet.create({
 
   nav: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: 20, paddingVertical: 10,
+    paddingHorizontal: sc(20), paddingVertical: sc(10),
     borderBottomWidth: 1, borderBottomColor: C.border,
   },
   logoRow: { flexDirection: 'row', alignItems: 'baseline', gap: 0 },
-  logoM: { fontFamily: 'BarlowCondensed-Bold', fontSize: 18, color: 'rgba(255,255,255,0.9)' },
-  logoAI: { fontFamily: 'MOMCAKE-Bold', fontSize: 20, color: '#8A60EB', lineHeight: 20 },
-  logoGenki: { fontFamily: 'BarlowCondensed-Bold', fontSize: 18, color: 'rgba(255,255,255,0.9)' },
-  navChevron: { fontFamily: 'BarlowCondensed-Bold', fontSize: 18, color: 'rgba(255,255,255,0.4)', marginLeft: 4, transform: [{ rotate: '90deg' }] },
+  logoM: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.9)' },
+  logoAI: { fontFamily: 'MOMCAKE-Bold', fontSize: fs(20), color: '#8A60EB', lineHeight: fs(20) },
+  logoGenki: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.9)' },
+  navChevron: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.4)', marginLeft: sc(4), transform: [{ rotate: '90deg' }] },
   navChevronOpen: { transform: [{ rotate: '270deg' }] },
-  navRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  navRight: { flexDirection: 'row', alignItems: 'center', gap: sc(10) },
   datePill: {
-    paddingHorizontal: 10, paddingVertical: 4, borderRadius: 14,
+    paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(14),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
   },
-  datePillText: { fontFamily: 'SourceCodePro', fontSize: 11, color: C.ink },
-  gearIcon: { fontSize: 18, color: 'rgba(255,255,255,0.45)' },
+  datePillText: { fontFamily: 'SourceCodePro', fontSize: fs(11), color: C.ink },
+  gearIcon: { fontSize: fs(18), color: 'rgba(255,255,255,0.45)' },
 
   canvas: { flex: 1, position: 'relative', overflow: 'hidden' },
 
@@ -1107,150 +1159,158 @@ const styles = StyleSheet.create({
 
   legendPanel: {
     position: 'absolute', top: 0, left: 0,
-    backgroundColor: 'rgba(10,12,20,0.92)', overflow: 'hidden', zIndex: 5, minWidth: 140,
+    backgroundColor: 'rgba(10,12,20,0.92)', overflow: 'hidden', zIndex: 5, minWidth: sc(140),
   },
-  legendInner: { paddingVertical: 10, paddingHorizontal: 12 },
-  legendRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 5 },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendGlow: { position: 'absolute', right: 0, width: 6, height: 6, borderRadius: 3, opacity: 0.5 },
-  legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: 12, color: C.ink, flex: 1 },
+  legendInner: { paddingVertical: sc(10), paddingHorizontal: sc(12) },
+  legendRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8), paddingVertical: sc(5) },
+  legendDot: { width: sc(8), height: sc(8), borderRadius: sc(4) },
+  legendGlow: { position: 'absolute', right: 0, width: sc(6), height: sc(6), borderRadius: sc(3), opacity: 0.5 },
+  legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.ink, flex: 1 },
 
   railWrap: {
     position: 'absolute', top: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'visible', zIndex: 3,
   },
   railTrack: { position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
-  railDash: { position: 'absolute', left: 3, right: 3, height: 3, borderRadius: 1.5 },
+  railDash: { position: 'absolute', left: sc(3), right: sc(3), height: sc(3), borderRadius: sc(1.5) },
   railThumb: {
-    position: 'absolute', left: '50%', marginLeft: -4, width: 8, height: 8, borderRadius: 4,
-    backgroundColor: C.aqua, shadowColor: C.aqua, shadowOpacity: 0.8, shadowRadius: 4, elevation: 4,
+    position: 'absolute', left: '50%', marginLeft: sc(-4), width: sc(8), height: sc(8), borderRadius: sc(4),
+    backgroundColor: C.aqua,
+    ...(IS_WEB
+      ? { boxShadow: `0 0 ${sc(4)}px ${C.aqua}` }
+      : { shadowColor: C.aqua, shadowOpacity: 0.8, shadowRadius: 4, elevation: 4 }),
   },
-  railLabel: { position: 'absolute', right: RAIL_W_ACTIVE + 4, backgroundColor: 'rgba(10,12,20,0.9)', paddingHorizontal: 5, paddingVertical: 2, borderRadius: 4 },
-  railLabelText: { fontFamily: 'SourceCodePro', fontSize: 9, color: C.aqua },
-  railBookend: { position: 'absolute', right: 2, fontFamily: 'SourceCodePro', fontSize: 8, color: 'rgba(255,255,255,0.3)' },
+  railLabel: { position: 'absolute', right: RAIL_W_ACTIVE + sc(4), backgroundColor: 'rgba(10,12,20,0.9)', paddingHorizontal: sc(5), paddingVertical: sc(2), borderRadius: sc(4) },
+  railLabelText: { fontFamily: 'SourceCodePro', fontSize: fs(9), color: C.aqua },
+  railBookend: { position: 'absolute', right: sc(2), fontFamily: 'SourceCodePro', fontSize: fs(8), color: 'rgba(255,255,255,0.3)' },
 
   // Condition sheet
   sheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0,
-    backgroundColor: C.surface, paddingHorizontal: 20, paddingTop: 12,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.5, shadowRadius: 16,
-    elevation: 20, zIndex: 10,
+    backgroundColor: C.surface, paddingHorizontal: sc(20), paddingTop: sc(12),
+    ...(IS_WEB
+      ? { boxShadow: `0px ${sc(-4)}px ${sc(16)}px rgba(0,0,0,0.5)` }
+      : { shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 20 }),
+    zIndex: 10,
   },
-  sheetHandle: { width: 34, height: 4, borderRadius: 2, backgroundColor: 'rgba(255,255,255,0.14)', alignSelf: 'center', marginBottom: 14 },
-  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  sysDot: { width: 8, height: 8, borderRadius: 4 },
-  sheetCondName: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: 14, color: C.ink, flex: 1 },
-  sheetCondSub: { fontFamily: 'BarlowCondensed-Regular', fontSize: 11, color: C.inkMuted },
-  sheetCloseBtn: { fontSize: 18, color: C.inkMuted, padding: 4 },
+  sheetHandle: { width: sc(34), height: sc(4), borderRadius: sc(2), backgroundColor: 'rgba(255,255,255,0.14)', alignSelf: 'center', marginBottom: sc(14) },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: sc(10), marginBottom: sc(8) },
+  sysDot: { width: sc(8), height: sc(8), borderRadius: sc(4) },
+  sheetCondName: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(14), color: C.ink, flex: 1 },
+  sheetCondSub: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.inkMuted },
+  sheetSysLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(11), letterSpacing: sc(2), textTransform: 'uppercase', color: C.inkMuted },
+  sheetCloseBtn: { fontSize: fs(18), color: C.inkMuted, padding: sc(4) },
 
-  sheetCondNameLarge: { fontFamily: 'MOMCAKE-Bold', fontSize: 26, color: C.ink, marginBottom: 4 },
-  sheetCondSubEn: { fontFamily: 'BarlowCondensed-Regular', fontSize: 13, color: C.inkMuted, marginBottom: 10 },
+  sheetCondNameLarge: { fontFamily: 'MOMCAKE-Bold', fontSize: fs(26), color: C.ink, marginBottom: sc(4) },
+  sheetCondSubEn: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(13), color: C.inkMuted, marginBottom: sc(10) },
 
-  sheetDateRow: { marginBottom: 12 },
-  dateViewRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sheetDateChip: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(31,195,164,0.12)' },
-  sheetDateText: { fontFamily: 'SourceCodePro', fontSize: 12, color: C.aqua },
-  datePencilBtn: { padding: 4 },
-  datePencil: { fontSize: 14, color: C.inkMuted },
-  dateEditRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  sheetDateRow: { marginBottom: sc(12) },
+  dateViewRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8) },
+  sheetDateChip: { alignSelf: 'flex-start', paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(8), backgroundColor: 'rgba(31,195,164,0.12)' },
+  sheetDateText: { fontFamily: 'SourceCodePro', fontSize: fs(12), color: C.aqua },
+  datePencilBtn: { padding: sc(4) },
+  datePencil: { fontSize: fs(14), color: C.inkMuted },
+  dateEditRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8) },
   dateEditInput: {
-    width: 160, height: 34, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(31,195,164,0.4)',
-    paddingHorizontal: 10, fontFamily: 'SourceCodePro', fontSize: 13, color: C.aqua, backgroundColor: C.surfaceHigh,
+    width: sc(160), height: sc(34), borderRadius: sc(8), borderWidth: 1, borderColor: 'rgba(31,195,164,0.4)',
+    paddingHorizontal: sc(10), fontFamily: 'SourceCodePro', fontSize: fs(13), color: C.aqua, backgroundColor: C.surfaceHigh,
   },
-  dateEditBtn: { width: 30, height: 30, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: C.surfaceHigh },
-  dateEditConfirm: { color: C.aqua, fontSize: 16, fontWeight: '700' },
-  dateEditCancel: { color: C.inkMuted, fontSize: 14 },
+  dateEditBtn: { width: sc(30), height: sc(30), borderRadius: sc(8), alignItems: 'center', justifyContent: 'center', backgroundColor: C.surfaceHigh },
+  dateEditConfirm: { color: C.aqua, fontSize: fs(16), fontWeight: '700' },
+  dateEditCancel: { color: C.inkMuted, fontSize: fs(14) },
 
-  sheetNote: { fontFamily: 'BarlowCondensed-Regular', fontSize: 16, color: C.ink, lineHeight: 22, marginBottom: 14 },
+  sheetNote: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(16), color: C.ink, lineHeight: fs(22), marginBottom: sc(14) },
 
   // Source block (3 lines)
-  sourceBlock: { marginBottom: 8 },
-  sourceLine1: { marginBottom: 3 },
-  sourceLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: 10, color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase', letterSpacing: 1.8 },
-  sourceMeta: { fontFamily: 'SourceCodePro', fontSize: 10, color: 'rgba(255,255,255,0.32)' },
-  sourceLine2: { fontFamily: 'SourceCodePro', fontSize: 10, color: 'rgba(255,255,255,0.32)', marginBottom: 4 },
-  sourceLine3: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sourceDoctor: { fontFamily: 'SourceCodePro', fontSize: 13, fontWeight: '700', color: 'rgba(255,255,255,0.65)' },
-  sourceIcons: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sourceBlock: { marginBottom: sc(8) },
+  sourceLine1: { marginBottom: sc(3) },
+  sourceLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: 'rgba(255,255,255,0.2)', textTransform: 'uppercase', letterSpacing: sc(1.8) },
+  sourceMeta: { fontFamily: 'SourceCodePro', fontSize: fs(10), color: 'rgba(255,255,255,0.32)' },
+  sourceLine2: { fontFamily: 'SourceCodePro', fontSize: fs(10), color: 'rgba(255,255,255,0.32)', marginBottom: sc(4) },
+  sourceLine3: { flexDirection: 'row', alignItems: 'center', gap: sc(10) },
+  sourceDoctor: { fontFamily: 'SourceCodePro', fontSize: fs(13), fontWeight: '700', color: 'rgba(255,255,255,0.65)' },
+  sourceIcons: { flexDirection: 'row', alignItems: 'center', gap: sc(10) },
 
-  sheetFooterRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 16 },
-  chatFooterBtn: { width: 36, height: 36, borderRadius: 8, backgroundColor: '#8A60EB', alignItems: 'center', justifyContent: 'center' },
+  sheetFooterRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: sc(16) },
+  chatFooterBtn: { width: sc(36), height: sc(36), borderRadius: sc(8), backgroundColor: '#8A60EB', alignItems: 'center', justifyContent: 'center' },
 
   // Records carousel
-  carousel: { maxHeight: 84, marginBottom: 6 },
-  carouselContent: { paddingHorizontal: 10, gap: 9, alignItems: 'center' },
-  recordCard: { width: 117, height: 74, borderRadius: 6, borderWidth: 1.5, overflow: 'hidden' },
-  recordCardFooter: { paddingHorizontal: 6, paddingTop: 2 },
-  recordCardLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: 10, color: C.ink },
-  recordCardDate: { fontFamily: 'SourceCodePro', fontSize: 8, color: C.inkMuted },
-  recordSelCircle: { position: 'absolute', top: 4, right: 4, width: 18, height: 18, borderRadius: 9, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  carousel: { maxHeight: sc(84), marginBottom: sc(6) },
+  carouselContent: { paddingHorizontal: sc(10), gap: sc(9), alignItems: 'center' },
+  recordCard: { width: sc(117), height: sc(74), borderRadius: sc(6), borderWidth: 1.5, overflow: 'hidden' },
+  recordCardFooter: { paddingHorizontal: sc(6), paddingTop: sc(2) },
+  recordCardLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.ink },
+  recordCardDate: { fontFamily: 'SourceCodePro', fontSize: fs(8), color: C.inkMuted },
+  recordSelCircle: { position: 'absolute', top: sc(4), right: sc(4), width: sc(18), height: sc(18), borderRadius: sc(9), borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
 
   // Chat
   chatScroll: { flex: 1 },
-  chatContent: { padding: 12, gap: 10 },
-  chatBubble: { maxWidth: '80%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12 },
-  chatBubbleUser: { alignSelf: 'flex-end', backgroundColor: C.purpleTint, borderRadius: 12, borderBottomRightRadius: 2 },
-  chatBubbleAssist: { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: 12, borderBottomLeftRadius: 2 },
-  chatBubbleText: { fontFamily: 'BarlowCondensed-Regular', fontSize: 15, color: C.ink, lineHeight: 20 },
+  chatContent: { padding: sc(12), gap: sc(10) },
+  chatBubble: { maxWidth: '80%', paddingHorizontal: sc(14), paddingVertical: sc(10), borderRadius: sc(12) },
+  chatBubbleUser: { alignSelf: 'flex-end', backgroundColor: C.purpleTint, borderRadius: sc(12), borderBottomRightRadius: sc(2) },
+  chatBubbleAssist: { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: sc(12), borderBottomLeftRadius: sc(2) },
+  chatBubbleText: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(15), color: C.ink, lineHeight: fs(20) },
   chatBubbleUserText: { color: '#fff' },
-  chatInputRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
+  chatInputRow: { flexDirection: 'row', gap: sc(8), paddingHorizontal: sc(12), paddingVertical: sc(10), borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
   chatInput: {
-    flex: 1, height: 40, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    paddingHorizontal: 12, fontFamily: 'BarlowCondensed-Regular', fontSize: 15, color: C.ink, backgroundColor: C.surfaceHigh,
+    flex: 1, height: sc(40), borderRadius: sc(10), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    paddingHorizontal: sc(12), fontFamily: 'BarlowCondensed-Regular', fontSize: fs(15), color: C.ink, backgroundColor: C.surfaceHigh,
   },
-  sendBtn: { width: 40, height: 40, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' },
+  sendBtn: { width: sc(40), height: sc(40), borderRadius: sc(10), backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' },
   sendBtnActive: { backgroundColor: C.purpleLight },
-  sendBtnText: { color: C.ink, fontSize: 18, fontWeight: '700' },
+  sendBtnText: { color: C.ink, fontSize: fs(18), fontWeight: '700' },
 
   // Lightbox
   lightbox: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 100, backgroundColor: 'rgba(10,12,20,0.96)', alignItems: 'center', justifyContent: 'center' },
-  lightboxContent: { width: 390, maxWidth: '92%', backgroundColor: C.surface, borderRadius: 16, padding: 16 },
-  lightboxTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  lightboxBadge: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 },
-  lightboxClose: { fontSize: 18, color: C.inkMuted },
-  lightboxThumb: { borderRadius: 8, overflow: 'hidden', alignSelf: 'center', marginBottom: 12 },
-  lightboxLabel: { fontFamily: 'MOMCAKE-Bold', fontSize: 20, color: C.ink },
-  lightboxDate: { fontFamily: 'SourceCodePro', fontSize: 11, color: C.inkMuted, marginBottom: 14 },
-  lightboxAddBtn: { borderRadius: 10, paddingVertical: 12, alignItems: 'center', backgroundColor: C.purpleLight },
-  lightboxAddText: { fontFamily: 'BarlowCondensed-Bold', fontSize: 15, color: '#fff', letterSpacing: 0.3 },
+  lightboxContent: { width: sc(390), maxWidth: '92%', backgroundColor: C.surface, borderRadius: sc(16), padding: sc(16) },
+  lightboxTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sc(12) },
+  lightboxBadge: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), textTransform: 'uppercase', letterSpacing: sc(1) },
+  lightboxClose: { fontSize: fs(18), color: C.inkMuted },
+  lightboxThumb: { borderRadius: sc(8), overflow: 'hidden', alignSelf: 'center', marginBottom: sc(12) },
+  lightboxLabel: { fontFamily: 'MOMCAKE-Bold', fontSize: fs(20), color: C.ink },
+  lightboxDate: { fontFamily: 'SourceCodePro', fontSize: fs(11), color: C.inkMuted, marginBottom: sc(14) },
+  lightboxAddBtn: { borderRadius: sc(10), paddingVertical: sc(12), alignItems: 'center', backgroundColor: C.purpleLight },
+  lightboxAddText: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(15), color: '#fff', letterSpacing: sc(0.3) },
 
   // Settings
   settingsSheet: {
     position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: C.surface,
-    borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingTop: 12, zIndex: 15,
-    shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 20,
+    borderTopLeftRadius: sc(20), borderTopRightRadius: sc(20), paddingHorizontal: sc(20), paddingTop: sc(12), zIndex: 15,
+    ...(IS_WEB
+      ? { boxShadow: `0px ${sc(-4)}px ${sc(16)}px rgba(0,0,0,0.5)` }
+      : { shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 20 }),
   },
-  settingsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  settingsTitle: { fontFamily: 'BarlowCondensed-Bold', fontSize: 18, color: C.ink, textTransform: 'uppercase', letterSpacing: 0.5 },
-  settingsSectionLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: 10, color: C.inkMuted, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 10 },
+  settingsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sc(20) },
+  settingsTitle: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: C.ink, textTransform: 'uppercase', letterSpacing: sc(0.5) },
+  settingsSectionLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.inkMuted, textTransform: 'uppercase', letterSpacing: sc(1), marginBottom: sc(10) },
 
-  langList: { maxHeight: 224, marginBottom: 20 },
+  langList: { maxHeight: sc(224), marginBottom: sc(20) },
   langRowItem: {
-    flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, paddingHorizontal: 10,
-    borderLeftWidth: 3, borderLeftColor: 'transparent', borderRadius: 6,
+    flexDirection: 'row', alignItems: 'center', gap: sc(10), paddingVertical: sc(10), paddingHorizontal: sc(10),
+    borderLeftWidth: sc(3), borderLeftColor: 'transparent', borderRadius: sc(6),
   },
   langRowItemActive: { borderLeftColor: C.purpleLight, backgroundColor: 'rgba(138,96,235,0.12)' },
-  langFlag: { fontSize: 20 },
-  langNative: { fontFamily: 'BarlowCondensed-Regular', fontSize: 14, fontWeight: '500', color: C.ink },
-  langEnglish: { fontFamily: 'SourceCodePro', fontSize: 9.5, color: C.inkMuted, flex: 1 },
-  langCheck: { fontSize: 14, color: C.purpleLight },
+  langFlag: { fontSize: fs(20) },
+  langNative: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(14), fontWeight: '500', color: C.ink },
+  langEnglish: { fontFamily: 'SourceCodePro', fontSize: fs(9.5), color: C.inkMuted, flex: 1 },
+  langCheck: { fontSize: fs(14), color: C.purpleLight },
 
-  dobRow: { gap: 10, marginBottom: 20 },
+  dobRow: { gap: sc(10), marginBottom: sc(20) },
   dobYearInput: {
-    height: 40, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: 8, paddingHorizontal: 12,
-    fontFamily: 'SourceCodePro', fontSize: 14, color: C.ink, backgroundColor: C.surfaceHigh, width: 80,
+    height: sc(40), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8), paddingHorizontal: sc(12),
+    fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink, backgroundColor: C.surfaceHigh, width: sc(80),
   },
-  dobMonthWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  monthChip: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
+  dobMonthWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: sc(6) },
+  monthChip: { paddingHorizontal: sc(8), paddingVertical: sc(5), borderRadius: sc(6), borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
   monthChipActive: { backgroundColor: C.purpleLight, borderColor: C.purpleLight },
-  monthChipText: { fontFamily: 'SourceCodePro', fontSize: 9, color: C.inkMuted },
+  monthChipText: { fontFamily: 'SourceCodePro', fontSize: fs(9), color: C.inkMuted },
   monthChipTextActive: { color: '#fff' },
 
   // Upload shortcuts
-  uploadWrap: { position: 'absolute', bottom: 20, left: 16, alignItems: 'center', zIndex: 4 },
-  uploadBtns: { gap: 8, alignItems: 'center', marginBottom: 8 },
-  uploadShortcut: { width: 28, height: 28, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
-  uploadShortcutChat: { width: 28, height: 28, borderRadius: 6, backgroundColor: 'rgba(138,96,235,0.12)', borderWidth: 1, borderColor: 'rgba(138,96,235,0.3)', alignItems: 'center', justifyContent: 'center' },
+  uploadWrap: { position: 'absolute', bottom: sc(20), left: sc(16), alignItems: 'flex-start', zIndex: 4 },
+  uploadBtns: { gap: sc(8), alignItems: 'flex-start', marginBottom: sc(8) },
+  uploadShortcut: { width: sc(28), height: sc(28), borderRadius: sc(6), backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+  uploadShortcutChat: { width: sc(28), height: sc(28), borderRadius: sc(6), backgroundColor: 'rgba(138,96,235,0.12)', borderWidth: 1, borderColor: 'rgba(138,96,235,0.3)', alignItems: 'center', justifyContent: 'center' },
   qsWordmark: { opacity: 0.3 },
 
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9 },

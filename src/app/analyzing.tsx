@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { router } from 'expo-router'
 import {
-  Animated, Dimensions, Easing, StyleSheet, Text, View,
+  Animated, Dimensions, Easing, Platform, StyleSheet, Text, View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Svg, {
@@ -11,6 +11,8 @@ import { useAppStore } from '@/store/useAppStore'
 
 const { width: SW } = Dimensions.get('window')
 const TRACK_W = SW - 64
+// The native animation driver is absent on web; using it there only warns.
+const IS_WEB = Platform.OS === 'web'
 
 const C = {
   bg: '#0A0E14',
@@ -71,8 +73,8 @@ function BlinkingDots() {
       Animated.loop(
         Animated.sequence([
           Animated.delay(i * 180),
-          Animated.timing(v, { toValue: 1, duration: 600, useNativeDriver: true }),
-          Animated.timing(v, { toValue: 0.2, duration: 600, useNativeDriver: true }),
+          Animated.timing(v, { toValue: 1, duration: 600, useNativeDriver: !IS_WEB }),
+          Animated.timing(v, { toValue: 0.2, duration: 600, useNativeDriver: !IS_WEB }),
         ]),
       ),
     )
@@ -81,7 +83,7 @@ function BlinkingDots() {
   }, [])
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
       <Svg width={180} height={340} viewBox="0 0 180 340">
         {DOT_POS.map(([cx, cy], i) => (
           <AnimatedCircle key={i} cx={cx} cy={cy} r={4.5} fill={C.purpleLight} opacity={anims[i]} />
@@ -114,8 +116,8 @@ export default function AnalyzingScreen() {
   const fadeIn = useRef(new Animated.Value(0)).current
 
   useEffect(() => {
-    Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: true, easing: Easing.out(Easing.ease) }).start()
-    Animated.timing(reveal, { toValue: 1, duration: 1600, useNativeDriver: true, easing: Easing.inOut(Easing.ease) }).start()
+    Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: !IS_WEB, easing: Easing.out(Easing.ease) }).start()
+    Animated.timing(reveal, { toValue: 1, duration: 1600, useNativeDriver: !IS_WEB, easing: Easing.inOut(Easing.ease) }).start()
 
     let progress = 0
     const tick = setInterval(() => {

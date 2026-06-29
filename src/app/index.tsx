@@ -67,7 +67,7 @@ function ImageIcon({ color }: { color: string }) {
 
 function QSBadge() {
   return (
-    <View style={styles.qsWrap} pointerEvents="none">
+    <View style={[styles.qsWrap, { pointerEvents: 'none' }]}>
       <Text style={styles.qsBuiltBy}>BUILT BY</Text>
       <QSWordmark size={28} onDark={false} />
     </View>
