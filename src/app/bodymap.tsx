@@ -972,6 +972,53 @@ function RecordLightbox() {
 
 const MONTHS_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
 
+// Real flag graphics for the language picker. Flag emoji (🇺🇸 etc.) fall back to
+// plain "US"/"JP" letters on Windows, so we draw simplified SVG flags instead for
+// a consistent visual experience across platforms.
+function LangFlag({ code }: { code: SupportedLang }) {
+  const sh = 40 / 13 // US stripe height
+  return (
+    <View style={styles.langFlagBox}>
+      <Svg width={sc(26)} height={sc(18)} viewBox="0 0 60 40">
+        {code === 'en' && (
+          <>
+            <Rect x={0} y={0} width={60} height={40} fill="#fff" />
+            {[0, 2, 4, 6, 8, 10, 12].map((i) => (
+              <Rect key={i} x={0} y={i * sh} width={60} height={sh} fill="#B22234" />
+            ))}
+            <Rect x={0} y={0} width={25} height={sh * 7} fill="#3C3B6E" />
+            {[5, 12.5, 20].map((cy) =>
+              [4, 11, 18].map((cx) => <Circle key={`${cx}-${cy}`} cx={cx} cy={cy} r={1.1} fill="#fff" />),
+            )}
+          </>
+        )}
+        {code === 'zh-TW' && (
+          <>
+            <Rect x={0} y={0} width={60} height={40} fill="#FE0000" />
+            <Rect x={0} y={0} width={30} height={20} fill="#000095" />
+            <Circle cx={15} cy={10} r={6} fill="#fff" />
+            <Circle cx={15} cy={10} r={4} fill="#000095" />
+            <Circle cx={15} cy={10} r={2} fill="#fff" />
+          </>
+        )}
+        {code === 'ja' && (
+          <>
+            <Rect x={0} y={0} width={60} height={40} fill="#fff" />
+            <Circle cx={30} cy={20} r={11} fill="#BC002D" />
+          </>
+        )}
+        {code === 'es' && (
+          <>
+            <Rect x={0} y={0} width={60} height={10} fill="#C60B1E" />
+            <Rect x={0} y={10} width={60} height={20} fill="#FFC400" />
+            <Rect x={0} y={30} width={60} height={10} fill="#C60B1E" />
+          </>
+        )}
+      </Svg>
+    </View>
+  )
+}
+
 // Compact month picker: a single field that expands into a scrollable list,
 // instead of 12 always-visible buttons.
 function MonthDropdown({ value, onChange }: { value: string; onChange: (m: string) => void }) {
@@ -1045,7 +1092,7 @@ function SettingsSheet() {
 
       <Text style={styles.settingsSectionLabel}>Language</Text>
       <ScrollView style={styles.langList} showsVerticalScrollIndicator={false}>
-        {SUPPORTED_LANGS.map(({ code, flag, native, english }) => {
+        {SUPPORTED_LANGS.map(({ code, native, english }) => {
           const active = preferredLanguage === code
           return (
             <TouchableOpacity
@@ -1053,7 +1100,7 @@ function SettingsSheet() {
               style={[styles.langRowItem, active && styles.langRowItemActive]}
               onPress={() => setPreferredLanguage(code)}
             >
-              <Text style={styles.langFlag}>{flag}</Text>
+              <LangFlag code={code} />
               <Text style={styles.langNative}>{native}</Text>
               <Text style={styles.langEnglish}>{english}</Text>
               {active && <Text style={styles.langCheck}>✓</Text>}
@@ -1062,41 +1109,52 @@ function SettingsSheet() {
         })}
       </ScrollView>
 
-      <Text style={styles.settingsSectionLabel}>Date of birth</Text>
-      <View style={styles.dobRow}>
-        <TextInput
-          style={styles.dobYearInput}
-          value={yearDraft}
-          onChangeText={(v) => {
-            const digits = v.replace(/[^0-9]/g, '').slice(0, 4)
-            setYearDraft(digits)
-            const n = parseInt(digits, 10)
-            if (digits.length === 4 && n > 1900 && n < 2030) setBirthYear(n)
-          }}
-          keyboardType="numeric"
-          maxLength={4}
-          placeholder="YYYY"
-          placeholderTextColor={C.inkMuted}
-        />
-        <MonthDropdown value={birthMonth} onChange={setBirthMonth} />
-      </View>
+      <View style={styles.birthGenderRow}>
+        <View style={styles.birthCol}>
+          <Text style={styles.settingsSectionLabel}>Birth</Text>
+          <View style={styles.dobRow}>
+            <TextInput
+              style={styles.dobYearInput}
+              value={yearDraft}
+              onChangeText={(v) => {
+                const digits = v.replace(/[^0-9]/g, '').slice(0, 4)
+                setYearDraft(digits)
+                const n = parseInt(digits, 10)
+                if (digits.length === 4 && n > 1900 && n < 2030) setBirthYear(n)
+              }}
+              keyboardType="numeric"
+              maxLength={4}
+              placeholder="YYYY"
+              placeholderTextColor={C.inkMuted}
+            />
+            <MonthDropdown value={birthMonth} onChange={setBirthMonth} />
+          </View>
+          <Text style={styles.settingsHint}>Exact date is not stored for privacy.</Text>
+        </View>
 
-      <Text style={styles.settingsSectionLabel}>Gender</Text>
-      <View style={styles.genderRow}>
-        {(['female', 'male'] as Gender[]).map((g) => (
-          <TouchableOpacity
-            key={g}
-            style={[styles.genderOpt, gender === g && styles.genderOptActive]}
-            onPress={() => setGender(g)}
-            activeOpacity={0.8}
-          >
-            <Text style={[styles.genderOptText, gender === g && styles.genderOptTextActive]}>
-              {g === 'female' ? 'Female' : 'Male'}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        <View style={styles.genderCol}>
+          <Text style={styles.settingsSectionLabel}>Gender</Text>
+          <View style={styles.genderRow}>
+            {(['female', 'male'] as Gender[]).map((g) => (
+              <TouchableOpacity
+                key={g}
+                style={[styles.genderOpt, gender === g && styles.genderOptActive]}
+                onPress={() => setGender(g)}
+                activeOpacity={0.8}
+                accessibilityLabel={g === 'female' ? 'Female' : 'Male'}
+              >
+                <Text style={[styles.genderOptIcon, gender === g && styles.genderOptTextActive]}>
+                  {g === 'female' ? '♀' : '♂'}
+                </Text>
+                <Text style={[styles.genderOptLetter, gender === g && styles.genderOptTextActive]}>
+                  {g === 'female' ? 'F' : 'M'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <Text style={styles.settingsHint}>Inferred — tap to correct.</Text>
+        </View>
       </View>
-      <Text style={styles.settingsHint}>Inferred from your records — tap to correct.</Text>
     </Animated.View>
   )
 }
@@ -1367,28 +1425,35 @@ const styles = StyleSheet.create({
     borderLeftWidth: sc(3), borderLeftColor: 'transparent', borderRadius: sc(6),
   },
   langRowItemActive: { borderLeftColor: C.purpleLight, backgroundColor: 'rgba(138,96,235,0.12)' },
-  langFlag: { fontSize: fs(20) },
+  langFlagBox: {
+    width: sc(26), height: sc(18), borderRadius: sc(3), overflow: 'hidden',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
+  },
   langNative: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(14), fontWeight: '500', color: C.ink },
   langEnglish: { fontFamily: 'SourceCodePro', fontSize: fs(9.5), color: C.inkMuted, flex: 1 },
   langCheck: { fontSize: fs(14), color: C.purpleLight },
 
-  dobRow: { flexDirection: 'row', gap: sc(10), marginBottom: sc(20), alignItems: 'flex-start', zIndex: 30 },
+  birthGenderRow: { flexDirection: 'row', gap: sc(24), alignItems: 'flex-start', zIndex: 30 },
+  birthCol: { flex: 1, minWidth: 0, zIndex: 30 },
+  genderCol: { flex: 1, minWidth: 0 },
+  dobRow: { flexDirection: 'row', gap: sc(8), marginBottom: sc(6), alignItems: 'flex-start', zIndex: 30 },
   dobYearInput: {
-    height: sc(40), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8), paddingHorizontal: sc(12),
-    fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink, backgroundColor: C.surfaceHigh, width: sc(96),
+    height: sc(40), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8), paddingHorizontal: sc(10),
+    fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink, backgroundColor: C.surfaceHigh,
+    flexGrow: 0, flexShrink: 1, flexBasis: sc(60), minWidth: 0, textAlign: 'center',
   },
 
   // Month dropdown
-  monthDdWrap: { position: 'relative', zIndex: 30 },
+  monthDdWrap: { position: 'relative', zIndex: 30, flexGrow: 0, flexShrink: 1, flexBasis: sc(60), minWidth: 0 },
   monthDdField: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    height: sc(40), minWidth: sc(110), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: sc(8), paddingHorizontal: sc(12), backgroundColor: C.surfaceHigh, gap: sc(8),
+    height: sc(40), width: '100%', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: sc(8), paddingHorizontal: sc(10), backgroundColor: C.surfaceHigh, gap: sc(4),
   },
   monthDdValue: { fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink },
   monthDdChevron: { fontSize: fs(9), color: C.inkMuted },
   monthDdList: {
-    position: 'absolute', top: sc(44), left: 0, right: 0,
+    position: 'absolute', bottom: sc(44), left: 0, right: 0,
     backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
     borderRadius: sc(8), overflow: 'hidden', zIndex: 40,
     ...(IS_WEB ? { boxShadow: `0 ${sc(6)}px ${sc(16)}px rgba(0,0,0,0.5)` } : { elevation: 8 }),
@@ -1399,13 +1464,14 @@ const styles = StyleSheet.create({
   monthDdItemTextActive: { color: C.purpleLight },
 
   // Gender
-  genderRow: { flexDirection: 'row', gap: sc(10), marginBottom: sc(8) },
+  genderRow: { flexDirection: 'row', gap: sc(10), marginBottom: sc(6) },
   genderOpt: {
-    paddingHorizontal: sc(20), paddingVertical: sc(9), borderRadius: sc(8),
+    width: sc(60), height: sc(40), borderRadius: sc(8), flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sc(4),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: C.surfaceHigh,
   },
   genderOptActive: { backgroundColor: C.purpleLight, borderColor: C.purpleLight },
-  genderOptText: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(14), color: C.inkMuted },
+  genderOptIcon: { fontSize: fs(20), lineHeight: fs(24), color: C.inkMuted },
+  genderOptLetter: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(14), color: C.inkMuted },
   genderOptTextActive: { color: '#fff' },
   settingsHint: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.inkMuted, marginBottom: sc(12) },
 
