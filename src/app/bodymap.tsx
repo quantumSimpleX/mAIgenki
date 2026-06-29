@@ -3,14 +3,15 @@ import {
   Animated, Dimensions, Easing, GestureResponderEvent,
   KeyboardAvoidingView, Platform,
   Pressable, ScrollView, StyleSheet, Text, TextInput,
-  TouchableOpacity, View,
+  TouchableOpacity, useWindowDimensions, View,
 } from 'react-native'
+import { IS_WEB, S, fs, sc } from '@/lib/scale'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, {
   Circle, Ellipse, G, Line, Path as SvgPath, Rect,
 } from 'react-native-svg'
 import { QSWordmark } from '@/components/QSWordmark'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStore, Gender } from '@/store/useAppStore'
 import { useConditions, useConditionRecords } from '@/hooks/useConditions'
 import {
   ALL_SYSTEMS, ConditionRecord, DesignCondition, SystemId,
@@ -18,15 +19,7 @@ import {
 } from '@/model/conditions'
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
 
-const { width: SW, height: SH } = Dimensions.get('window')
-const IS_WEB = Platform.OS === 'web'
-// Desktop web renders this mobile-first UI at tiny phone sizes; scale the whole
-// chrome (fonts + the containers that wrap them) 2× so text is accessible.
-// fs() = font sizes, sc() = spacing/dimensions. Mobile is left untouched (S=1).
-const IS_DESKTOP = IS_WEB && SW >= 768
-const S = IS_DESKTOP ? 2 : 1
-const fs = (n: number) => (S === 1 ? n : Math.round(n * S))
-const sc = (n: number) => (S === 1 ? n : Math.round(n * S))
+const { height: SH } = Dimensions.get('window')
 
 const C = {
   bg: '#0A0C14',
@@ -106,6 +99,18 @@ function ChatBubbleIcon({ color = '#fff', size = fs(14) }: { color?: string; siz
         d="M4 5h16v11H9l-4 4v-4H4z"
         stroke={color} strokeWidth={1.8} fill="none" strokeLinejoin="round"
       />
+    </Svg>
+  )
+}
+
+function GearIcon({ color = 'rgba(255,255,255,0.55)', size = fs(20) }: { color?: string; size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <SvgPath
+        d="M19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V20a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 18.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
+        stroke={color} strokeWidth={1.6} fill="none" strokeLinecap="round" strokeLinejoin="round"
+      />
+      <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={1.6} fill="none" />
     </Svg>
   )
 }
@@ -244,7 +249,7 @@ function NavBar() {
           </Text>
         </TouchableOpacity>
         <TouchableOpacity onPress={toggleSettings} hitSlop={12}>
-          <Text style={styles.gearIcon}>⚙</Text>
+          <GearIcon />
         </TouchableOpacity>
       </View>
     </View>
@@ -255,41 +260,63 @@ function NavBar() {
 
 function LegendPanel() {
   const { activeSystems, toggleSystem, legendOpen } = useAppStore()
-  const maxH = useRef(new Animated.Value(legendOpen ? sc(320) : 0)).current
+  const { height: winH } = useWindowDimensions()
 
-  const prevOpen = useRef(legendOpen)
-  if (prevOpen.current !== legendOpen) {
-    prevOpen.current = legendOpen
+  // Responsive sizing: shrink the legend so all rows fit between the nav bar and
+  // the bottom of the viewport as the window gets shorter. Never larger than the
+  // desktop scale S, never smaller than 1× (mobile baseline).
+  const ROWS = ALL_SYSTEMS.length
+  // Row ≈ label line-box (fontSize × 1.4) + vertical padding; plus inner pad and
+  // one row of slack so the whole legend (incl. the last "Reproductive" row) is
+  // always allowed to fit between the nav and the viewport bottom.
+  const rowH1x = Math.ceil(12 * 1.4) + 1.5 * 2
+  const naturalH = rowH1x * (ROWS + 1) + 8 * 2
+  const navH = 56 * S
+  const avail = winH - navH - 24
+  const lscale = Math.max(1, Math.min(S, avail / naturalH))
+
+  const labelFs = Math.round(12 * lscale)
+  const dotSz = Math.round(8 * lscale)
+  const rowPadV = Math.round(1.5 * lscale)
+  const innerPadV = Math.round(8 * lscale)
+  const innerPadH = Math.round(12 * lscale)
+  const rowGap = Math.round(8 * lscale)
+  // Open height from the same scaled metrics we render, with a full extra row of
+  // slack so the last row is never clipped by the animated maxHeight.
+  const rowH = Math.ceil(labelFs * 1.4) + rowPadV * 2
+  const contentH = rowH * (ROWS + 1) + innerPadV * 2
+
+  const maxH = useRef(new Animated.Value(legendOpen ? contentH : 0)).current
+  useEffect(() => {
     Animated.timing(maxH, {
-      toValue: legendOpen ? sc(320) : 0,
+      toValue: legendOpen ? contentH : 0,
       duration: 320,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: false,
     }).start()
-  }
+  }, [legendOpen, contentH, maxH])
 
   return (
     <Animated.View style={[styles.legendPanel, { maxHeight: maxH, pointerEvents: legendOpen ? 'auto' : 'none' }]}>
-      <View style={styles.legendInner}>
+      <View style={[styles.legendInner, { paddingVertical: innerPadV, paddingHorizontal: innerPadH }]}>
         {ALL_SYSTEMS.map((id) => {
           const active = activeSystems.includes(id)
           const meta = SYSTEM_META[id]
           return (
             <TouchableOpacity
               key={id}
-              style={styles.legendRow}
+              style={[styles.legendRow, { paddingVertical: rowPadV, gap: rowGap }]}
               onPress={() => toggleSystem(id)}
               activeOpacity={0.7}
             >
               <View style={[
                 styles.legendDot,
-                { backgroundColor: meta.color },
+                { width: dotSz, height: dotSz, borderRadius: dotSz / 2, backgroundColor: meta.color },
                 !active && { opacity: 0.3 },
               ]} />
-              <Text style={[styles.legendLabel, !active && { opacity: 0.4 }]}>
+              <Text style={[styles.legendLabel, { fontSize: labelFs }, !active && { opacity: 0.4 }]}>
                 {meta.label}
               </Text>
-              {active && <View style={[styles.legendGlow, { backgroundColor: meta.color }]} />}
             </TouchableOpacity>
           )
         })}
@@ -404,7 +431,9 @@ function BodySvg({
 // ─── Vertical Time Rail ──────────────────────────────────────────────────────
 
 const RAIL_W_INACTIVE = sc(14)
-const RAIL_W_ACTIVE = sc(36)
+// In the browser the rail stays expanded; keep it at half the previous desktop
+// width (slimmer drag target) while native keeps the larger touch width.
+const RAIL_W_ACTIVE = IS_WEB ? sc(18) : sc(36)
 
 function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const {
@@ -547,7 +576,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
               style={[
                 styles.railDash,
                 {
-                  top: top - 1.5,
+                  top: top - 1,
                   backgroundColor: SYSTEM_META[c.system]?.color ?? '#fff',
                   opacity: isSelected ? 1 : 0.7,
                 },
@@ -562,8 +591,8 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       ))}
       <View style={[styles.railThumb, { top: thumbTop - 4 }]} />
       {timeRailActive && (
-        <View style={[styles.railLabel, { top: Math.max(0, thumbTop - 14) }]}>
-          <Text style={styles.railLabelText}>
+        <View style={[styles.railLabel, { top: Math.max(0, thumbTop - 14), pointerEvents: 'none' }]}>
+          <Text style={styles.railLabelText} numberOfLines={1}>
             {formatDateDisplay(currentYear, timeDisplayMode, birthYear, birthMonth)}
           </Text>
         </View>
@@ -941,6 +970,37 @@ function RecordLightbox() {
 
 // ─── Settings Sheet ───────────────────────────────────────────────────────────
 
+const MONTHS_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+
+// Compact month picker: a single field that expands into a scrollable list,
+// instead of 12 always-visible buttons.
+function MonthDropdown({ value, onChange }: { value: string; onChange: (m: string) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <View style={styles.monthDdWrap}>
+      <TouchableOpacity style={styles.monthDdField} onPress={() => setOpen((o) => !o)} activeOpacity={0.7}>
+        <Text style={styles.monthDdValue}>{value}</Text>
+        <Text style={styles.monthDdChevron}>{open ? '▲' : '▼'}</Text>
+      </TouchableOpacity>
+      {open && (
+        <View style={styles.monthDdList}>
+          <ScrollView style={{ maxHeight: sc(176) }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+            {MONTHS_SHORT.map((mo) => (
+              <TouchableOpacity
+                key={mo}
+                style={[styles.monthDdItem, value === mo && styles.monthDdItemActive]}
+                onPress={() => { onChange(mo); setOpen(false) }}
+              >
+                <Text style={[styles.monthDdItemText, value === mo && styles.monthDdItemTextActive]}>{mo}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  )
+}
+
 function SettingsSheet() {
   const insets = useSafeAreaInsets()
   const {
@@ -948,7 +1008,14 @@ function SettingsSheet() {
     preferredLanguage, setPreferredLanguage,
     birthYear, setBirthYear,
     birthMonth, setBirthMonth,
+    gender, setGender,
   } = useAppStore()
+
+  // Local draft so the year field can be typed freely; only a valid 4-digit year
+  // is committed to the store (and persisted). Re-syncs when birthYear changes
+  // externally, e.g. when settings are hydrated from SQLite.
+  const [yearDraft, setYearDraft] = useState(String(birthYear))
+  useEffect(() => { setYearDraft(String(birthYear)) }, [birthYear])
 
   const anim = useRef(new Animated.Value(0)).current
   const prevOpen = useRef(false)
@@ -963,7 +1030,6 @@ function SettingsSheet() {
   }
 
   const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [sc(500), 0] })
-  const MONTHS_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
 
   return (
     <Animated.View
@@ -1000,24 +1066,37 @@ function SettingsSheet() {
       <View style={styles.dobRow}>
         <TextInput
           style={styles.dobYearInput}
-          value={String(birthYear)}
-          onChangeText={(v) => { const n = parseInt(v); if (n > 1900 && n < 2020) setBirthYear(n) }}
+          value={yearDraft}
+          onChangeText={(v) => {
+            const digits = v.replace(/[^0-9]/g, '').slice(0, 4)
+            setYearDraft(digits)
+            const n = parseInt(digits, 10)
+            if (digits.length === 4 && n > 1900 && n < 2030) setBirthYear(n)
+          }}
           keyboardType="numeric"
           maxLength={4}
+          placeholder="YYYY"
           placeholderTextColor={C.inkMuted}
         />
-        <View style={styles.dobMonthWrap}>
-          {MONTHS_SHORT.map((mo) => (
-            <TouchableOpacity
-              key={mo}
-              style={[styles.monthChip, birthMonth === mo && styles.monthChipActive]}
-              onPress={() => setBirthMonth(mo)}
-            >
-              <Text style={[styles.monthChipText, birthMonth === mo && styles.monthChipTextActive]}>{mo}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        <MonthDropdown value={birthMonth} onChange={setBirthMonth} />
       </View>
+
+      <Text style={styles.settingsSectionLabel}>Gender</Text>
+      <View style={styles.genderRow}>
+        {(['female', 'male'] as Gender[]).map((g) => (
+          <TouchableOpacity
+            key={g}
+            style={[styles.genderOpt, gender === g && styles.genderOptActive]}
+            onPress={() => setGender(g)}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.genderOptText, gender === g && styles.genderOptTextActive]}>
+              {g === 'female' ? 'Female' : 'Male'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+      <Text style={styles.settingsHint}>Inferred from your records — tap to correct.</Text>
     </Animated.View>
   )
 }
@@ -1142,7 +1221,7 @@ const styles = StyleSheet.create({
   logoM: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.9)' },
   logoAI: { fontFamily: 'MOMCAKE-Bold', fontSize: fs(20), color: '#8A60EB', lineHeight: fs(20) },
   logoGenki: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.9)' },
-  navChevron: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.4)', marginLeft: sc(4), transform: [{ rotate: '90deg' }] },
+  navChevron: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.4)', marginLeft: sc(8), width: fs(16), textAlign: 'center', transform: [{ rotate: '90deg' }] },
   navChevronOpen: { transform: [{ rotate: '270deg' }] },
   navRight: { flexDirection: 'row', alignItems: 'center', gap: sc(10) },
   datePill: {
@@ -1150,7 +1229,6 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
   },
   datePillText: { fontFamily: 'SourceCodePro', fontSize: fs(11), color: C.ink },
-  gearIcon: { fontSize: fs(18), color: 'rgba(255,255,255,0.45)' },
 
   canvas: { flex: 1, position: 'relative', overflow: 'hidden' },
 
@@ -1159,20 +1237,19 @@ const styles = StyleSheet.create({
 
   legendPanel: {
     position: 'absolute', top: 0, left: 0,
-    backgroundColor: 'rgba(10,12,20,0.92)', overflow: 'hidden', zIndex: 5, minWidth: sc(140),
+    backgroundColor: 'rgba(10,12,20,0.92)', overflow: 'hidden', zIndex: 5,
   },
   legendInner: { paddingVertical: sc(10), paddingHorizontal: sc(12) },
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8), paddingVertical: sc(5) },
   legendDot: { width: sc(8), height: sc(8), borderRadius: sc(4) },
-  legendGlow: { position: 'absolute', right: 0, width: sc(6), height: sc(6), borderRadius: sc(3), opacity: 0.5 },
-  legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.ink, flex: 1 },
+  legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.ink },
 
   railWrap: {
     position: 'absolute', top: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'visible', zIndex: 3,
   },
   railTrack: { position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
-  railDash: { position: 'absolute', left: sc(3), right: sc(3), height: sc(3), borderRadius: sc(1.5) },
+  railDash: { position: 'absolute', left: sc(3), right: sc(3), height: 2, borderRadius: 1 },
   railThumb: {
     position: 'absolute', left: '50%', marginLeft: sc(-4), width: sc(8), height: sc(8), borderRadius: sc(4),
     backgroundColor: C.aqua,
@@ -1295,16 +1372,42 @@ const styles = StyleSheet.create({
   langEnglish: { fontFamily: 'SourceCodePro', fontSize: fs(9.5), color: C.inkMuted, flex: 1 },
   langCheck: { fontSize: fs(14), color: C.purpleLight },
 
-  dobRow: { gap: sc(10), marginBottom: sc(20) },
+  dobRow: { flexDirection: 'row', gap: sc(10), marginBottom: sc(20), alignItems: 'flex-start', zIndex: 30 },
   dobYearInput: {
     height: sc(40), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8), paddingHorizontal: sc(12),
-    fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink, backgroundColor: C.surfaceHigh, width: sc(80),
+    fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink, backgroundColor: C.surfaceHigh, width: sc(96),
   },
-  dobMonthWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: sc(6) },
-  monthChip: { paddingHorizontal: sc(8), paddingVertical: sc(5), borderRadius: sc(6), borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' },
-  monthChipActive: { backgroundColor: C.purpleLight, borderColor: C.purpleLight },
-  monthChipText: { fontFamily: 'SourceCodePro', fontSize: fs(9), color: C.inkMuted },
-  monthChipTextActive: { color: '#fff' },
+
+  // Month dropdown
+  monthDdWrap: { position: 'relative', zIndex: 30 },
+  monthDdField: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    height: sc(40), minWidth: sc(110), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: sc(8), paddingHorizontal: sc(12), backgroundColor: C.surfaceHigh, gap: sc(8),
+  },
+  monthDdValue: { fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink },
+  monthDdChevron: { fontSize: fs(9), color: C.inkMuted },
+  monthDdList: {
+    position: 'absolute', top: sc(44), left: 0, right: 0,
+    backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: sc(8), overflow: 'hidden', zIndex: 40,
+    ...(IS_WEB ? { boxShadow: `0 ${sc(6)}px ${sc(16)}px rgba(0,0,0,0.5)` } : { elevation: 8 }),
+  },
+  monthDdItem: { paddingVertical: sc(8), paddingHorizontal: sc(12) },
+  monthDdItemActive: { backgroundColor: 'rgba(138,96,235,0.18)' },
+  monthDdItemText: { fontFamily: 'SourceCodePro', fontSize: fs(13), color: C.ink },
+  monthDdItemTextActive: { color: C.purpleLight },
+
+  // Gender
+  genderRow: { flexDirection: 'row', gap: sc(10), marginBottom: sc(8) },
+  genderOpt: {
+    paddingHorizontal: sc(20), paddingVertical: sc(9), borderRadius: sc(8),
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: C.surfaceHigh,
+  },
+  genderOptActive: { backgroundColor: C.purpleLight, borderColor: C.purpleLight },
+  genderOptText: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(14), color: C.inkMuted },
+  genderOptTextActive: { color: '#fff' },
+  settingsHint: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.inkMuted, marginBottom: sc(12) },
 
   // Upload shortcuts
   uploadWrap: { position: 'absolute', bottom: sc(20), left: sc(16), alignItems: 'flex-start', zIndex: 4 },

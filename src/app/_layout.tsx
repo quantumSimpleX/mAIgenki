@@ -4,6 +4,7 @@ import { useFonts } from 'expo-font'
 import { StatusBar } from 'expo-status-bar'
 import { View } from 'react-native'
 import { DatabaseProvider } from '@/lib/db/provider'
+import { SettingsHydrator } from '@/hooks/useSettingsPersistence'
 
 export default function RootLayout() {
   const [fontsLoaded] = useFonts({
@@ -22,6 +23,7 @@ export default function RootLayout() {
 
   return (
     <DatabaseProvider>
+      <SettingsHydrator />
       <StatusBar style="light" />
       <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
         <Stack.Screen name="index" />

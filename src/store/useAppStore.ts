@@ -6,6 +6,7 @@ import {
 
 type Screen = 'upload' | 'analyzing' | 'bodymap'
 type TimeDisplayMode = 'date' | 'age'
+export type Gender = 'male' | 'female'
 
 type AppState = {
   screen: Screen
@@ -24,6 +25,7 @@ type AppState = {
   uploadPanelOpen: boolean
   birthYear: number
   birthMonth: string
+  gender: Gender
   preferredLanguage: SupportedLang
   chatOpen: boolean
   chatMessages: ChatMessage[]
@@ -56,6 +58,7 @@ type AppActions = {
   setUploadPanelOpen: (open: boolean) => void
   setBirthYear: (year: number) => void
   setBirthMonth: (month: string) => void
+  setGender: (gender: Gender) => void
   setPreferredLanguage: (lang: SupportedLang) => void
   setChatOpen: (open: boolean) => void
   addChatMessage: (msg: ChatMessage) => void
@@ -92,6 +95,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   uploadPanelOpen: true,
   birthYear: 1985,
   birthMonth: 'JAN',
+  gender: 'female',
   preferredLanguage: 'ja',
   chatOpen: false,
   chatMessages: [],
@@ -156,6 +160,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   setUploadPanelOpen: (uploadPanelOpen) => set({ uploadPanelOpen }),
   setBirthYear: (birthYear) => set({ birthYear }),
   setBirthMonth: (birthMonth) => set({ birthMonth }),
+  setGender: (gender) => set({ gender }),
   setPreferredLanguage: (preferredLanguage) => set({ preferredLanguage }),
   setChatOpen: (chatOpen) => set({ chatOpen }),
   addChatMessage: (msg) => set((s) => ({ chatMessages: [...s.chatMessages, msg] })),
