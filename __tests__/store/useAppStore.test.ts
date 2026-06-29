@@ -29,10 +29,10 @@ describe('actions', () => {
   })
 
   it('toggleSystem removes then re-adds', () => {
-    get().toggleSystem('cardio')
-    expect(get().activeSystems).not.toContain('cardio')
-    get().toggleSystem('cardio')
-    expect(get().activeSystems).toContain('cardio')
+    get().toggleSystem('cardiovascular')
+    expect(get().activeSystems).not.toContain('cardiovascular')
+    get().toggleSystem('cardiovascular')
+    expect(get().activeSystems).toContain('cardiovascular')
   })
 
   it('selectCondition opens the sheet with year/rail/cleared state', () => {
@@ -155,8 +155,8 @@ describe('simple setters', () => {
     expect(get().analyzePhase).toBe(2)
   })
   it('setActiveSystems replaces array', () => {
-    get().setActiveSystems(['cardio', 'neuro'])
-    expect(get().activeSystems).toEqual(['cardio', 'neuro'])
+    get().setActiveSystems(['cardiovascular', 'nervous'])
+    expect(get().activeSystems).toEqual(['cardiovascular', 'nervous'])
   })
   it('setCurrentYear updates year', () => {
     get().setCurrentYear(2020.5)

@@ -39,7 +39,7 @@ PDF upload
 
 The UI is three screens deep: upload → anatomy viewer → condition drill-down → condition chat.
 
-**BodyCanvas** (`src/components/anatomy/BodyCanvas.tsx`) is the visual core: it stacks 10 absolute-positioned `Image` components (pre-rendered PNG layers, one per organ system) with transparency. During development, placeholder `View` components stand in until Blender-rendered PNGs are ready in `assets/anatomy/`.
+**Body canvas** (in `src/app/bodymap.tsx`: `BodyLayers` + `BodySvg`) is the visual core: it stacks 11 absolute-positioned `Image` components (transparent PNG layers, one per organ system) toggled by `activeSystems`, with the condition hotspot dots drawn on top in SVG. The current layers are interim 2D art (`assets/maigenki-systems-2colorized/`), pending Blender-rendered PNGs.
 
 **OpenRouter** is the only network call. The `openai` npm package is used with `baseURL: 'https://openrouter.ai/api/v1'`. No API key is required for free-tier models; the user's key (if set) is read from the Zustand settings store and stored in SQLite.
 
@@ -47,8 +47,10 @@ The UI is three screens deep: upload → anatomy viewer → condition drill-down
 
 ```typescript
 // src/model/health.ts
-type OrgSystem = 'cardiovascular' | 'respiratory' | 'digestive' | 'musculoskeletal'
-  | 'nervous' | 'endocrine' | 'urinary' | 'reproductive' | 'immune' | 'integumentary'
+// 11 systems, ordered to match the legend (top → bottom) and the NN- asset prefix.
+type OrgSystem = 'integumentary' | 'muscular' | 'skeletal' | 'cardiovascular'
+  | 'lymphatic' | 'nervous' | 'respiratory' | 'digestive' | 'renal'
+  | 'endocrine' | 'reproductive'
 
 type ConditionStatus = 'documented' | 'resolved' | 'inferred'
 
@@ -62,8 +64,7 @@ type Condition = {
 
 ## Anatomy Asset Naming
 
-PNG files in `assets/anatomy/` follow: `{system}_{male|female}.png`
-All 20 files (10 systems × 2 body types) must share **identical canvas dimensions** (1080×1920px) so they align when stacked. Body type is inferred from records; user is prompted only if indeterminate.
+PNG files follow `NN-{system}.png`, where `NN` is the legend order (`00`–`10`) and `{system}` is the full `OrgSystem` name. A `-m`/`-f` suffix is added only for gender-specific layers (currently just `10-reproductive-m.png`; no `-f` yet). Layers live in three sibling folders by processing stage: `maigenki-systems-0ORIG` (raw), `-1noBG` (background removed), `-2colorized` (display layers used in the build). All files in a folder share **identical canvas dimensions** (1018×2436px) so they align when stacked. Body type is inferred from records; user is prompted only if indeterminate.
 
 ## Code Style
 

@@ -28,7 +28,7 @@ describe('applyInferenceRules', () => {
 
   it('does not duplicate already-documented hypertension', () => {
     const existing: ConditionInput[] = [{
-      name_medical: 'Essential hypertension', name_common: 'High blood pressure', system: 'cardio',
+      name_medical: 'Essential hypertension', name_common: 'High blood pressure', system: 'cardiovascular',
       organ: 'heart', anatomical_location: null, status: 'documented', severity: null,
       certainty: 'confirmed', date_onset: null, date_diagnosed: null, evidence: null,
     }]

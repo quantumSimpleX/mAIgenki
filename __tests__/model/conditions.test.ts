@@ -27,7 +27,7 @@ describe('CONDITIONS data', () => {
     for (const c of CONDITIONS) expect(ALL_SYSTEMS).toContain(c.system)
   })
   it('cardio label is Cardiovascular (not Circulatory)', () => {
-    expect(SYSTEM_META.cardio.label).toBe('Cardiovascular')
+    expect(SYSTEM_META.cardiovascular.label).toBe('Cardiovascular')
   })
   it('has 11 systems', () => {
     expect(ALL_SYSTEMS.length).toBe(11)

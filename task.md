@@ -10,7 +10,7 @@ Complete tasks in order. Mark each `[x]` when done.
 ## Phase 0 — Foundation
 
 ### Task 0.1 — Fix `src/model/conditions.ts`
-- [x] Fix `SYSTEM_META.cardio.label`: `'Circulatory'` → `'Cardiovascular'`
+- [x] Fix `SYSTEM_META.cardiovascular.label`: `'Circulatory'` → `'Cardiovascular'`
 - [x] Keep `SupportedLang` as `'en' | 'zh-TW' | 'ja' | 'es'` (4 langs this iteration)
 - [x] Update all 22 `evidence` strings to `'Dr. FirstName LastName · Institution · City, ST, US'` format:
   - eczema: `'Dr. Sarah Kim · Bay Area Skin & Allergy Institute · Oakland, CA, US'`

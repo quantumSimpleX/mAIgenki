@@ -29,22 +29,22 @@ export type ConditionRecord = {
 }
 
 export const ALL_SYSTEMS: SystemId[] = [
-  'integ', 'muscle', 'skeletal', 'cardio', 'lymph',
-  'neuro', 'pulm', 'gi', 'renal', 'endo', 'repro',
+  'integumentary', 'muscular', 'skeletal', 'cardiovascular', 'lymphatic',
+  'nervous', 'respiratory', 'digestive', 'renal', 'endocrine', 'reproductive',
 ]
 
 export const SYSTEM_META: Record<SystemId, { label: string; color: string }> = {
-  integ:   { label: 'Integumentary',  color: '#4F46E5' },
-  muscle:  { label: 'Muscular',       color: '#F472B6' },
+  integumentary:   { label: 'Integumentary',  color: '#4F46E5' },
+  muscular:  { label: 'Muscular',       color: '#F472B6' },
   skeletal:{ label: 'Skeletal',       color: '#94A3B8' },
-  cardio:  { label: 'Cardiovascular', color: '#EF4444' },
-  lymph:   { label: 'Lymphatic',      color: '#22C55E' },
-  neuro:   { label: 'Nervous',        color: '#EAB308' },
-  pulm:    { label: 'Respiratory',    color: '#06B6D4' },
-  gi:      { label: 'Digestive',      color: '#F97316' },
+  cardiovascular:  { label: 'Cardiovascular', color: '#EF4444' },
+  lymphatic:   { label: 'Lymphatic',      color: '#22C55E' },
+  nervous:   { label: 'Nervous',        color: '#EAB308' },
+  respiratory:    { label: 'Respiratory',    color: '#06B6D4' },
+  digestive:      { label: 'Digestive',      color: '#F97316' },
   renal:   { label: 'Renal',          color: '#84CC16' },
-  endo:    { label: 'Endocrine',      color: '#D946EF' },
-  repro:   { label: 'Reproductive',   color: '#C0526A' },
+  endocrine:    { label: 'Endocrine',      color: '#D946EF' },
+  reproductive:   { label: 'Reproductive',   color: '#C0526A' },
 }
 
 const MONTH_IDX: Record<string, number> = {
@@ -64,7 +64,7 @@ export function getLocalName(c: DesignCondition, lang: SupportedLang): string {
 
 export const CONDITIONS: DesignCondition[] = [
   {
-    id: 'eczema', system: 'integ',
+    id: 'eczema', system: 'integumentary',
     label: 'Atopic dermatitis',
     medName: 'Atopic dermatitis with eosinophilia',
     localNames: { ja: 'アトピー性皮膚炎', es: 'Dermatitis atópica', 'zh-TW': '特應性皮膚炎' },
@@ -73,7 +73,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Sarah Kim · Bay Area Skin & Allergy Institute · Oakland, CA, US',
   },
   {
-    id: 'psoriasis', system: 'integ',
+    id: 'psoriasis', system: 'integumentary',
     label: 'Plaque psoriasis',
     medName: 'Psoriasis vulgaris',
     localNames: { ja: '尋常性乾癬', es: 'Psoriasis en placas', 'zh-TW': '銀屑病' },
@@ -82,7 +82,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Meera Patel · St. Claire Medical Center · Boston, MA, US',
   },
   {
-    id: 'fibro', system: 'muscle',
+    id: 'fibro', system: 'muscular',
     label: 'Fibromyalgia',
     medName: 'Fibromyalgia syndrome (FMS)',
     localNames: { ja: '線維筋痛症', es: 'Fibromialgia', 'zh-TW': '纖維肌痛症' },
@@ -91,7 +91,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Luis Torres · Northwestern Memorial Hospital · Chicago, IL, US',
   },
   {
-    id: 'rotator', system: 'muscle',
+    id: 'rotator', system: 'muscular',
     label: 'Rotator cuff tear',
     medName: 'Partial-thickness supraspinatus tear',
     localNames: { ja: '腱板断裂', es: 'Desgarro del manguito rotador', 'zh-TW': '旋轉肌袖撕裂' },
@@ -118,7 +118,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Christine Lee · Oregon Health & Science University · Portland, OR, US',
   },
   {
-    id: 'htn', system: 'cardio',
+    id: 'htn', system: 'cardiovascular',
     label: 'Hypertension',
     medName: 'Essential hypertension, stage 1',
     localNames: { ja: '高血圧症', es: 'Hipertensión arterial', 'zh-TW': '高血壓' },
@@ -127,7 +127,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Anuj Sharma · Cleveland Clinic · Cleveland, OH, US',
   },
   {
-    id: 'afib', system: 'cardio',
+    id: 'afib', system: 'cardiovascular',
     label: 'Atrial fibrillation',
     medName: 'Paroxysmal atrial fibrillation',
     localNames: { ja: '心房細動', es: 'Fibrilación auricular', 'zh-TW': '心房顫動' },
@@ -136,7 +136,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: "Dr. Patrick Walsh · St. Mary's Medical Center · New York, NY, US",
   },
   {
-    id: 'lymph1', system: 'lymph',
+    id: 'lymph1', system: 'lymphatic',
     label: 'Reactive lymphadenopathy',
     medName: 'Reactive cervical lymphadenopathy',
     localNames: { ja: '反応性リンパ節腫脹', es: 'Linfadenopatía reactiva', 'zh-TW': '反應性淋巴結病' },
@@ -145,7 +145,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Emily Brennan · Penn Medicine · Philadelphia, PA, US',
   },
   {
-    id: 'mono', system: 'lymph',
+    id: 'mono', system: 'lymphatic',
     label: 'Infectious mononucleosis',
     medName: 'EBV-associated infectious mononucleosis',
     localNames: { ja: '伝染性単核球症', es: 'Mononucleosis infecciosa', 'zh-TW': '傳染性單核細胞增多症' },
@@ -154,7 +154,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Thomas Park · University of Michigan Health · Ann Arbor, MI, US',
   },
   {
-    id: 'migraine', system: 'neuro',
+    id: 'migraine', system: 'nervous',
     label: 'Migraine disorder',
     medName: 'Migraine with visual aura (ICHD-3)',
     localNames: { ja: '片頭痛', es: 'Migraña con aura', 'zh-TW': '偏頭痛' },
@@ -163,7 +163,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Nina Rodriguez · Cedars-Sinai Medical Center · Los Angeles, CA, US',
   },
   {
-    id: 'carpal', system: 'neuro',
+    id: 'carpal', system: 'nervous',
     label: 'Carpal tunnel syndrome',
     medName: 'Median nerve entrapment at the carpal tunnel',
     localNames: { ja: '手根管症候群', es: 'Síndrome del túnel carpiano', 'zh-TW': '腕管綜合症' },
@@ -172,7 +172,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Fumiko Yamamoto · El Camino Health · San Jose, CA, US',
   },
   {
-    id: 'asthma', system: 'pulm',
+    id: 'asthma', system: 'respiratory',
     label: 'Asthma',
     medName: 'Mild persistent asthma (GINA step 2)',
     localNames: { ja: '気管支喘息', es: 'Asma bronquial', 'zh-TW': '支氣管哮喘' },
@@ -181,7 +181,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Brian Chen · UCHealth Medical Center · Denver, CO, US',
   },
   {
-    id: 'covid', system: 'pulm',
+    id: 'covid', system: 'respiratory',
     label: 'COVID-19',
     medName: 'SARS-CoV-2 infection, moderate severity',
     localNames: { ja: '新型コロナウイルス感染症', es: 'COVID-19', 'zh-TW': '新冠肺炎' },
@@ -190,7 +190,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: "Dr. Marcus Johnson · St. David's Medical Center · Austin, TX, US",
   },
   {
-    id: 'gerd', system: 'gi',
+    id: 'gerd', system: 'digestive',
     label: 'GERD',
     medName: 'Gastroesophageal reflux disease, erosive (LA grade B)',
     localNames: { ja: '胃食道逆流症', es: 'Enfermedad por reflujo gastroesofágico', 'zh-TW': '胃食管反流病' },
@@ -199,7 +199,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Harpreet Singh · Emory University Hospital · Atlanta, GA, US',
   },
   {
-    id: 'ibs', system: 'gi',
+    id: 'ibs', system: 'digestive',
     label: 'Irritable bowel syndrome',
     medName: 'Irritable bowel syndrome — mixed type (IBS-M)',
     localNames: { ja: '過敏性腸症候群', es: 'Síndrome del intestino irritable', 'zh-TW': '腸易激綜合症' },
@@ -226,7 +226,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Divya Patel · Valleywise Health Medical Center · Phoenix, AZ, US',
   },
   {
-    id: 'thyroid', system: 'endo',
+    id: 'thyroid', system: 'endocrine',
     label: 'Hypothyroidism',
     medName: 'Primary hypothyroidism',
     localNames: { ja: '甲状腺機能低下症', es: 'Hipotiroidismo', 'zh-TW': '甲狀腺功能減退症' },
@@ -235,7 +235,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Yuna Kim · Mayo Clinic Health System · Minneapolis, MN, US',
   },
   {
-    id: 'vitd', system: 'endo',
+    id: 'vitd', system: 'endocrine',
     label: 'Vitamin D deficiency',
     medName: '25-OH Vitamin D deficiency (< 30 nmol/L)',
     localNames: { ja: 'ビタミンD欠乏症', es: 'Deficiencia de vitamina D', 'zh-TW': '維生素D缺乏症' },
@@ -244,7 +244,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Brian Chen · UCHealth Medical Center · Denver, CO, US',
   },
   {
-    id: 'fibroid', system: 'repro',
+    id: 'fibroid', system: 'reproductive',
     label: 'Uterine fibroids',
     medName: 'Uterine leiomyomata, multiple intramural',
     localNames: { ja: '子宮筋腫', es: 'Fibromas uterinos', 'zh-TW': '子宮肌瘤' },
@@ -253,7 +253,7 @@ export const CONDITIONS: DesignCondition[] = [
     evidence: 'Dr. Adaeze Obi · George Washington University Hospital · Washington, DC, US',
   },
   {
-    id: 'pcos', system: 'repro',
+    id: 'pcos', system: 'reproductive',
     label: 'Polycystic ovary syndrome',
     medName: 'Polycystic ovary syndrome (Rotterdam criteria)',
     localNames: { ja: '多嚢胞性卵巣症候群', es: 'Síndrome de ovario poliquístico', 'zh-TW': '多囊卵巢綜合症' },

@@ -1,8 +1,8 @@
 import { SYSTEM_COLORS, type OrgSystem, type Condition } from '@/model/health'
 
 const ALL_SYSTEMS: OrgSystem[] = [
-  'integ', 'muscle', 'skeletal', 'cardio', 'lymph',
-  'neuro', 'pulm', 'gi', 'renal', 'endo', 'repro',
+  'integumentary', 'muscular', 'skeletal', 'cardiovascular', 'lymphatic',
+  'nervous', 'respiratory', 'digestive', 'renal', 'endocrine', 'reproductive',
 ]
 
 describe('health model', () => {
@@ -21,7 +21,7 @@ describe('health model', () => {
       id: '1',
       name: 'Hypertension',
       organ: 'heart',
-      system: 'cardio',
+      system: 'cardiovascular',
       date: '2022-03-15',
       status: 'documented',
       evidence: 'BP 145/92 recorded on 2022-03-15',

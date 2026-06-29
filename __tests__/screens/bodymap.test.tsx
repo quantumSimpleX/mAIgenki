@@ -45,8 +45,8 @@ describe('BodyMapScreen module', () => {
 
 describe('System meta — Cardiovascular label', () => {
   it('cardio system label is Cardiovascular (not Circulatory)', () => {
-    expect(SYSTEM_META.cardio.label).toBe('Cardiovascular')
-    expect(SYSTEM_META.cardio.label).not.toBe('Circulatory')
+    expect(SYSTEM_META.cardiovascular.label).toBe('Cardiovascular')
+    expect(SYSTEM_META.cardiovascular.label).not.toBe('Circulatory')
   })
 })
 

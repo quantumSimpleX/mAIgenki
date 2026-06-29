@@ -121,7 +121,7 @@ It does not block Phases 0–2, but must be completed before Phase 3 polish.
 
 - [ ] **Task 3.1** — Replace placeholder SVG ellipses with accurate organ paths
   - Each of the 11 systems gets traced SVG `<Path>` elements in the 260×460 coordinate space
-  - Male + female variants (repro system differs)
+  - Male + female variants (reproductive system differs)
   - Body type inferred from conditions; user prompted only if indeterminate
   - Files: `src/components/anatomy/BodyCanvas.tsx`, organ path constants
 
@@ -147,7 +147,7 @@ It does not block Phases 0–2, but must be completed before Phase 3 polish.
 
 - [ ] **C.1** — Trace or render male anterior body silhouette (integumentary layer)
 - [ ] **C.2** — Trace or render male organ paths for 10 internal systems
-- [ ] **C.3** — Female variant: repro system + any silhouette differences
+- [ ] **C.3** — Female variant: reproductive system + any silhouette differences
 - [ ] **C.4** — Verify all paths share identical 260×460 coordinate space
 - [ ] **C.5** — Export to `src/components/anatomy/paths/` (SVG path strings) or `assets/anatomy/` (PNGs)
 

@@ -10,7 +10,23 @@ export async function isDemoDataPresent(db: SQLiteDatabase): Promise<boolean> {
   return val === '1'
 }
 
+// Maps the short organ-system codes used before the rename to the full names
+// that now match the anatomy layer filenames. Runs on every startup so DBs
+// seeded with the old codes migrate in place; idempotent once migrated.
+const SYSTEM_CODE_RENAME: Record<string, string> = {
+  integ: 'integumentary', muscle: 'muscular', cardio: 'cardiovascular',
+  lymph: 'lymphatic', neuro: 'nervous', pulm: 'respiratory',
+  gi: 'digestive', endo: 'endocrine', repro: 'reproductive',
+}
+
+async function migrateSystemCodes(db: SQLiteDatabase): Promise<void> {
+  for (const [oldCode, newCode] of Object.entries(SYSTEM_CODE_RENAME)) {
+    await db.runAsync('UPDATE conditions SET system = ? WHERE system = ?', [newCode, oldCode])
+  }
+}
+
 export async function seedDemoData(db: SQLiteDatabase): Promise<void> {
+  await migrateSystemCodes(db)
   if (await isDemoDataPresent(db)) return
 
   await db.runAsync(

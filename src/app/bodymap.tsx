@@ -10,6 +10,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, {
   Circle, Ellipse, G, Line, Path as SvgPath, Rect,
 } from 'react-native-svg'
+import { Image } from 'expo-image'
 import { QSWordmark } from '@/components/QSWordmark'
 import { useAppStore, Gender } from '@/store/useAppStore'
 import { useConditions, useConditionRecords } from '@/hooks/useConditions'
@@ -327,6 +328,42 @@ function LegendPanel() {
 
 // ─── Body SVG ─────────────────────────────────────────────────────────────────
 
+// Colorized 2D anatomy layers, keyed by system. Filenames are NN-{system}.png
+// where NN is the legend order. Metro needs static require() paths, so this is
+// an explicit map. Reproductive currently ships male-only (no -f layer yet).
+const COLORIZED_LAYERS: Record<SystemId, ComponentProps<typeof Image>['source']> = {
+  integumentary: require('../../assets/maigenki-systems-2colorized/00-integumentary.png'),
+  muscular: require('../../assets/maigenki-systems-2colorized/01-muscular.png'),
+  skeletal: require('../../assets/maigenki-systems-2colorized/02-skeletal.png'),
+  cardiovascular: require('../../assets/maigenki-systems-2colorized/03-cardiovascular.png'),
+  lymphatic: require('../../assets/maigenki-systems-2colorized/04-lymphatic.png'),
+  nervous: require('../../assets/maigenki-systems-2colorized/05-nervous.png'),
+  respiratory: require('../../assets/maigenki-systems-2colorized/06-respiratory.png'),
+  digestive: require('../../assets/maigenki-systems-2colorized/07-digestive.png'),
+  renal: require('../../assets/maigenki-systems-2colorized/08-renal.png'),
+  endocrine: require('../../assets/maigenki-systems-2colorized/09-endocrine.png'),
+  reproductive: require('../../assets/maigenki-systems-2colorized/10-reproductive-m.png'),
+}
+
+// Stacks the colorized PNG layers for the active systems, in legend order
+// (integumentary at the back → reproductive on top). Each layer is a transparent
+// full-body PNG so they composite naturally.
+function BodyLayers({ activeSystems }: { activeSystems: SystemId[] }) {
+  return (
+    <>
+      {ALL_SYSTEMS.filter((id) => activeSystems.includes(id)).map((id) => (
+        <Image
+          key={id}
+          source={COLORIZED_LAYERS[id]}
+          style={StyleSheet.absoluteFill}
+          contentFit="contain"
+          pointerEvents="none"
+        />
+      ))}
+    </>
+  )
+}
+
 function BodySvg({
   activeSystems, conditions, onConditionPress, currentYear,
   condDateOverrides, selectedCondition,
@@ -346,61 +383,7 @@ function BodySvg({
   })
 
   return (
-    <Svg width="100%" height="100%" viewBox="0 0 260 460" style={styles.bodySvg}>
-      <Ellipse cx={130} cy={46} rx={34} ry={38} stroke="rgba(255,255,255,0.18)" strokeWidth={1.5} fill="rgba(255,255,255,0.03)" />
-      <SvgPath d="M114 82 L114 102 M146 82 L146 102" stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} />
-      <SvgPath
-        d="M82 102 Q62 118 59 168 L54 288 Q54 312 82 318 L82 392 Q82 410 100 410 L160 410 Q178 410 178 392 L178 318 Q206 312 206 288 L201 168 Q198 118 178 102 Z"
-        stroke="rgba(255,255,255,0.14)" strokeWidth={1.5} fill="rgba(255,255,255,0.03)"
-      />
-      <SvgPath d="M82 108 Q52 130 42 208 Q38 228 46 242 Q52 252 64 246 Q72 236 74 214 L78 152" stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} fill="transparent" />
-      <SvgPath d="M178 108 Q208 130 218 208 Q222 228 214 242 Q208 252 196 246 Q188 236 186 214 L182 152" stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} fill="transparent" />
-      <SvgPath d="M100 410 L92 498 Q90 520 104 520 Q118 520 120 498 L122 420" stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} fill="transparent" />
-      <SvgPath d="M160 410 L168 498 Q170 520 156 520 Q142 520 140 498 L138 420" stroke="rgba(255,255,255,0.12)" strokeWidth={1.5} fill="transparent" />
-
-      {activeSystems.includes('cardio') && (
-        <Ellipse cx={130} cy={178} rx={18} ry={20} fill={SYSTEM_META.cardio.color} opacity={0.18} />
-      )}
-      {activeSystems.includes('pulm') && (
-        <G>
-          <Ellipse cx={112} cy={172} rx={13} ry={18} fill={SYSTEM_META.pulm.color} opacity={0.15} />
-          <Ellipse cx={148} cy={172} rx={13} ry={18} fill={SYSTEM_META.pulm.color} opacity={0.15} />
-        </G>
-      )}
-      {activeSystems.includes('gi') && (
-        <Ellipse cx={130} cy={242} rx={22} ry={30} fill={SYSTEM_META.gi.color} opacity={0.15} />
-      )}
-      {activeSystems.includes('renal') && (
-        <G>
-          <Ellipse cx={110} cy={218} rx={9} ry={13} fill={SYSTEM_META.renal.color} opacity={0.2} />
-          <Ellipse cx={150} cy={218} rx={9} ry={13} fill={SYSTEM_META.renal.color} opacity={0.2} />
-        </G>
-      )}
-      {activeSystems.includes('endo') && (
-        <Ellipse cx={130} cy={132} rx={10} ry={7} fill={SYSTEM_META.endo.color} opacity={0.25} />
-      )}
-      {activeSystems.includes('neuro') && (
-        <Ellipse cx={130} cy={46} rx={28} ry={32} fill={SYSTEM_META.neuro.color} opacity={0.12} />
-      )}
-      {activeSystems.includes('repro') && (
-        <Ellipse cx={130} cy={308} rx={18} ry={14} fill={SYSTEM_META.repro.color} opacity={0.2} />
-      )}
-      {activeSystems.includes('muscle') && (
-        <Ellipse cx={130} cy={220} rx={26} ry={60} fill={SYSTEM_META.muscle.color} opacity={0.06} />
-      )}
-      {activeSystems.includes('skeletal') && (
-        <SvgPath d="M120 102 L120 392 M140 102 L140 392" stroke={SYSTEM_META.skeletal.color} strokeWidth={1} opacity={0.15} />
-      )}
-      {activeSystems.includes('lymph') && (
-        <G>
-          <Ellipse cx={130} cy={148} rx={7} ry={7} fill={SYSTEM_META.lymph.color} opacity={0.25} />
-          <Ellipse cx={130} cy={272} rx={7} ry={7} fill={SYSTEM_META.lymph.color} opacity={0.25} />
-        </G>
-      )}
-      {activeSystems.includes('integ') && (
-        <Ellipse cx={130} cy={240} rx={58} ry={140} fill={SYSTEM_META.integ.color} opacity={0.04} />
-      )}
-
+    <Svg width="100%" height="100%" viewBox="0 0 260 460" style={styles.bodySvg} pointerEvents="box-none">
       {/* Condition hotspot dots. On web pass a raw onClick (flows through to the
           DOM <g>) instead of onPress — onPress makes react-native-svg attach its
           touchable responder handlers, which leak to the DOM as "Unknown event
@@ -1231,14 +1214,17 @@ export default function BodyMapScreen() {
 
         <View style={styles.canvas}>
           <View style={styles.bodyWrap}>
-            <BodySvg
-              activeSystems={activeSystems}
-              conditions={conditions}
-              onConditionPress={handleConditionPress}
-              currentYear={currentYear}
-              condDateOverrides={condDateOverrides}
-              selectedCondition={selectedCondition}
-            />
+            <View style={styles.bodyAspect}>
+              <BodyLayers activeSystems={activeSystems} />
+              <BodySvg
+                activeSystems={activeSystems}
+                conditions={conditions}
+                onConditionPress={handleConditionPress}
+                currentYear={currentYear}
+                condDateOverrides={condDateOverrides}
+                selectedCondition={selectedCondition}
+              />
+            </View>
           </View>
 
           <LegendPanel />
@@ -1291,6 +1277,7 @@ const styles = StyleSheet.create({
   canvas: { flex: 1, position: 'relative', overflow: 'hidden' },
 
   bodyWrap: { position: 'absolute', top: '2.5%', left: 0, right: RAIL_W_INACTIVE, bottom: 0 },
+  bodyAspect: { height: '100%', aspectRatio: 260 / 460, alignSelf: 'center', position: 'relative' },
   bodySvg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 
   legendPanel: {

@@ -102,19 +102,19 @@ These are the canonical system IDs, display names, and colors. They are the sour
 
 | ID | Display Name | Color | Key anatomy |
 |---|---|---|---|
-| `integ` | Integumentary | `#4F46E5` (indigo) | Skin layer outline (ghost silhouette; toggleable like all other systems) |
-| `muscle` | Muscular | `#F472B6` (pink) | Major muscle groups |
+| `integumentary` | Integumentary | `#4F46E5` (indigo) | Skin layer outline (ghost silhouette; toggleable like all other systems) |
+| `muscular` | Muscular | `#F472B6` (pink) | Major muscle groups |
 | `skeletal` | Skeletal | `#94A3B8` (slate) | Spine, major bones, joints |
-| `cardio` | Circulatory | `#EF4444` (red) | Heart, major vessels |
-| `lymph` | Lymphatic | `#22C55E` (green) | Lymph nodes, spleen |
-| `neuro` | Nervous | `#EAB308` (yellow) | Brain, spinal cord, nerves |
-| `pulm` | Respiratory | `#06B6D4` (cyan) | Lungs, trachea |
-| `gi` | Digestive | `#F97316` (orange) | Stomach, intestines, liver |
+| `cardiovascular` | Circulatory | `#EF4444` (red) | Heart, major vessels |
+| `lymphatic` | Lymphatic | `#22C55E` (green) | Lymph nodes, spleen |
+| `nervous` | Nervous | `#EAB308` (yellow) | Brain, spinal cord, nerves |
+| `respiratory` | Respiratory | `#06B6D4` (cyan) | Lungs, trachea |
+| `digestive` | Digestive | `#F97316` (orange) | Stomach, intestines, liver |
 | `renal` | Renal | `#84CC16` (lime) | Kidneys, bladder |
-| `endo` | Endocrine | `#D946EF` (fuchsia) | Thyroid, pancreas, adrenals |
-| `repro` | Reproductive | `#C0526A` (rose) | Sex-specific organs |
+| `endocrine` | Endocrine | `#D946EF` (fuchsia) | Thyroid, pancreas, adrenals |
+| `reproductive` | Reproductive | `#C0526A` (rose) | Sex-specific organs |
 
-Colors were chosen to minimize visual conflict when layers overlap on the dark background. The repro color was changed from `#7F1D1D` to `#C0526A` in design session 04 for visibility.
+Colors were chosen to minimize visual conflict when layers overlap on the dark background. The reproductive color was changed from `#7F1D1D` to `#C0526A` in design session 04 for visibility.
 
 ---
 
@@ -124,8 +124,8 @@ Colors were chosen to minimize visual conflict when layers overlap on the dark b
 // src/model/health.ts
 
 export type OrgSystem =
-  | 'integ' | 'muscle' | 'skeletal' | 'cardio' | 'lymph'
-  | 'neuro' | 'pulm' | 'gi' | 'renal' | 'endo' | 'repro'
+  | 'integumentary' | 'muscular' | 'skeletal' | 'cardiovascular' | 'lymphatic'
+  | 'nervous' | 'respiratory' | 'digestive' | 'renal' | 'endocrine' | 'reproductive'
 
 export type ConditionStatus = 'documented' | 'resolved' | 'inferred'
 

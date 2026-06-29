@@ -19,7 +19,7 @@ Pure unit tests for data layer.
 | 3 | parseDateFrac late year | `parseDateFrac('2023-DEC-31')` > 2023.9 |
 | 4 | CONDITIONS count | `CONDITIONS.length === 22` |
 | 5 | All systemIds valid | Every `c.system` is in `ALL_SYSTEMS` |
-| 6 | cardio label | `SYSTEM_META.cardio.label === 'Cardiovascular'` (NOT 'Circulatory') |
+| 6 | cardiovascular label | `SYSTEM_META.cardiovascular.label === 'Cardiovascular'` (NOT 'Circulatory') |
 | 7 | ALL_SYSTEMS count | `ALL_SYSTEMS.length === 11` |
 | 8 | getLocalName ja | `getLocalName(htn, 'ja') === '高血圧症'` |
 | 9 | getLocalName es | `getLocalName(htn, 'es') === 'Hipertensión arterial'` |
@@ -29,7 +29,7 @@ Pure unit tests for data layer.
 | 13 | CONDITION_RECORDS keys | All 22 condition IDs have a CONDITION_RECORDS entry |
 | 14 | CONDITION_RECORDS types | Every record type is one of TREND/ECG/IMAGING/LABS/SPIRO/SCAN |
 | 15 | htn has 3 records | `CONDITION_RECORDS.htn.length === 3` |
-| 16 | Record color matches system | htn records have `color: '#EF4444'` (cardio color) |
+| 16 | Record color matches system | htn records have `color: '#EF4444'` (cardiovascular color) |
 
 ---
 
@@ -44,8 +44,8 @@ State management unit tests using `create` from zustand with the actual store.
 | 3 | Initial sheetOpen | `false` |
 | 4 | Initial legendOpen | `true` |
 | 5 | startAnalyze | `screen === 'analyzing'`, `analyzeProgress === 0`, `analyzePhase === 0` |
-| 6 | toggleSystem removes | After toggle('cardio'), activeSystems excludes 'cardio' |
-| 7 | toggleSystem adds back | After two toggles, activeSystems has 'cardio' again |
+| 6 | toggleSystem removes | After toggle('cardiovascular'), activeSystems excludes 'cardiovascular' |
+| 7 | toggleSystem adds back | After two toggles, activeSystems has 'cardiovascular' again |
 | 8 | selectCondition opens sheet | `sheetOpen === true` after selectCondition(htn) |
 | 9 | selectCondition sets year | `currentYear === htn.yearFrac` after select |
 | 10 | selectCondition timeRailActive | `timeRailActive === true` after select |
