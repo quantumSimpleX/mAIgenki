@@ -245,10 +245,11 @@ function NavBar() {
         <Text style={styles.logoM}>m</Text>
         <Text style={styles.logoAI}>AI</Text>
         <Text style={styles.logoGenki}> Genki</Text>
-        {/* Chevron rotates inside a fixed square box so its distance from the
-            logo is identical in the open (up) and closed (down) states. */}
+        {/* SVG chevron — geometrically centered, rotates 180° when open. */}
         <View style={[styles.navChevronBox, legendOpen && styles.navChevronBoxOpen]}>
-          <Text style={styles.navChevron}>›</Text>
+          <Svg width={fs(10)} height={fs(6)} viewBox="0 0 10 6" fill="none">
+            <SvgPath d="M1 1L5 5L9 1" stroke="rgba(255,255,255,0.4)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
         </View>
       </TouchableOpacity>
       <View style={styles.navRight}>
@@ -332,15 +333,11 @@ function LegendPanel() {
                 hitSlop={6}
                 style={[
                   styles.legendOnlyBtn,
-                  {
-                    height: Math.ceil(labelFs * 1.4),
-                    borderRadius: Math.ceil(labelFs * 0.7),
-                    backgroundColor: meta.color,
-                  },
+                  { borderColor: meta.color },
                   !active && { opacity: 0.3 },
                 ]}
               >
-                <Text style={[styles.legendOnlyText, { fontSize: Math.round(labelFs * 0.66) }]}>ONLY</Text>
+                <Text style={[styles.legendOnlyText, { fontSize: Math.round(labelFs * 0.58), color: meta.color }]}>only</Text>
               </TouchableOpacity>
             </TouchableOpacity>
           )
@@ -424,7 +421,7 @@ function BodySvg({
         return (
           <G key={c.id} {...pressProps}>
             {/* Single solid dot in the system color, sitting on the organ */}
-            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 8 : 6} fill={color} />
+            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 4 : 3} fill={color} />
           </G>
         )
       })}
@@ -457,8 +454,8 @@ function RippleRing({ color, delay, size }: { color: string; delay: number; size
         position: 'absolute', left: -size / 2, top: -size / 2,
         width: size, height: size, borderRadius: size / 2,
         borderWidth: 1.5, borderColor: color,
-        opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0] }),
-        transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] }) }],
+        opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] }),
+        transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 3.2] }) }],
       }}
     />
   )
@@ -493,6 +490,7 @@ function ConditionRipples({
         >
           <RippleRing color={SYSTEM_META[c.system]?.color ?? '#fff'} delay={0} size={sc(30)} />
           <RippleRing color={SYSTEM_META[c.system]?.color ?? '#fff'} delay={700} size={sc(30)} />
+          <RippleRing color={SYSTEM_META[c.system]?.color ?? '#fff'} delay={1400} size={sc(30)} />
         </View>
       ))}
     </View>
@@ -1250,7 +1248,10 @@ function UploadShortcuts({
       {/* Resets body-map zoom/pan; only shown once the view has been moved */}
       {viewTransformed && (
         <TouchableOpacity style={styles.resetViewBtn} onPress={onResetView}>
-          <Text style={styles.resetViewText}>RESET</Text>
+          <Svg width={fs(14)} height={fs(14)} viewBox="0 0 24 24" fill="none">
+            <SvgPath d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8" stroke={C.inkMuted} strokeWidth={1.8} strokeLinecap="round" />
+            <SvgPath d="M3 3v5h5" stroke={C.inkMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+          </Svg>
         </TouchableOpacity>
       )}
       {uploadPanelOpen && (
@@ -1467,9 +1468,8 @@ const styles = StyleSheet.create({
   logoM: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.9)' },
   logoAI: { fontFamily: 'MOMCAKE-Bold', fontSize: fs(20), color: '#8A60EB', lineHeight: fs(20) },
   logoGenki: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.9)' },
-  navChevronBox: { marginLeft: sc(8), width: fs(16), height: fs(16), alignItems: 'center', justifyContent: 'center', alignSelf: 'center', transform: [{ rotate: '90deg' }] },
-  navChevronBoxOpen: { transform: [{ rotate: '270deg' }] },
-  navChevron: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), lineHeight: fs(18), color: 'rgba(255,255,255,0.4)', textAlign: 'center' },
+  navChevronBox: { marginLeft: sc(8), width: fs(14), height: fs(14), alignItems: 'center', justifyContent: 'center', alignSelf: 'center', transform: [{ rotate: '0deg' }] },
+  navChevronBoxOpen: { transform: [{ rotate: '180deg' }] },
   navRight: { flexDirection: 'row', alignItems: 'center', gap: sc(10) },
   datePill: {
     paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(14),
@@ -1492,8 +1492,8 @@ const styles = StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8), paddingVertical: sc(5) },
   legendDot: { width: sc(8), height: sc(8), borderRadius: sc(4) },
   legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.ink },
-  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(6), alignItems: 'center', justifyContent: 'center' },
-  legendOnlyText: { fontFamily: 'BarlowCondensed-Bold', color: '#0A0C14', letterSpacing: 0.5 },
+  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(4), paddingVertical: sc(1), borderRadius: sc(3), borderWidth: 0.5, alignItems: 'center', justifyContent: 'center' },
+  legendOnlyText: { fontWeight: '300' as const, letterSpacing: 0.2 },
 
   railWrap: {
     position: 'absolute', top: 0, right: 0, bottom: 0,
@@ -1670,11 +1670,10 @@ const styles = StyleSheet.create({
 
   // Upload shortcuts
   uploadWrap: { position: 'absolute', bottom: sc(20), left: sc(16), alignItems: 'flex-start', zIndex: 4 },
-  resetViewBtn: { paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(6), borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: sc(8) },
-  resetViewText: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(10), letterSpacing: 1, color: C.inkMuted },
-  uploadBtns: { gap: sc(8), alignItems: 'flex-start', marginBottom: sc(8) },
-  uploadShortcut: { width: sc(28), height: sc(28), borderRadius: sc(6), backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
-  uploadShortcutChat: { width: sc(28), height: sc(28), borderRadius: sc(6), backgroundColor: 'rgba(138,96,235,0.12)', borderWidth: 1, borderColor: 'rgba(138,96,235,0.3)', alignItems: 'center', justifyContent: 'center' },
+  resetViewBtn: { width: sc(24), height: sc(24), borderRadius: sc(5), backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center', marginBottom: sc(5) },
+  uploadBtns: { gap: sc(5), alignItems: 'flex-start', marginBottom: sc(6) },
+  uploadShortcut: { width: sc(24), height: sc(24), borderRadius: sc(5), backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
+  uploadShortcutChat: { width: sc(24), height: sc(24), borderRadius: sc(5), backgroundColor: 'rgba(138,96,235,0.12)', borderWidth: 1, borderColor: 'rgba(138,96,235,0.3)', alignItems: 'center', justifyContent: 'center' },
   qsWordmark: { opacity: 0.3 },
 
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9 },
