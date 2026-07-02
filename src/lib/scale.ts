@@ -1,13 +1,12 @@
-import { Platform } from 'react-native'
+import { Dimensions, Platform } from 'react-native'
 
 export const IS_WEB = Platform.OS === 'web'
 
-// Read directly from window so this works correctly in SPA mode (no SSR).
-// Dimensions.get('window') calls window.innerWidth too, but window.screen.width
-// is a safe fallback for the rare race where innerWidth is 0 at script eval time.
-const SW = IS_WEB && typeof window !== 'undefined'
-  ? (window.innerWidth || window.screen?.width || 0)
-  : 0
+// Dimensions.get('window') is a runtime function call — Metro can't inline it
+// at build time, so it always evaluates in the browser with the real viewport
+// width. Direct window.innerWidth access gets dead-code-eliminated by Metro's
+// production bundler (it sees typeof window === undefined in Node.js build env).
+const { width: SW } = Dimensions.get('window')
 
 export const IS_DESKTOP = IS_WEB && SW >= 768
 export const S = IS_DESKTOP ? 2 : 1
