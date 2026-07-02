@@ -401,19 +401,16 @@ function GhostDots({
     <Svg width="100%" height="100%" viewBox="0 0 260 460" style={StyleSheet.absoluteFill} pointerEvents="box-none">
       {visible.map((c) => {
         const color = SYSTEM_META[c.system]?.color ?? '#fff'
-        const pressProps = IS_WEB
-          ? { onClick: () => onPress(c) }
-          : { onPress: () => onPress(c) }
+        const pressProps = (IS_WEB
+          ? { onPress: null, onClick: () => onPress(c) }
+          : { onPress: () => onPress(c) }) as unknown as ComponentProps<typeof G>
         return (
-          <Circle
-            key={c.id}
-            cx={c.cx}
-            cy={c.cy}
-            r={2}
-            fill={color}
-            fillOpacity={0.3}
-            {...pressProps as unknown as ComponentProps<typeof Circle>}
-          />
+          <G key={c.id} {...pressProps}>
+            {/* Invisible hit area — r=10 so it's easy to click */}
+            <Circle cx={c.cx} cy={c.cy} r={10} opacity={0} />
+            {/* Visible ghost dot */}
+            <Circle cx={c.cx} cy={c.cy} r={2} fill={color} fillOpacity={0.3} pointerEvents="none" />
+          </G>
         )
       })}
     </Svg>
@@ -1450,11 +1447,6 @@ export default function BodyMapScreen() {
               ]}
             >
               <BodyLayers activeSystems={activeSystems} />
-              <GhostDots
-                conditions={conditions}
-                activeSystems={activeSystems}
-                onPress={handleConditionPress}
-              />
               <BodySvg
                 activeSystems={activeSystems}
                 conditions={conditions}
@@ -1462,6 +1454,11 @@ export default function BodyMapScreen() {
                 currentYear={currentYear}
                 condDateOverrides={condDateOverrides}
                 selectedCondition={selectedCondition}
+              />
+              <GhostDots
+                conditions={conditions}
+                activeSystems={activeSystems}
+                onPress={handleConditionPress}
               />
               <ConditionRipples
                 conditions={conditions}
