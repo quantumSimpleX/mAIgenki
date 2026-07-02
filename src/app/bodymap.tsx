@@ -553,9 +553,10 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const railRef = useRef<View>(null)
   const railTopRef = useRef(0)
 
-  // Dynamic range: 1 month of padding before the earliest and after the latest condition.
+  // Dynamic range: 1 month after the latest (top, high-density end of log scale → ~17px gap).
+  // Bottom (low-density end) needs ~12× more time to produce the same pixel gap, so use 1 year.
   const railMin = conditions.length > 0
-    ? Math.min(...conditions.map((c) => c.yearFrac)) - 1 / 12
+    ? Math.min(...conditions.map((c) => c.yearFrac)) - 1
     : FALLBACK_MIN
   const railMax = conditions.length > 0
     ? Math.max(...conditions.map((c) => c.yearFrac)) + 1 / 12
