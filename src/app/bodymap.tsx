@@ -48,25 +48,27 @@ const SUPPORTED_LANGS: {
 
 // Log-scale helpers — vertical rail: bottom=oldest, top=newest
 const K = 2.5
-const MIN_YEAR = 2013
-const MAX_YEAR = 2024
+// Rail range is computed dynamically from conditions — 1 month padding on each end.
+// Fallback values used only when conditions list is empty.
+const FALLBACK_MIN = 2013
+const FALLBACK_MAX = 2025
 
-function toLinear(yearFrac: number): number {
-  return Math.max(0, Math.min(1, (yearFrac - MIN_YEAR) / (MAX_YEAR - MIN_YEAR)))
+function toLinear(yearFrac: number, rMin: number, rMax: number): number {
+  return Math.max(0, Math.min(1, (yearFrac - rMin) / (rMax - rMin)))
 }
-function toLogFrac(yearFrac: number): number {
-  const t = toLinear(yearFrac)
+function toLogFrac(yearFrac: number, rMin: number, rMax: number): number {
+  const t = toLinear(yearFrac, rMin, rMax)
   return (Math.exp(K * t) - 1) / (Math.exp(K) - 1)
 }
-function toVertPos(yearFrac: number, railH: number): number {
-  return (1 - toLogFrac(yearFrac)) * railH
+function toVertPos(yearFrac: number, railH: number, rMin: number, rMax: number): number {
+  return (1 - toLogFrac(yearFrac, rMin, rMax)) * railH
 }
-function fromVertPos(posY: number, railH: number): number {
-  if (railH <= 0) return MAX_YEAR
+function fromVertPos(posY: number, railH: number, rMin: number, rMax: number): number {
+  if (railH <= 0) return rMax
   const frac = 1 - posY / railH
   const clamped = Math.max(0, Math.min(1, frac))
   const t = Math.log(clamped * (Math.exp(K) - 1) + 1) / K
-  return MIN_YEAR + t * (MAX_YEAR - MIN_YEAR)
+  return rMin + t * (rMax - rMin)
 }
 
 const DISCLAIMER = 'Educational only. Not medical advice. Never a substitute for professional clinical judgment.'
@@ -337,7 +339,7 @@ function LegendPanel() {
                   !active && { opacity: 0.3 },
                 ]}
               >
-                <Text style={[styles.legendOnlyText, { fontSize: Math.round(labelFs * 0.58), color: meta.color }]}>only</Text>
+                <Text style={[styles.legendOnlyText, { fontSize: Math.round(labelFs * 0.58), lineHeight: Math.round(labelFs * 0.58), color: meta.color }]}>only</Text>
               </TouchableOpacity>
             </TouchableOpacity>
           )
@@ -385,6 +387,39 @@ function BodyLayers({ activeSystems }: { activeSystems: SystemId[] }) {
   )
 }
 
+// Permanent faded dots: show all conditions regardless of current time, 30% opacity.
+// Clicking has the same effect as the interactive dots (snaps rail + opens condition sheet).
+function GhostDots({
+  conditions, activeSystems, onPress,
+}: {
+  conditions: DesignCondition[]
+  activeSystems: SystemId[]
+  onPress: (c: DesignCondition) => void
+}) {
+  const visible = conditions.filter((c) => activeSystems.includes(c.system))
+  return (
+    <Svg width="100%" height="100%" viewBox="0 0 260 460" style={StyleSheet.absoluteFill} pointerEvents="box-none">
+      {visible.map((c) => {
+        const color = SYSTEM_META[c.system]?.color ?? '#fff'
+        const pressProps = IS_WEB
+          ? { onClick: () => onPress(c) }
+          : { onPress: () => onPress(c) }
+        return (
+          <Circle
+            key={c.id}
+            cx={c.cx}
+            cy={c.cy}
+            r={2}
+            fill={color}
+            fillOpacity={0.3}
+            {...pressProps as unknown as ComponentProps<typeof Circle>}
+          />
+        )
+      })}
+    </Svg>
+  )
+}
+
 function BodySvg({
   activeSystems, conditions, onConditionPress, currentYear,
   condDateOverrides, selectedCondition,
@@ -421,7 +456,7 @@ function BodySvg({
         return (
           <G key={c.id} {...pressProps}>
             {/* Single solid dot in the system color, sitting on the organ */}
-            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 4 : 3} fill={color} />
+            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 3 : 2} fill={color} />
           </G>
         )
       })}
@@ -517,7 +552,14 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const wasActiveOnGrant = useRef(false)
   const railRef = useRef<View>(null)
   const railTopRef = useRef(0)
-  const YEAR_BOOKENDS = [MIN_YEAR, MAX_YEAR]
+
+  // Dynamic range: 1 month of padding before the earliest and after the latest condition.
+  const railMin = conditions.length > 0
+    ? Math.min(...conditions.map((c) => c.yearFrac)) - 1 / 12
+    : FALLBACK_MIN
+  const railMax = conditions.length > 0
+    ? Math.max(...conditions.map((c) => c.yearFrac)) + 1 / 12
+    : FALLBACK_MAX
 
   // On web the rail is always expanded — never collapses.
   useEffect(() => {
@@ -540,20 +582,17 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   function snapToNearest(posY: number) {
     // Clamp the cursor to the rail so the thumb tracks the mouse exactly while dragging.
     const clampedY = Math.max(0, Math.min(railH, posY))
-    const rawYear = fromVertPos(clampedY, railH)
+    const rawYear = fromVertPos(clampedY, railH, railMin, railMax)
     const visible = conditions.filter((c) => activeSystems.includes(c.system))
     if (visible.length === 0) {
       setCurrentYear(rawYear)
       return
     }
-    // Proximity is measured in pixels against each marker's on-rail position, so
-    // the snap zone is visually uniform on the log-scaled rail (free-dragging
-    // everywhere else). Snap only when within 1% of the rail height of a marker.
     let nearestFrac = visible[0].yearFrac
     let minPxDist = Infinity
     for (const c of visible) {
       const cFrac = condDateOverrides[c.id] ? parseFloat(condDateOverrides[c.id]) : c.yearFrac
-      const pxDist = Math.abs(toVertPos(cFrac, railH) - clampedY)
+      const pxDist = Math.abs(toVertPos(cFrac, railH, railMin, railMax) - clampedY)
       if (pxDist < minPxDist) { minPxDist = pxDist; nearestFrac = cFrac }
     }
     const threshold = railH * 0.01
@@ -601,7 +640,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
     }
   }, [])
 
-  const thumbTop = toVertPos(currentYear, railH)
+  const thumbTop = toVertPos(currentYear, railH, railMin, railMax)
 
   return (
     <Animated.View
@@ -637,7 +676,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
         .filter((c) => activeSystems.includes(c.system))
         .map((c) => {
           const frac = condDateOverrides[c.id] ? parseFloat(condDateOverrides[c.id]) : c.yearFrac
-          const top = toVertPos(frac, railH)
+          const top = toVertPos(frac, railH, railMin, railMax)
           const isSelected = selectedCondition?.id === c.id
           return (
             <View
@@ -653,12 +692,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
             />
           )
         })}
-      {timeRailActive && YEAR_BOOKENDS.map((yr) => (
-        <Text key={yr} style={[styles.railBookend, { top: toVertPos(yr, railH) - 8 }]}>
-          {`'${String(yr).slice(2)}`}
-        </Text>
-      ))}
-      <View style={[styles.railThumb, { top: thumbTop - 4 }]} />
+      <View style={[styles.railThumb, { top: thumbTop - sc(4) }]} />
       {timeRailActive && (
         <View style={[styles.railLabel, { top: Math.max(0, thumbTop - 14), pointerEvents: 'none' }]}>
           <Text style={styles.railLabelText} numberOfLines={1}>
@@ -1266,13 +1300,15 @@ function UploadShortcuts({
               <SvgPath d="M14 3v4h4" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
             </Svg>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
-            <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
-              <Rect x={3} y={7} width={18} height={13} rx={2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
-              <Circle cx={12} cy={13} r={3.2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
-              <SvgPath d="M8 7l1.5-2h5L16 7" stroke={C.aqua} strokeWidth={1.6} fill="none" />
-            </Svg>
-          </TouchableOpacity>
+          {!IS_WEB && (
+            <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
+              <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
+                <Rect x={3} y={7} width={18} height={13} rx={2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
+                <Circle cx={12} cy={13} r={3.2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
+                <SvgPath d="M8 7l1.5-2h5L16 7" stroke={C.aqua} strokeWidth={1.6} fill="none" />
+              </Svg>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
             <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
               <Rect x={3} y={4} width={18} height={16} rx={2} stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
@@ -1413,6 +1449,11 @@ export default function BodyMapScreen() {
               ]}
             >
               <BodyLayers activeSystems={activeSystems} />
+              <GhostDots
+                conditions={conditions}
+                activeSystems={activeSystems}
+                onPress={handleConditionPress}
+              />
               <BodySvg
                 activeSystems={activeSystems}
                 conditions={conditions}
@@ -1480,7 +1521,7 @@ const styles = StyleSheet.create({
   // True-black canvas; userSelect keeps rail drags from selecting the layers on web
   canvas: { flex: 1, position: 'relative', overflow: 'hidden', backgroundColor: '#000', userSelect: 'none' },
 
-  bodyWrap: { position: 'absolute', top: '2.5%', left: 0, right: RAIL_W_INACTIVE, bottom: 0 },
+  bodyWrap: { position: 'absolute', top: '1%', left: 0, right: RAIL_W_INACTIVE, bottom: '7%' },
   bodyAspect: { height: '100%', aspectRatio: 260 / 460, alignSelf: 'center', position: 'relative' },
   bodySvg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 
@@ -1492,7 +1533,7 @@ const styles = StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8), paddingVertical: sc(5) },
   legendDot: { width: sc(8), height: sc(8), borderRadius: sc(4) },
   legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.ink },
-  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(4), paddingVertical: sc(1), borderRadius: sc(3), borderWidth: 0.5, alignItems: 'center', justifyContent: 'center' },
+  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(3), borderRadius: sc(3), borderWidth: 0.5, alignItems: 'center', justifyContent: 'center', alignSelf: 'baseline' },
   legendOnlyText: { fontWeight: '300' as const, letterSpacing: 0.2 },
 
   railWrap: {

@@ -25,8 +25,19 @@ async function migrateSystemCodes(db: SQLiteDatabase): Promise<void> {
   }
 }
 
+// Runs on every startup so existing seeded DBs pick up repositioned condition dots.
+async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
+  for (const c of CONDITIONS) {
+    await db.runAsync(
+      'UPDATE conditions SET cx = ?, cy = ?, render_x = ?, render_y = ? WHERE id = ?',
+      [c.cx, c.cy, c.cx, c.cy, c.id],
+    )
+  }
+}
+
 export async function seedDemoData(db: SQLiteDatabase): Promise<void> {
   await migrateSystemCodes(db)
+  await migrateConditionPositions(db)
   if (await isDemoDataPresent(db)) return
 
   await db.runAsync(
