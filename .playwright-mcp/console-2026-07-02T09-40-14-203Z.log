@@ -10,3 +10,10 @@ Performance optimizations: OFF. @ http://localhost:8090/node_modules/expo-router
 [  333984ms] Error: Error: Database not found - nativeDatabaseId[1]
     at workerMessageHandler (http://localhost:8090/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:100413:27)
     at Worker.<anonymous> (http://localhost:8090/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:99957:49)
+[ 1560517ms] [WARNING] Cannot record touch end without a touch start.
+ Touch End: {"identifier":0,"pageX":691,"pageY":760,"timestamp":1560502.900000006}
+ Touch Bank: [] @ http://localhost:8090/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:71504
+[ 6845595ms] [WARNING] Disconnected from Metro (1006)
+To reconnect:
+- Ensure that Metro is running and available on the same network
+- Reload this app (will trigger further help if Metro cannot be connected to) @ http://localhost:8090/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:71504
