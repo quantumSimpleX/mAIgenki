@@ -1533,7 +1533,7 @@ const styles = StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'baseline', gap: sc(8), paddingVertical: sc(5) },
   legendDot: { width: sc(8), height: sc(8), borderRadius: sc(4), alignSelf: 'center' },
   legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.ink },
-  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(3), paddingVertical: 2, borderRadius: sc(3), borderWidth: 0.5, alignItems: 'center', justifyContent: 'center' },
+  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(3), paddingTop: 1, paddingBottom: 4, borderRadius: sc(3), borderWidth: 0.5, alignItems: 'center', justifyContent: 'center' },
   legendOnlyText: { fontWeight: '300' as const, letterSpacing: 0.2 },
 
   railWrap: {
