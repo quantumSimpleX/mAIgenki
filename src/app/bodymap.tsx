@@ -283,7 +283,7 @@ function LegendPanel() {
   // always allowed to fit between the nav and the viewport bottom.
   const rowH1x = Math.ceil(12 * 1.4) + 1.5 * 2
   const naturalH = rowH1x * (ROWS + 1) + 8 * 2
-  const navH = 56 * S
+  const navH = 40 * S
   const avail = winH - navH - 24
   const lscale = Math.max(1, Math.min(S, avail / naturalH))
 
@@ -1502,7 +1502,7 @@ const styles = StyleSheet.create({
 
   nav: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
-    paddingHorizontal: sc(20), paddingVertical: sc(10),
+    paddingHorizontal: sc(20), paddingVertical: sc(6),
     borderBottomWidth: 1, borderBottomColor: C.border,
   },
   logoRow: { flexDirection: 'row', alignItems: 'baseline', gap: 0 },
@@ -1521,7 +1521,7 @@ const styles = StyleSheet.create({
   // True-black canvas; userSelect keeps rail drags from selecting the layers on web
   canvas: { flex: 1, position: 'relative', overflow: 'hidden', backgroundColor: '#000', userSelect: 'none' },
 
-  bodyWrap: { position: 'absolute', top: '1%', left: 0, right: RAIL_W_INACTIVE, bottom: '7%' },
+  bodyWrap: { position: 'absolute', top: 0, left: 0, right: RAIL_W_INACTIVE, bottom: 0 },
   bodyAspect: { height: '100%', aspectRatio: 260 / 460, alignSelf: 'center', position: 'relative' },
   bodySvg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 
@@ -1533,7 +1533,7 @@ const styles = StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'flex-end', gap: sc(8), paddingVertical: sc(5) },
   legendDot: { width: sc(8), height: sc(8), borderRadius: sc(4), alignSelf: 'center' },
   legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.ink },
-  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(3), paddingTop: 1, paddingBottom: 4, borderRadius: sc(3), borderWidth: 0.5, alignItems: 'center', justifyContent: 'center' },
+  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(3) - 1, paddingTop: 0, paddingBottom: 3, borderRadius: sc(3), borderWidth: 0.5, alignItems: 'center', justifyContent: 'center' },
   legendOnlyText: { fontWeight: '300' as const, letterSpacing: 0.2 },
 
   railWrap: {
