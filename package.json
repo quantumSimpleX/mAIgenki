@@ -58,6 +58,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",
+    "vercel-build": "npx expo export -p web",
     "lint": "expo lint",
     "test": "cross-env NODE_OPTIONS=--max-old-space-size=4096 jest --coverage",
     "test:watch": "jest --watch",
