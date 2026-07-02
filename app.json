@@ -22,7 +22,7 @@
       "package": "com.anonymous.maigenki"
     },
     "web": {
-      "output": "static",
+      "output": "spa",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
