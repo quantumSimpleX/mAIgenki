@@ -112,11 +112,11 @@ Layer `00` is the back layer, `10` the front. Legend order matches this order to
 | 05 | `digestive` | Digestive | `#F97316` (orange) | Stomach, intestines, liver |
 | 06 | `respiratory` | Respiratory | `#06B6D4` (cyan) | Lungs, trachea |
 | 07 | `renal` | Renal | `#22C55E` (green) | Kidneys, bladder |
-| 08 | `lymphatic` | Lymphatic | `#84CC16` (lime) | Lymph nodes, spleen |
-| 09 | `endocrine` | Endocrine | `#F472B6` (pink) | Thyroid, pancreas, adrenals |
+| 08 | `lymphatic` | Lymphatic | `#F472B6` (pink) | Lymph nodes, spleen |
+| 09 | `endocrine` | Endocrine | `#84CC16` (lime) | Thyroid, pancreas, adrenals |
 | 10 | `reproductive` | Reproductive | `#C0526A` (rose) | Sex-specific organs |
 
-Colors were chosen to minimize visual conflict when layers overlap on the dark background. The reproductive color was changed from `#7F1D1D` to `#C0526A` in design session 04 for visibility. In July 2026 the endocrine↔muscular and renal↔lymphatic colors were swapped in code; the corresponding PNG layer tints are pending regeneration and temporarily still show the old hues.
+Colors were chosen to minimize visual conflict when layers overlap on the dark background. The reproductive color was changed from `#7F1D1D` to `#C0526A` in design session 04 for visibility. In July 2026: endocrine↔muscular and renal↔lymphatic colors were swapped; then lymphatic↔endocrine were swapped again. Net result: muscular=#D946EF, endocrine=#84CC16, renal=#22C55E, lymphatic=#F472B6. PNG layer tints for these four systems are pending regeneration and temporarily show old hues.
 
 ---
 

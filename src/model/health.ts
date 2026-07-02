@@ -44,7 +44,7 @@ export const SYSTEM_COLORS: Record<OrgSystem, string> = {
   digestive:       '#F97316',
   respiratory:     '#06B6D4',
   renal:    '#22C55E',
-  lymphatic:    '#84CC16',
-  endocrine:     '#F472B6',
+  lymphatic:    '#F472B6',
+  endocrine:     '#84CC16',
   reproductive:    '#C0526A',
 }

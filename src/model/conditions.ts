@@ -42,8 +42,8 @@ export const SYSTEM_META: Record<SystemId, { label: string; color: string }> = {
   digestive:      { label: 'Digestive',      color: '#F97316' },
   respiratory:    { label: 'Respiratory',    color: '#06B6D4' },
   renal:   { label: 'Renal',          color: '#22C55E' },
-  lymphatic:   { label: 'Lymphatic',      color: '#84CC16' },
-  endocrine:    { label: 'Endocrine',      color: '#F472B6' },
+  lymphatic:   { label: 'Lymphatic',      color: '#F472B6' },
+  endocrine:    { label: 'Endocrine',      color: '#84CC16' },
   reproductive:   { label: 'Reproductive',   color: '#C0526A' },
 }
 
@@ -322,21 +322,21 @@ export const CONDITION_RECORDS: Record<string, ConditionRecord[]> = {
     { id: 'r-uti-2', type: 'TREND', label: 'Recurrence log', date: '2020–2024', color: '#22C55E' },
   ],
   thyroid: [
-    { id: 'r-thy-1', type: 'LABS', label: 'TSH / T4', date: '2024-MAR', color: '#F472B6' },
-    { id: 'r-thy-2', type: 'IMAGING', label: 'Thyroid US', date: '2019-JAN', color: '#F472B6' },
-    { id: 'r-thy-3', type: 'TREND', label: 'TSH trend', date: '2017–2024', color: '#F472B6' },
+    { id: 'r-thy-1', type: 'LABS', label: 'TSH / T4', date: '2024-MAR', color: '#84CC16' },
+    { id: 'r-thy-2', type: 'IMAGING', label: 'Thyroid US', date: '2019-JAN', color: '#84CC16' },
+    { id: 'r-thy-3', type: 'TREND', label: 'TSH trend', date: '2017–2024', color: '#84CC16' },
   ],
   vitd: [
-    { id: 'r-vitd-1', type: 'LABS', label: '25-OH Vit D', date: '2024-APR', color: '#F472B6' },
-    { id: 'r-vitd-2', type: 'TREND', label: 'Level trend', date: '2015–2024', color: '#F472B6' },
+    { id: 'r-vitd-1', type: 'LABS', label: '25-OH Vit D', date: '2024-APR', color: '#84CC16' },
+    { id: 'r-vitd-2', type: 'TREND', label: 'Level trend', date: '2015–2024', color: '#84CC16' },
   ],
   lymph1: [
-    { id: 'r-lym-1', type: 'IMAGING', label: 'Neck US', date: '2016-JUN', color: '#84CC16' },
-    { id: 'r-lym-2', type: 'LABS', label: 'CBC / diff', date: '2016-JUN', color: '#84CC16' },
+    { id: 'r-lym-1', type: 'IMAGING', label: 'Neck US', date: '2016-JUN', color: '#F472B6' },
+    { id: 'r-lym-2', type: 'LABS', label: 'CBC / diff', date: '2016-JUN', color: '#F472B6' },
   ],
   mono: [
-    { id: 'r-mono-1', type: 'LABS', label: 'EBV antibodies', date: '2014-SEP', color: '#84CC16' },
-    { id: 'r-mono-2', type: 'IMAGING', label: 'Abdomen US', date: '2014-SEP', color: '#84CC16' },
+    { id: 'r-mono-1', type: 'LABS', label: 'EBV antibodies', date: '2014-SEP', color: '#F472B6' },
+    { id: 'r-mono-2', type: 'IMAGING', label: 'Abdomen US', date: '2014-SEP', color: '#F472B6' },
   ],
   eczema: [
     { id: 'r-ecz-1', type: 'IMAGING', label: 'Skin photos', date: '2023-MAR', color: '#4F46E5' },
