@@ -339,7 +339,7 @@ function LegendPanel() {
                   !active && { opacity: 0.3 },
                 ]}
               >
-                <Text style={[styles.legendOnlyText, { fontSize: Math.round(labelFs * 0.58), lineHeight: Math.round(labelFs * 0.58), color: meta.color }]}>only</Text>
+                <Text style={[styles.legendOnlyText, { fontSize: Math.round(labelFs * 0.58), color: meta.color }]}>only</Text>
               </TouchableOpacity>
             </TouchableOpacity>
           )
@@ -1530,10 +1530,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(10,12,20,0.92)', overflow: 'hidden', zIndex: 5,
   },
   legendInner: { paddingVertical: sc(10), paddingHorizontal: sc(12) },
-  legendRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8), paddingVertical: sc(5) },
-  legendDot: { width: sc(8), height: sc(8), borderRadius: sc(4) },
+  legendRow: { flexDirection: 'row', alignItems: 'baseline', gap: sc(8), paddingVertical: sc(5) },
+  legendDot: { width: sc(8), height: sc(8), borderRadius: sc(4), alignSelf: 'center' },
   legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.ink },
-  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(3), borderRadius: sc(3), borderWidth: 0.5, alignItems: 'center', justifyContent: 'center', alignSelf: 'baseline' },
+  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(3), paddingVertical: sc(2), borderRadius: sc(3), borderWidth: 0.5, alignItems: 'center', justifyContent: 'center' },
   legendOnlyText: { fontWeight: '300' as const, letterSpacing: 0.2 },
 
   railWrap: {
