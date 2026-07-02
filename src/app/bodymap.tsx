@@ -315,20 +315,24 @@ function LegendPanel() {
           const active = activeSystems.includes(id)
           const meta = SYSTEM_META[id]
           return (
-            <TouchableOpacity
+            <View
               key={id}
               style={[styles.legendRow, { paddingVertical: rowPadV, gap: rowGap }]}
-              onPress={() => toggleSystem(id)}
-              activeOpacity={0.7}
             >
-              <View style={[
-                styles.legendDot,
-                { width: dotSz, height: dotSz, borderRadius: dotSz / 2, backgroundColor: meta.color },
-                !active && { opacity: 0.3 },
-              ]} />
-              <Text style={[styles.legendLabel, { fontSize: labelFs }, !active && { opacity: 0.4 }]}>
-                {meta.label}
-              </Text>
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: rowGap, flex: 1 }}
+                onPress={() => toggleSystem(id)}
+                activeOpacity={0.7}
+              >
+                <View style={[
+                  styles.legendDot,
+                  { width: dotSz, height: dotSz, borderRadius: dotSz / 2, backgroundColor: meta.color },
+                  !active && { opacity: 0.3 },
+                ]} />
+                <Text style={[styles.legendLabel, { fontSize: labelFs }, !active && { opacity: 0.4 }]}>
+                  {meta.label}
+                </Text>
+              </TouchableOpacity>
               {/* Solo toggle: shows only this layer; tap again to restore all */}
               <TouchableOpacity
                 onPress={() => soloSystem(id)}
@@ -341,7 +345,7 @@ function LegendPanel() {
               >
                 <Text style={[styles.legendOnlyText, { fontSize: Math.round(labelFs * 0.58), color: meta.color }]}>only</Text>
               </TouchableOpacity>
-            </TouchableOpacity>
+            </View>
           )
         })}
       </View>
