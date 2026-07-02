@@ -3,6 +3,7 @@
     "name": "mAIgenki",
     "slug": "maigenki",
     "version": "1.0.0",
+    "platforms": ["android", "ios", "web"],
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "maigenki",
@@ -17,7 +18,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.maigenki"
     },
     "web": {
       "output": "single",
@@ -48,6 +50,17 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {
+        "headers": {
+          "Cross-Origin-Embedder-Policy": "credentialless",
+          "Cross-Origin-Opener-Policy": "same-origin"
+        }
+      },
+      "eas": {
+        "projectId": "4eeeb67e-7c5b-4bb8-87ef-7814cd2b609b"
+      }
     }
   }
 }
