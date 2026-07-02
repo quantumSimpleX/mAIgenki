@@ -393,6 +393,9 @@ function BodyLayers({ activeSystems }: { activeSystems: SystemId[] }) {
 
 // Permanent faded dots: show all conditions regardless of current time, 30% opacity.
 // Clicking has the same effect as the interactive dots (snaps rail + opens condition sheet).
+// Uses a single full-SVG transparent Rect handler + "find nearest dot within threshold"
+// to avoid (a) overlapping hit areas between close dots and (b) z-order eclipsing where
+// dots from lower PNG layers can never be reached because higher-layer dots sit on top.
 function GhostDots({
   conditions, activeSystems, onPress,
 }: {
@@ -401,22 +404,49 @@ function GhostDots({
   onPress: (c: DesignCondition) => void
 }) {
   const visible = conditions.filter((c) => activeSystems.includes(c.system))
+
+  const pressNearest = useCallback((svgX: number, svgY: number) => {
+    let nearest: DesignCondition | null = null
+    let minDist = 8  // SVG units — must click within this radius of a dot
+    for (const c of visible) {
+      const d = Math.hypot(c.cx - svgX, c.cy - svgY)
+      if (d < minDist) { minDist = d; nearest = c }
+    }
+    if (nearest) onPress(nearest)
+  }, [visible, onPress])
+
+  const rectProps = IS_WEB
+    ? {
+        onClick: (e: React.MouseEvent<SVGRectElement>) => {
+          const svgEl = (e.target as SVGElement).ownerSVGElement!
+          const rect = svgEl.getBoundingClientRect()
+          pressNearest(
+            (e.clientX - rect.left) * 260 / rect.width,
+            (e.clientY - rect.top) * 460 / rect.height,
+          )
+        },
+      }
+    : {
+        onPress: (e: GestureResponderEvent) => {
+          pressNearest(e.nativeEvent.locationX, e.nativeEvent.locationY)
+        },
+      }
+
   return (
     <Svg width="100%" height="100%" viewBox="0 0 260 460" style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      {visible.map((c) => {
-        const color = SYSTEM_META[c.system]?.color ?? '#fff'
-        const pressProps = (IS_WEB
-          ? { onPress: null, onClick: () => onPress(c) }
-          : { onPress: () => onPress(c) }) as unknown as ComponentProps<typeof G>
-        return (
-          <G key={c.id} {...pressProps}>
-            {/* Invisible hit area — r=10 so it's easy to click */}
-            <Circle cx={c.cx} cy={c.cy} r={10} opacity={0} />
-            {/* Visible ghost dot */}
-            <Circle cx={c.cx} cy={c.cy} r={2} fill={color} fillOpacity={0.3} pointerEvents="none" />
-          </G>
-        )
-      })}
+      <Rect
+        x={0} y={0} width={260} height={460}
+        fill="transparent"
+        pointerEvents="auto"
+        {...(rectProps as ComponentProps<typeof Rect>)}
+      />
+      {visible.map((c) => (
+        <Circle
+          key={c.id} cx={c.cx} cy={c.cy} r={1.5}
+          fill={SYSTEM_META[c.system]?.color ?? '#fff'} fillOpacity={0.3}
+          pointerEvents="none"
+        />
+      ))}
     </Svg>
   )
 }
@@ -448,17 +478,13 @@ function BodySvg({
       {visibleConds.map((c) => {
         const isSelected = selectedCondition?.id === c.id
         const color = SYSTEM_META[c.system]?.color ?? '#fff'
-        // Web: onPress:null keeps react-native-svg from attaching its touchable
-        // responder handlers (which leak to the DOM), while onClick passes
-        // straight through to the <g> so the click still fires. Native: onPress.
-        const pressProps = (IS_WEB
-          ? { onPress: null, onClick: () => onConditionPress(c) }
-          : { onPress: () => onConditionPress(c) }) as unknown as ComponentProps<typeof G>
         return (
-          <G key={c.id} {...pressProps}>
-            {/* Single solid dot in the system color, sitting on the organ */}
-            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 3 : 2} fill={color} />
-          </G>
+          <Circle
+            key={c.id} cx={c.cx} cy={c.cy}
+            r={isSelected ? 2.5 : 1.5}
+            fill={color}
+            pointerEvents="none"
+          />
         )
       })}
     </Svg>
