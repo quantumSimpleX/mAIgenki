@@ -5,11 +5,11 @@ export type OrgSystem =
   | 'muscular'      // Muscular
   | 'skeletal'    // Skeletal
   | 'cardiovascular'      // Circulatory
-  | 'lymphatic'       // Lymphatic
   | 'nervous'       // Nervous
-  | 'respiratory'        // Respiratory
   | 'digestive'          // Digestive
+  | 'respiratory'        // Respiratory
   | 'renal'       // Renal
+  | 'lymphatic'       // Lymphatic
   | 'endocrine'        // Endocrine
   | 'reproductive'       // Reproductive
 
@@ -37,14 +37,14 @@ export type HealthRecord = {
 // repro updated from #7F1D1D → #C0526A in session 04 for visibility on dark bg.
 export const SYSTEM_COLORS: Record<OrgSystem, string> = {
   integumentary:    '#4F46E5',
-  muscular:   '#F472B6',
+  muscular:   '#D946EF',
   skeletal: '#94A3B8',
   cardiovascular:   '#EF4444',
-  lymphatic:    '#22C55E',
   nervous:    '#EAB308',
-  respiratory:     '#06B6D4',
   digestive:       '#F97316',
-  renal:    '#84CC16',
-  endocrine:     '#D946EF',
+  respiratory:     '#06B6D4',
+  renal:    '#22C55E',
+  lymphatic:    '#84CC16',
+  endocrine:     '#F472B6',
   reproductive:    '#C0526A',
 }

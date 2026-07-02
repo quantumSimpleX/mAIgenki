@@ -100,21 +100,23 @@ Condition detail and Settings are **bottom sheets** within `bodymap.tsx`, not se
 
 These are the canonical system IDs, display names, and colors. They are the source of truth — do not change without updating all pipeline code and the design.
 
-| ID | Display Name | Color | Key anatomy |
-|---|---|---|---|
-| `integumentary` | Integumentary | `#4F46E5` (indigo) | Skin layer outline (ghost silhouette; toggleable like all other systems) |
-| `muscular` | Muscular | `#F472B6` (pink) | Major muscle groups |
-| `skeletal` | Skeletal | `#94A3B8` (slate) | Spine, major bones, joints |
-| `cardiovascular` | Circulatory | `#EF4444` (red) | Heart, major vessels |
-| `lymphatic` | Lymphatic | `#22C55E` (green) | Lymph nodes, spleen |
-| `nervous` | Nervous | `#EAB308` (yellow) | Brain, spinal cord, nerves |
-| `respiratory` | Respiratory | `#06B6D4` (cyan) | Lungs, trachea |
-| `digestive` | Digestive | `#F97316` (orange) | Stomach, intestines, liver |
-| `renal` | Renal | `#84CC16` (lime) | Kidneys, bladder |
-| `endocrine` | Endocrine | `#D946EF` (fuchsia) | Thyroid, pancreas, adrenals |
-| `reproductive` | Reproductive | `#C0526A` (rose) | Sex-specific organs |
+Layer `00` is the back layer, `10` the front. Legend order matches this order top → bottom.
 
-Colors were chosen to minimize visual conflict when layers overlap on the dark background. The reproductive color was changed from `#7F1D1D` to `#C0526A` in design session 04 for visibility.
+| NN | ID | Display Name | Color | Key anatomy |
+|---|---|---|---|---|
+| 00 | `integumentary` | Integumentary | `#4F46E5` (indigo) | Skin layer outline (ghost silhouette; toggleable like all other systems) |
+| 01 | `muscular` | Muscular | `#D946EF` (fuchsia) | Major muscle groups |
+| 02 | `skeletal` | Skeletal | `#94A3B8` (slate) | Spine, major bones, joints |
+| 03 | `cardiovascular` | Circulatory | `#EF4444` (red) | Heart, major vessels |
+| 04 | `nervous` | Nervous | `#EAB308` (yellow) | Brain, spinal cord, nerves |
+| 05 | `digestive` | Digestive | `#F97316` (orange) | Stomach, intestines, liver |
+| 06 | `respiratory` | Respiratory | `#06B6D4` (cyan) | Lungs, trachea |
+| 07 | `renal` | Renal | `#22C55E` (green) | Kidneys, bladder |
+| 08 | `lymphatic` | Lymphatic | `#84CC16` (lime) | Lymph nodes, spleen |
+| 09 | `endocrine` | Endocrine | `#F472B6` (pink) | Thyroid, pancreas, adrenals |
+| 10 | `reproductive` | Reproductive | `#C0526A` (rose) | Sex-specific organs |
+
+Colors were chosen to minimize visual conflict when layers overlap on the dark background. The reproductive color was changed from `#7F1D1D` to `#C0526A` in design session 04 for visibility. In July 2026 the endocrine↔muscular and renal↔lymphatic colors were swapped in code; the corresponding PNG layer tints are pending regeneration and temporarily still show the old hues.
 
 ---
 
@@ -124,8 +126,8 @@ Colors were chosen to minimize visual conflict when layers overlap on the dark b
 // src/model/health.ts
 
 export type OrgSystem =
-  | 'integumentary' | 'muscular' | 'skeletal' | 'cardiovascular' | 'lymphatic'
-  | 'nervous' | 'respiratory' | 'digestive' | 'renal' | 'endocrine' | 'reproductive'
+  | 'integumentary' | 'muscular' | 'skeletal' | 'cardiovascular' | 'nervous'
+  | 'digestive' | 'respiratory' | 'renal' | 'lymphatic' | 'endocrine' | 'reproductive'
 
 export type ConditionStatus = 'documented' | 'resolved' | 'inferred'
 

@@ -9,7 +9,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { useAppStore } from '@/store/useAppStore'
 import { useConditions } from '@/hooks/useConditions'
 import { QSWordmark } from '@/components/QSWordmark'
-import { IS_DESKTOP, S } from '@/lib/scale'
+import { IS_DESKTOP, IS_WEB, S } from '@/lib/scale'
 
 const C = {
   bg: '#FAFAF7',
@@ -182,13 +182,17 @@ export default function UploadScreen() {
 
               <View style={styles.uploadDivider} />
 
-              {/* Camera */}
-              <TouchableOpacity style={styles.uploadCol} onPress={handleCamera} activeOpacity={0.7}>
-                <CameraIcon color={C.aqua} s={styles} />
-                <Text style={[styles.uploadColLabel, { color: C.aquaDark }]}>Take a photo</Text>
-              </TouchableOpacity>
+              {/* Camera — no camera capture in the browser */}
+              {!IS_WEB && (
+                <>
+                  <TouchableOpacity style={styles.uploadCol} onPress={handleCamera} activeOpacity={0.7}>
+                    <CameraIcon color={C.aqua} s={styles} />
+                    <Text style={[styles.uploadColLabel, { color: C.aquaDark }]}>Take a photo</Text>
+                  </TouchableOpacity>
 
-              <View style={styles.uploadDivider} />
+                  <View style={styles.uploadDivider} />
+                </>
+              )}
 
               {/* Image */}
               <TouchableOpacity style={styles.uploadCol} onPress={handlePickImage} activeOpacity={0.7}>

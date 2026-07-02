@@ -71,6 +71,10 @@ function fromVertPos(posY: number, railH: number): number {
 
 const DISCLAIMER = 'Educational only. Not medical advice. Never a substitute for professional clinical judgment.'
 
+// Body-map zoom limits
+const MIN_ZOOM = 1
+const MAX_ZOOM = 5
+
 // ─── Small SVG icons ──────────────────────────────────────────────────────────
 
 function MailIcon({ color = C.aqua, size = fs(15) }: { color?: string; size?: number }) {
@@ -241,7 +245,11 @@ function NavBar() {
         <Text style={styles.logoM}>m</Text>
         <Text style={styles.logoAI}>AI</Text>
         <Text style={styles.logoGenki}> Genki</Text>
-        <Text style={[styles.navChevron, legendOpen && styles.navChevronOpen]}>›</Text>
+        {/* Chevron rotates inside a fixed square box so its distance from the
+            logo is identical in the open (up) and closed (down) states. */}
+        <View style={[styles.navChevronBox, legendOpen && styles.navChevronBoxOpen]}>
+          <Text style={styles.navChevron}>›</Text>
+        </View>
       </TouchableOpacity>
       <View style={styles.navRight}>
         <TouchableOpacity style={styles.datePill} onPress={toggleTimeDisplayMode} hitSlop={8}>
@@ -260,7 +268,7 @@ function NavBar() {
 // ─── Legend Panel ────────────────────────────────────────────────────────────
 
 function LegendPanel() {
-  const { activeSystems, toggleSystem, legendOpen } = useAppStore()
+  const { activeSystems, toggleSystem, soloSystem, legendOpen } = useAppStore()
   const { height: winH } = useWindowDimensions()
 
   // Responsive sizing: shrink the legend so all rows fit between the nav bar and
@@ -318,6 +326,22 @@ function LegendPanel() {
               <Text style={[styles.legendLabel, { fontSize: labelFs }, !active && { opacity: 0.4 }]}>
                 {meta.label}
               </Text>
+              {/* Solo toggle: shows only this layer; tap again to restore all */}
+              <TouchableOpacity
+                onPress={() => soloSystem(id)}
+                hitSlop={6}
+                style={[
+                  styles.legendOnlyBtn,
+                  {
+                    height: Math.ceil(labelFs * 1.4),
+                    borderRadius: Math.ceil(labelFs * 0.7),
+                    backgroundColor: meta.color,
+                  },
+                  !active && { opacity: 0.3 },
+                ]}
+              >
+                <Text style={[styles.legendOnlyText, { fontSize: Math.round(labelFs * 0.66) }]}>ONLY</Text>
+              </TouchableOpacity>
             </TouchableOpacity>
           )
         })}
@@ -336,11 +360,11 @@ const COLORIZED_LAYERS: Record<SystemId, ComponentProps<typeof Image>['source']>
   muscular: require('../../assets/maigenki-systems-2colorized/01-muscular.png'),
   skeletal: require('../../assets/maigenki-systems-2colorized/02-skeletal.png'),
   cardiovascular: require('../../assets/maigenki-systems-2colorized/03-cardiovascular.png'),
-  lymphatic: require('../../assets/maigenki-systems-2colorized/04-lymphatic.png'),
-  nervous: require('../../assets/maigenki-systems-2colorized/05-nervous.png'),
+  nervous: require('../../assets/maigenki-systems-2colorized/04-nervous.png'),
+  digestive: require('../../assets/maigenki-systems-2colorized/05-digestive.png'),
   respiratory: require('../../assets/maigenki-systems-2colorized/06-respiratory.png'),
-  digestive: require('../../assets/maigenki-systems-2colorized/07-digestive.png'),
-  renal: require('../../assets/maigenki-systems-2colorized/08-renal.png'),
+  renal: require('../../assets/maigenki-systems-2colorized/07-renal.png'),
+  lymphatic: require('../../assets/maigenki-systems-2colorized/08-lymphatic.png'),
   endocrine: require('../../assets/maigenki-systems-2colorized/09-endocrine.png'),
   reproductive: require('../../assets/maigenki-systems-2colorized/10-reproductive-m.png'),
 }
@@ -399,15 +423,79 @@ function BodySvg({
           : { onPress: () => onConditionPress(c) }) as unknown as ComponentProps<typeof G>
         return (
           <G key={c.id} {...pressProps}>
-            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 10 : 8}
-              fill={color} fillOpacity={isSelected ? 1 : 0.75}
-              stroke={C.bg} strokeWidth={1.5} />
-            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 4.5 : 3.5}
-              fill="#fff" fillOpacity={0.95} />
+            {/* Single solid dot in the system color, sitting on the organ */}
+            <Circle cx={c.cx} cy={c.cy} r={isSelected ? 8 : 6} fill={color} />
           </G>
         )
       })}
     </Svg>
+  )
+}
+
+// ─── Condition ripple ────────────────────────────────────────────────────────
+
+// One radiating ring, per the Claude Design pulse-ring reference: scale 1→2.4,
+// opacity 0.25→0, 2.2s ease-out, looping. `delay` phase-shifts the second ring.
+function RippleRing({ color, delay, size }: { color: string; delay: number; size: number }) {
+  const anim = useRef(new Animated.Value(0)).current
+  useEffect(() => {
+    const loop = Animated.sequence([
+      Animated.delay(delay),
+      Animated.loop(
+        Animated.timing(anim, {
+          toValue: 1, duration: 2200, easing: Easing.out(Easing.ease), useNativeDriver: !IS_WEB,
+        }),
+      ),
+    ])
+    loop.start()
+    return () => loop.stop()
+  }, [anim, delay])
+  return (
+    <Animated.View
+      pointerEvents="none"
+      style={{
+        position: 'absolute', left: -size / 2, top: -size / 2,
+        width: size, height: size, borderRadius: size / 2,
+        borderWidth: 1.5, borderColor: color,
+        opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [0.25, 0] }),
+        transform: [{ scale: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 2.4] }) }],
+      }}
+    />
+  )
+}
+
+// Radiating ripple over each condition dot whose marker the time rail is
+// currently snapped to, so the user can spot where the condition sits.
+function ConditionRipples({
+  conditions, activeSystems, currentYear, condDateOverrides,
+}: {
+  conditions: DesignCondition[]
+  activeSystems: SystemId[]
+  currentYear: number
+  condDateOverrides: Record<string, string>
+}) {
+  const snapped = conditions.filter((c) => {
+    if (!activeSystems.includes(c.system)) return false
+    const frac = condDateOverrides[c.id] ? parseFloat(condDateOverrides[c.id]) : c.yearFrac
+    return Math.abs(frac - currentYear) < 1e-9
+  })
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {snapped.map((c) => (
+        <View
+          key={c.id}
+          style={{
+            position: 'absolute',
+            left: `${(c.cx / 260) * 100}%`,
+            top: `${(c.cy / 460) * 100}%`,
+            width: 0, height: 0,
+          }}
+        >
+          <RippleRing color={SYSTEM_META[c.system]?.color ?? '#fff'} delay={0} size={sc(30)} />
+          <RippleRing color={SYSTEM_META[c.system]?.color ?? '#fff'} delay={700} size={sc(30)} />
+        </View>
+      ))}
+    </View>
   )
 }
 
@@ -1112,7 +1200,7 @@ function SettingsSheet() {
             />
             <MonthDropdown value={birthMonth} onChange={setBirthMonth} />
           </View>
-          <Text style={styles.settingsHint}>Exact date is not stored for privacy.</Text>
+          <Text style={styles.settingsHint}>Privacy: Date isn&apos;t stored</Text>
         </View>
 
         <View style={styles.genderCol}>
@@ -1144,7 +1232,12 @@ function SettingsSheet() {
 
 // ─── Upload Shortcuts ─────────────────────────────────────────────────────────
 
-function UploadShortcuts() {
+function UploadShortcuts({
+  onResetView, viewTransformed,
+}: {
+  onResetView: () => void
+  viewTransformed: boolean
+}) {
   const {
     uploadPanelOpen, setUploadPanelOpen, uploadBtnsHovered, setUploadBtnsHovered,
     startAnalyze, openHealthChat,
@@ -1154,6 +1247,12 @@ function UploadShortcuts() {
 
   return (
     <View style={styles.uploadWrap}>
+      {/* Resets body-map zoom/pan; only shown once the view has been moved */}
+      {viewTransformed && (
+        <TouchableOpacity style={styles.resetViewBtn} onPress={onResetView}>
+          <Text style={styles.resetViewText}>RESET</Text>
+        </TouchableOpacity>
+      )}
       {uploadPanelOpen && (
         <Pressable
           style={[styles.uploadBtns, { opacity: btnsOpacity }]}
@@ -1207,14 +1306,111 @@ export default function BodyMapScreen() {
     selectCondition(c)
   }, [selectCondition])
 
+  // ── Body-map zoom & pan ──
+  // Mobile: two-finger pinch zooms, one-finger drag pans.
+  // Web: mouse wheel zooms, right-click drag pans.
+  const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 })
+  const viewRef = useRef(view)
+  viewRef.current = view
+  const bodyWrapRef = useRef<View>(null)
+  // mode: 0 = idle, 1 = one-finger pan, 2 = pinch
+  const gesture = useRef({ mode: 0, dist: 0, x: 0, y: 0, scale: 1, tx: 0, ty: 0 })
+
+  const clampScale = (s: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, s))
+  const resetView = useCallback(() => setView({ scale: 1, tx: 0, ty: 0 }), [])
+
+  useEffect(() => {
+    if (!IS_WEB) return
+    const node = bodyWrapRef.current as unknown as HTMLElement | null
+    if (!node) return
+    let panning = false
+    let lastX = 0
+    let lastY = 0
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const { scale, tx, ty } = viewRef.current
+      const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scale * Math.exp(-e.deltaY * 0.0015)))
+      const k = next / scale
+      setView({ scale: next, tx: tx * k, ty: ty * k })
+    }
+    const onContextMenu = (e: Event) => e.preventDefault()
+    const onMouseDown = (e: MouseEvent) => {
+      if (e.button !== 2) return
+      panning = true
+      lastX = e.clientX
+      lastY = e.clientY
+    }
+    const onMouseMove = (e: MouseEvent) => {
+      if (!panning) return
+      const { scale, tx, ty } = viewRef.current
+      setView({ scale, tx: tx + e.clientX - lastX, ty: ty + e.clientY - lastY })
+      lastX = e.clientX
+      lastY = e.clientY
+    }
+    const onMouseUp = () => { panning = false }
+    node.addEventListener('wheel', onWheel, { passive: false })
+    node.addEventListener('contextmenu', onContextMenu)
+    node.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      node.removeEventListener('wheel', onWheel)
+      node.removeEventListener('contextmenu', onContextMenu)
+      node.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [])
+
+  // Claims the responder only on movement, so taps still reach condition dots.
+  const panResponderProps = IS_WEB ? {} : {
+    onStartShouldSetResponder: () => false,
+    onMoveShouldSetResponder: () => true,
+    onResponderGrant: () => { gesture.current.mode = 0 },
+    onResponderMove: (e: GestureResponderEvent) => {
+      const touches = e.nativeEvent.touches
+      const g = gesture.current
+      const v = viewRef.current
+      if (touches.length >= 2) {
+        const dist = Math.hypot(
+          touches[0].pageX - touches[1].pageX,
+          touches[0].pageY - touches[1].pageY,
+        )
+        if (g.mode !== 2) {
+          gesture.current = { mode: 2, dist, x: 0, y: 0, scale: v.scale, tx: v.tx, ty: v.ty }
+          return
+        }
+        const scale = clampScale(g.scale * (dist / g.dist))
+        const k = scale / g.scale
+        setView({ scale, tx: g.tx * k, ty: g.ty * k })
+      } else if (touches.length === 1) {
+        const t = touches[0]
+        if (g.mode !== 1) {
+          gesture.current = { mode: 1, dist: 0, x: t.pageX, y: t.pageY, scale: v.scale, tx: v.tx, ty: v.ty }
+          return
+        }
+        setView({ scale: v.scale, tx: g.tx + t.pageX - g.x, ty: g.ty + t.pageY - g.y })
+      }
+    },
+    onResponderRelease: () => { gesture.current.mode = 0 },
+    onResponderTerminate: () => { gesture.current.mode = 0 },
+  }
+
+  const viewTransformed = view.scale !== 1 || view.tx !== 0 || view.ty !== 0
+
   return (
     <View style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <NavBar />
 
         <View style={styles.canvas}>
-          <View style={styles.bodyWrap}>
-            <View style={styles.bodyAspect}>
+          <View ref={bodyWrapRef} style={styles.bodyWrap} {...panResponderProps}>
+            <View
+              style={[
+                styles.bodyAspect,
+                { transform: [{ translateX: view.tx }, { translateY: view.ty }, { scale: view.scale }] },
+              ]}
+            >
               <BodyLayers activeSystems={activeSystems} />
               <BodySvg
                 activeSystems={activeSystems}
@@ -1224,12 +1420,18 @@ export default function BodyMapScreen() {
                 condDateOverrides={condDateOverrides}
                 selectedCondition={selectedCondition}
               />
+              <ConditionRipples
+                conditions={conditions}
+                activeSystems={activeSystems}
+                currentYear={currentYear}
+                condDateOverrides={condDateOverrides}
+              />
             </View>
           </View>
 
           <LegendPanel />
           <VerticalTimeRail conditions={conditions} />
-          <UploadShortcuts />
+          <UploadShortcuts onResetView={resetView} viewTransformed={viewTransformed} />
         </View>
       </SafeAreaView>
 
@@ -1265,8 +1467,9 @@ const styles = StyleSheet.create({
   logoM: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.9)' },
   logoAI: { fontFamily: 'MOMCAKE-Bold', fontSize: fs(20), color: '#8A60EB', lineHeight: fs(20) },
   logoGenki: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.9)' },
-  navChevron: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.4)', marginLeft: sc(8), width: fs(16), textAlign: 'center', transform: [{ rotate: '90deg' }] },
-  navChevronOpen: { transform: [{ rotate: '270deg' }] },
+  navChevronBox: { marginLeft: sc(8), width: fs(16), height: fs(16), alignItems: 'center', justifyContent: 'center', alignSelf: 'center', transform: [{ rotate: '90deg' }] },
+  navChevronBoxOpen: { transform: [{ rotate: '270deg' }] },
+  navChevron: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), lineHeight: fs(18), color: 'rgba(255,255,255,0.4)', textAlign: 'center' },
   navRight: { flexDirection: 'row', alignItems: 'center', gap: sc(10) },
   datePill: {
     paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(14),
@@ -1274,7 +1477,8 @@ const styles = StyleSheet.create({
   },
   datePillText: { fontFamily: 'SourceCodePro', fontSize: fs(11), color: C.ink },
 
-  canvas: { flex: 1, position: 'relative', overflow: 'hidden' },
+  // True-black canvas; userSelect keeps rail drags from selecting the layers on web
+  canvas: { flex: 1, position: 'relative', overflow: 'hidden', backgroundColor: '#000', userSelect: 'none' },
 
   bodyWrap: { position: 'absolute', top: '2.5%', left: 0, right: RAIL_W_INACTIVE, bottom: 0 },
   bodyAspect: { height: '100%', aspectRatio: 260 / 460, alignSelf: 'center', position: 'relative' },
@@ -1288,6 +1492,8 @@ const styles = StyleSheet.create({
   legendRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8), paddingVertical: sc(5) },
   legendDot: { width: sc(8), height: sc(8), borderRadius: sc(4) },
   legendLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.ink },
+  legendOnlyBtn: { marginLeft: 'auto', paddingHorizontal: sc(6), alignItems: 'center', justifyContent: 'center' },
+  legendOnlyText: { fontFamily: 'BarlowCondensed-Bold', color: '#0A0C14', letterSpacing: 0.5 },
 
   railWrap: {
     position: 'absolute', top: 0, right: 0, bottom: 0,
@@ -1464,6 +1670,8 @@ const styles = StyleSheet.create({
 
   // Upload shortcuts
   uploadWrap: { position: 'absolute', bottom: sc(20), left: sc(16), alignItems: 'flex-start', zIndex: 4 },
+  resetViewBtn: { paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(6), borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', backgroundColor: 'rgba(255,255,255,0.06)', marginBottom: sc(8) },
+  resetViewText: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(10), letterSpacing: 1, color: C.inkMuted },
   uploadBtns: { gap: sc(8), alignItems: 'flex-start', marginBottom: sc(8) },
   uploadShortcut: { width: sc(28), height: sc(28), borderRadius: sc(6), backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
   uploadShortcutChat: { width: sc(28), height: sc(28), borderRadius: sc(6), backgroundColor: 'rgba(138,96,235,0.12)', borderWidth: 1, borderColor: 'rgba(138,96,235,0.3)', alignItems: 'center', justifyContent: 'center' },

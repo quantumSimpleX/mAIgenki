@@ -85,7 +85,7 @@ It does not block Phases 0–2, but must be completed before Phase 3 polish.
 
 - [x] **Task 2.3** — Body map screen (`src/app/bodymap.tsx`)
   - NavBar (back | "Health Story" | settings gear)
-  - LegendPanel: 11 colored system chips, toggleable
+  - LegendPanel: 11 colored system chips, toggleable, each with an ONLY solo button (layer order per SPEC.md system table)
   - BodySvg: SVG placeholder (viewBox `0 0 260 460`), organ highlight ellipses + condition dots per system
   - Time rail: vertical right side, log-scale K=2.5, 14px inactive / 36px active ticks
   - Tab switcher: Body Map | Timeline (`bodyMapMode` state)

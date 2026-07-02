@@ -46,6 +46,7 @@ type AppActions = {
   setAnalyzeProgress: (progress: number) => void
   setAnalyzePhase: (phase: number) => void
   toggleSystem: (id: SystemId) => void
+  soloSystem: (id: SystemId) => void
   setActiveSystems: (systems: SystemId[]) => void
   setCurrentYear: (year: number) => void
   selectCondition: (c: DesignCondition | null) => void
@@ -117,6 +118,12 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     activeSystems: s.activeSystems.includes(id)
       ? s.activeSystems.filter((x) => x !== id)
       : [...s.activeSystems, id],
+  })),
+  // Solo the tapped system; soloing it again restores all layers.
+  soloSystem: (id) => set((s) => ({
+    activeSystems: s.activeSystems.length === 1 && s.activeSystems[0] === id
+      ? [...ALL_SYSTEMS]
+      : [id],
   })),
   setActiveSystems: (activeSystems) => set({ activeSystems }),
   setCurrentYear: (currentYear) => set({ currentYear }),

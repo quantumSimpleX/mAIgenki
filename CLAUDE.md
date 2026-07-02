@@ -49,7 +49,7 @@ The UI is three screens deep: upload → anatomy viewer → condition drill-down
 // src/model/health.ts
 // 11 systems, ordered to match the legend (top → bottom) and the NN- asset prefix.
 type OrgSystem = 'integumentary' | 'muscular' | 'skeletal' | 'cardiovascular'
-  | 'lymphatic' | 'nervous' | 'respiratory' | 'digestive' | 'renal'
+  | 'nervous' | 'digestive' | 'respiratory' | 'renal' | 'lymphatic'
   | 'endocrine' | 'reproductive'
 
 type ConditionStatus = 'documented' | 'resolved' | 'inferred'
@@ -64,7 +64,7 @@ type Condition = {
 
 ## Anatomy Asset Naming
 
-PNG files follow `NN-{system}.png`, where `NN` is the legend order (`00`–`10`) and `{system}` is the full `OrgSystem` name. A `-m`/`-f` suffix is added only for gender-specific layers (currently just `10-reproductive-m.png`; no `-f` yet). Layers live in three sibling folders by processing stage: `maigenki-systems-0ORIG` (raw), `-1noBG` (background removed), `-2colorized` (display layers used in the build). All files in a folder share **identical canvas dimensions** (1018×2436px) so they align when stacked. Body type is inferred from records; user is prompted only if indeterminate.
+PNG files follow `NN-{system}.png`, where `NN` is the legend order (`00`–`10`; `00` is the back layer, `10` the front) and `{system}` is the full `OrgSystem` name. Layer stacking order matches the `OrgSystem` union above. A `-m`/`-f` suffix is added only for gender-specific layers (currently just `10-reproductive-m.png`; no `-f` yet). Layers live in three sibling folders by processing stage: `maigenki-systems-0ORIG` (raw), `-1noBG` (background removed), `-2colorized` (display layers used in the build). All files in a folder share **identical canvas dimensions** (1018×2436px) so they align when stacked. Body type is inferred from records; user is prompted only if indeterminate.
 
 ## Code Style
 
