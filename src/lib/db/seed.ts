@@ -26,11 +26,13 @@ async function migrateSystemCodes(db: SQLiteDatabase): Promise<void> {
 }
 
 // Runs on every startup so existing seeded DBs pick up repositioned condition dots.
+// Only updates cx/cy — these are guaranteed by ALTER_COLUMNS_SQL. render_x/render_y
+// are handled separately via ALTER_COLUMNS_SQL so they may not exist in very old DBs.
 async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
   for (const c of CONDITIONS) {
     await db.runAsync(
-      'UPDATE conditions SET cx = ?, cy = ?, render_x = ?, render_y = ? WHERE id = ?',
-      [c.cx, c.cy, c.cx, c.cy, c.id],
+      'UPDATE conditions SET cx = ?, cy = ? WHERE id = ?',
+      [c.cx, c.cy, c.id],
     )
   }
 }

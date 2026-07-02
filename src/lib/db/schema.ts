@@ -262,6 +262,8 @@ export const CREATE_TABLES_SQL = `
 // try/catch on init so an already-migrated DB ignores the duplicate-column error.
 export const ALTER_COLUMNS_SQL: string[] = [
   `ALTER TABLE conditions ADD COLUMN evidence TEXT`,
+  `ALTER TABLE conditions ADD COLUMN render_x REAL`,
+  `ALTER TABLE conditions ADD COLUMN render_y REAL`,
   `ALTER TABLE conditions ADD COLUMN cx REAL`,
   `ALTER TABLE conditions ADD COLUMN cy REAL`,
   `ALTER TABLE conditions ADD COLUMN year_frac REAL`,

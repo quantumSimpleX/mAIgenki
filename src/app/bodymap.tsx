@@ -393,9 +393,12 @@ function BodyLayers({ activeSystems }: { activeSystems: SystemId[] }) {
 
 // Permanent faded dots: show all conditions regardless of current time, 30% opacity.
 // Clicking has the same effect as the interactive dots (snaps rail + opens condition sheet).
-// Uses a single full-SVG transparent Rect handler + "find nearest dot within threshold"
-// to avoid (a) overlapping hit areas between close dots and (b) z-order eclipsing where
-// dots from lower PNG layers can never be reached because higher-layer dots sit on top.
+//
+// The SVG is purely visual (pointerEvents="none"). A separate transparent View / Pressable
+// layered on top owns all click/press events and uses "find nearest dot within 8 SVG units"
+// to identify which condition was intended. This eliminates both (a) overlapping hit areas
+// between tightly-clustered dots and (b) SVG z-order eclipsing where a higher-layer dot's
+// hit area would block a lower-layer dot from ever being reachable.
 function GhostDots({
   conditions, activeSystems, onPress,
 }: {
@@ -404,6 +407,7 @@ function GhostDots({
   onPress: (c: DesignCondition) => void
 }) {
   const visible = conditions.filter((c) => activeSystems.includes(c.system))
+  const [nativeSize, setNativeSize] = useState({ w: 260, h: 460 })
 
   const pressNearest = useCallback((svgX: number, svgY: number) => {
     let nearest: DesignCondition | null = null
@@ -415,39 +419,50 @@ function GhostDots({
     if (nearest) onPress(nearest)
   }, [visible, onPress])
 
-  const rectProps = IS_WEB
-    ? {
-        onClick: (e: React.MouseEvent<SVGRectElement>) => {
-          const svgEl = (e.target as SVGElement).ownerSVGElement!
-          const rect = svgEl.getBoundingClientRect()
-          pressNearest(
-            (e.clientX - rect.left) * 260 / rect.width,
-            (e.clientY - rect.top) * 460 / rect.height,
-          )
-        },
-      }
-    : {
-        onPress: (e: GestureResponderEvent) => {
-          pressNearest(e.nativeEvent.locationX, e.nativeEvent.locationY)
-        },
-      }
-
   return (
-    <Svg width="100%" height="100%" viewBox="0 0 260 460" style={StyleSheet.absoluteFill} pointerEvents="box-none">
-      <Rect
-        x={0} y={0} width={260} height={460}
-        fill="transparent"
-        pointerEvents="auto"
-        {...(rectProps as ComponentProps<typeof Rect>)}
-      />
-      {visible.map((c) => (
-        <Circle
-          key={c.id} cx={c.cx} cy={c.cy} r={1.5}
-          fill={SYSTEM_META[c.system]?.color ?? '#fff'} fillOpacity={0.3}
-          pointerEvents="none"
+    <>
+      {/* Visual layer: ghost dots at 30% opacity, no pointer events */}
+      <Svg
+        width="100%" height="100%" viewBox="0 0 260 460"
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      >
+        {visible.map((c) => (
+          <Circle
+            key={c.id} cx={c.cx} cy={c.cy} r={1.5}
+            fill={SYSTEM_META[c.system]?.color ?? '#fff'} fillOpacity={0.3}
+            pointerEvents="none"
+          />
+        ))}
+      </Svg>
+      {/* Click-handling layer: outside the SVG to avoid SVG pointer-events fragility */}
+      {IS_WEB ? (
+        <View
+          style={StyleSheet.absoluteFill}
+          {...({
+            onClick: (e: any) => {
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+              pressNearest(
+                (e.clientX - rect.left) * 260 / rect.width,
+                (e.clientY - rect.top) * 460 / rect.height,
+              )
+            },
+          } as object)}
         />
-      ))}
-    </Svg>
+      ) : (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onLayout={(e) => {
+            const { width, height } = e.nativeEvent.layout
+            setNativeSize({ w: width, h: height })
+          }}
+          onPress={(e) => pressNearest(
+            (e.nativeEvent.locationX / nativeSize.w) * 260,
+            (e.nativeEvent.locationY / nativeSize.h) * 460,
+          )}
+        />
+      )}
+    </>
   )
 }
 
