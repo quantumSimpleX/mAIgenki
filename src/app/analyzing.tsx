@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { router } from 'expo-router'
 import {
   Animated, Dimensions, Easing, Platform, StyleSheet, Text, View,
@@ -66,7 +66,7 @@ function BodySilhouette({ reveal }: { reveal: Animated.Value }) {
 }
 
 function BlinkingDots() {
-  const anims = useRef(DOT_POS.map(() => new Animated.Value(0.2))).current
+  const [anims] = useState(() => DOT_POS.map(() => new Animated.Value(0.2)))
 
   useEffect(() => {
     const loops = anims.map((v, i) =>
@@ -112,8 +112,8 @@ function PhaseDots({ phase }: { phase: number }) {
 export default function AnalyzingScreen() {
   const { analyzeProgress, analyzePhase, setAnalyzeProgress, setAnalyzePhase, setScreen } = useAppStore()
 
-  const reveal = useRef(new Animated.Value(0)).current
-  const fadeIn = useRef(new Animated.Value(0)).current
+  const [reveal] = useState(() => new Animated.Value(0))
+  const [fadeIn] = useState(() => new Animated.Value(0))
 
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: !IS_WEB, easing: Easing.out(Easing.ease) }).start()

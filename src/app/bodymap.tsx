@@ -329,7 +329,7 @@ function LegendPanel() {
   const rowH = Math.ceil(labelFs * 1.4) + rowPadV * 2
   const contentH = rowH * (ROWS + 1) + innerPadV * 2
 
-  const maxH = useRef(new Animated.Value(legendOpen ? contentH : 0)).current
+  const [maxH] = useState(() => new Animated.Value(legendOpen ? contentH : 0))
   useEffect(() => {
     Animated.timing(maxH, {
       toValue: legendOpen ? contentH : 0,
@@ -545,7 +545,7 @@ function BodySvg({
 // One radiating ring, per the Claude Design pulse-ring reference: scale 1→2.4,
 // opacity 0.25→0, 2.2s ease-out, looping. `delay` phase-shifts the second ring.
 function RippleRing({ color, delay, size }: { color: string; delay: number; size: number }) {
-  const anim = useRef(new Animated.Value(0)).current
+  const [anim] = useState(() => new Animated.Value(0))
   useEffect(() => {
     const loop = Animated.sequence([
       Animated.delay(delay),
@@ -623,7 +623,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   } = useAppStore()
 
   const [railH, setRailH] = useState(SH * 0.6)
-  const widthAnim = useRef(new Animated.Value(IS_WEB ? RAIL_W_ACTIVE : RAIL_W_INACTIVE)).current
+  const [widthAnim] = useState(() => new Animated.Value(IS_WEB ? RAIL_W_ACTIVE : RAIL_W_INACTIVE))
   const didDrag = useRef(false)
   const wasActiveOnGrant = useRef(false)
   const railRef = useRef<View>(null)
@@ -681,9 +681,11 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   // listen on window instead: the thumb follows the mouse anywhere on screen
   // until the button is released. snapRef keeps the latest closure (railH etc.).
   const snapRef = useRef(snapToNearest)
-  snapRef.current = snapToNearest
   const activateRef = useRef(activateRail)
-  activateRef.current = activateRail
+  useEffect(() => {
+    snapRef.current = snapToNearest
+    activateRef.current = activateRail
+  })
 
   // Web drag is driven entirely by DOM listeners (no RN responder props, which
   // react-native-web does not consume on Animated.View and would leak to the
@@ -894,12 +896,10 @@ function ConditionSheet() {
 
   const condRecords = useConditionRecords(selectedCondition?.id)
 
-  const sheetTranslateY = useRef(new Animated.Value(1)).current // 1 = off-screen
-  const [disclaimerShown, setDisclaimerShown] = useState(false)
+  const [sheetTranslateY] = useState(() => new Animated.Value(1)) // 1 = off-screen
+  const disclaimerShown = useRef(false)
 
-  const prevOpen = useRef(false)
-  if (prevOpen.current !== sheetOpen) {
-    prevOpen.current = sheetOpen
+  useEffect(() => {
     Animated.timing(sheetTranslateY, {
       toValue: sheetOpen ? 0 : 1,
       duration: 420,
@@ -907,14 +907,15 @@ function ConditionSheet() {
       // '%' output range below can't run on the native driver; JS-driven here.
       useNativeDriver: false,
     }).start()
-  }
+  }, [sheetTranslateY, sheetOpen])
 
   // Disclaimer must precede the first chat message every session (cannot be
-  // permanently dismissed).
+  // permanently dismissed). Tracked with a ref so it resets each session (on
+  // remount) without triggering an extra render.
   useEffect(() => {
-    if (chatOpen && sheetOpen && !disclaimerShown) {
+    if (chatOpen && sheetOpen && !disclaimerShown.current) {
       addChatMessage({ role: 'assistant', content: DISCLAIMER })
-      setDisclaimerShown(true)
+      disclaimerShown.current = true
     }
   }, [chatOpen, sheetOpen])
 
@@ -1283,20 +1284,25 @@ function SettingsSheet() {
   // Local draft so the year field can be typed freely; only a valid 4-digit year
   // is committed to the store (and persisted). Re-syncs when birthYear changes
   // externally, e.g. when settings are hydrated from SQLite.
+  // Resync the draft when birthYear changes externally (e.g. settings hydrated
+  // from SQLite). React's "adjust state during render" pattern — preferred over an
+  // effect, which would cause an extra render pass.
   const [yearDraft, setYearDraft] = useState(String(birthYear))
-  useEffect(() => { setYearDraft(String(birthYear)) }, [birthYear])
+  const [prevBirthYear, setPrevBirthYear] = useState(birthYear)
+  if (birthYear !== prevBirthYear) {
+    setPrevBirthYear(birthYear)
+    setYearDraft(String(birthYear))
+  }
 
-  const anim = useRef(new Animated.Value(0)).current
-  const prevOpen = useRef(false)
-  if (prevOpen.current !== settingsOpen) {
-    prevOpen.current = settingsOpen
+  const [anim] = useState(() => new Animated.Value(0))
+  useEffect(() => {
     Animated.timing(anim, {
       toValue: settingsOpen ? 1 : 0,
       duration: 280,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: !IS_WEB,
     }).start()
-  }
+  }, [anim, settingsOpen])
 
   const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [sc(500), 0] })
 
@@ -1475,7 +1481,7 @@ export default function BodyMapScreen() {
   // Web: mouse wheel zooms, right-click drag pans.
   const [view, setView] = useState({ scale: 1, tx: 0, ty: 0 })
   const viewRef = useRef(view)
-  viewRef.current = view
+  useEffect(() => { viewRef.current = view })
   const bodyWrapRef = useRef<View>(null)
   // mode: 0 = idle, 1 = one-finger pan, 2 = pinch
   const gesture = useRef({ mode: 0, dist: 0, x: 0, y: 0, scale: 1, tx: 0, ty: 0 })

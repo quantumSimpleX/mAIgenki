@@ -8,38 +8,43 @@ import { getConditions, getConditionRecords } from '@/lib/db/queries'
 // Loads seeded conditions from SQLite, falling back to the hardcoded CONDITIONS
 // (used in tests, before the DB is seeded, or when the DB is unavailable on web).
 export function useConditions(): [DesignCondition[], () => void] {
-  const [conditions, setConditions] = useState<DesignCondition[]>([])
+  // Seed initial state with the hardcoded fallback so no state is ever empty —
+  // this also avoids a synchronous setState when the DB is unavailable.
+  const [conditions, setConditions] = useState<DesignCondition[]>(CONDITIONS)
   const db = useOptionalDatabase()
 
   const refresh = useCallback(() => {
-    if (!db) { setConditions(CONDITIONS); return }
-    getConditions(db).then(setConditions).catch(() => setConditions(CONDITIONS))
+    if (!db) return // initial/current state already holds the fallback
+    getConditions(db)
+      .then((rows) => setConditions(rows.length > 0 ? rows : CONDITIONS))
+      .catch(() => setConditions(CONDITIONS))
   }, [db])
 
   useEffect(() => { refresh() }, [refresh])
 
-  return [conditions.length > 0 ? conditions : CONDITIONS, refresh]
+  return [conditions, refresh]
 }
 
 // Loads a condition's attached records from SQLite, falling back to the
 // hardcoded CONDITION_RECORDS map.
 export function useConditionRecords(condId: string | null | undefined): ConditionRecord[] {
-  const [records, setRecords] = useState<ConditionRecord[]>([])
+  // Only DB-loaded rows live in state; the hardcoded fallback and the empty/no-id
+  // cases are derived during render, so the effect never setStates synchronously.
+  // `id` tags which condition the loaded rows belong to, guarding against showing
+  // stale rows after condId changes.
+  const [loaded, setLoaded] = useState<{ id: string; rows: ConditionRecord[] } | null>(null)
   const db = useOptionalDatabase()
 
   useEffect(() => {
-    if (!condId) {
-      setRecords([])
-      return
-    }
-    if (!db) {
-      setRecords(CONDITION_RECORDS[condId] ?? [])
-      return
-    }
+    if (!condId || !db) return
+    let cancelled = false
     getConditionRecords(db, condId)
-      .then((rows) => setRecords(rows.length > 0 ? rows : (CONDITION_RECORDS[condId] ?? [])))
-      .catch(() => setRecords(CONDITION_RECORDS[condId] ?? []))
+      .then((rows) => { if (!cancelled) setLoaded({ id: condId, rows }) })
+      .catch(() => { if (!cancelled) setLoaded({ id: condId, rows: [] }) })
+    return () => { cancelled = true }
   }, [db, condId])
 
-  return records
+  if (!condId) return []
+  if (loaded && loaded.id === condId && loaded.rows.length > 0) return loaded.rows
+  return CONDITION_RECORDS[condId] ?? []
 }
