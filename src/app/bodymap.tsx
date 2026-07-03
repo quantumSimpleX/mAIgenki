@@ -1492,8 +1492,8 @@ export default function BodyMapScreen() {
   const viewRef = useRef(view)
   useEffect(() => { viewRef.current = view })
   const bodyWrapRef = useRef<View>(null)
-  // mode: 0 = idle, 1 = one-finger pan, 2 = pinch
-  const gesture = useRef({ mode: 0, dist: 0, x: 0, y: 0, scale: 1, tx: 0, ty: 0 })
+  // mode: 0 = idle, 1 = one-finger pan, 2 = pinch. cx/cy = measured canvas centre.
+  const gesture = useRef({ mode: 0, dist: 0, x: 0, y: 0, scale: 1, tx: 0, ty: 0, cx: 0, cy: 0 })
 
   const clampScale = (s: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, s))
   const resetView = useCallback(() => setView({ scale: 1, tx: 0, ty: 0 }), [])
@@ -1510,7 +1510,11 @@ export default function BodyMapScreen() {
       const { scale, tx, ty } = viewRef.current
       const next = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, scale * Math.exp(-e.deltaY * 0.0015)))
       const k = next / scale
-      setView({ scale: next, tx: tx * k, ty: ty * k })
+      const rect = node.getBoundingClientRect()
+      const qx = e.clientX - (rect.left + rect.width / 2)
+      const qy = e.clientY - (rect.top + rect.height / 2)
+      // Zoom about the cursor: keep the content point under it fixed.
+      setView({ scale: next, tx: k * tx + qx * (1 - k), ty: k * ty + qy * (1 - k) })
     }
     const onContextMenu = (e: Event) => e.preventDefault()
     const onMouseDown = (e: MouseEvent) => {
@@ -1531,8 +1535,9 @@ export default function BodyMapScreen() {
     // Must use non-passive listeners so preventDefault() blocks the browser's
     // own pinch-to-zoom (which would scale the whole viewport, not just the layers).
     let twoFingerActive = false
-    let tfStartDist = 0, tfStartMx = 0, tfStartMy = 0
+    let tfStartDist = 0, tfM0x = 0, tfM0y = 0
     let tfStartScale = 1, tfStartTx = 0, tfStartTy = 0
+    let tfCx = 0, tfCy = 0 // canvas centre (transform origin) at gesture start
     const touchInfo = (t: TouchList) => ({
       dist: Math.hypot(t[1].clientX - t[0].clientX, t[1].clientY - t[0].clientY),
       mx: (t[0].clientX + t[1].clientX) / 2,
@@ -1542,8 +1547,12 @@ export default function BodyMapScreen() {
       if (e.touches.length === 2) {
         e.preventDefault()
         twoFingerActive = true
+        const rect = node.getBoundingClientRect()
+        tfCx = rect.left + rect.width / 2
+        tfCy = rect.top + rect.height / 2
         const { dist, mx, my } = touchInfo(e.touches)
-        tfStartDist = dist; tfStartMx = mx; tfStartMy = my
+        tfStartDist = dist
+        tfM0x = mx - tfCx; tfM0y = my - tfCy // start midpoint relative to centre
         tfStartScale = viewRef.current.scale
         tfStartTx = viewRef.current.tx
         tfStartTy = viewRef.current.ty
@@ -1553,10 +1562,14 @@ export default function BodyMapScreen() {
       if (!twoFingerActive || e.touches.length !== 2) return
       e.preventDefault()
       const { dist, mx, my } = touchInfo(e.touches)
+      const scale = clampScale(tfStartScale * (dist / tfStartDist))
+      const k = scale / tfStartScale
+      // Zoom about the pinch midpoint: keep the content point under it pinned to
+      // the (moving) midpoint as the fingers spread, pinch, and drag.
       setView({
-        scale: clampScale(tfStartScale * (dist / tfStartDist)),
-        tx: tfStartTx + (mx - tfStartMx),
-        ty: tfStartTy + (my - tfStartMy),
+        scale,
+        tx: (mx - tfCx) - k * (tfM0x - tfStartTx),
+        ty: (my - tfCy) - k * (tfM0y - tfStartTy),
       })
     }
     const onTouchEnd = () => { twoFingerActive = false }
@@ -1608,16 +1621,32 @@ export default function BodyMapScreen() {
         const mx = (t0.pageX + t1.pageX) / 2
         const my = (t0.pageY + t1.pageY) / 2
         if (g.mode !== 2) {
-          // Capture initial mid-point and state for both pinch and pan.
-          gesture.current = { mode: 2, dist, x: mx, y: my, scale: v.scale, tx: v.tx, ty: v.ty }
+          // Capture initial mid-point and state for both pinch and pan. cx/cy is
+          // measured async (NaN until it lands) so we can zoom about the midpoint.
+          gesture.current = { mode: 2, dist, x: mx, y: my, scale: v.scale, tx: v.tx, ty: v.ty, cx: NaN, cy: NaN }
+          bodyWrapRef.current?.measureInWindow((wx, wy, w, h) => {
+            gesture.current.cx = wx + w / 2
+            gesture.current.cy = wy + h / 2
+          })
           return
         }
         const scale = clampScale(g.scale * (dist / g.dist))
-        setView({ scale, tx: g.tx + (mx - g.x), ty: g.ty + (my - g.y) })
+        if (Number.isNaN(g.cx)) {
+          // Centre not measured yet: centre-anchored zoom + midpoint pan.
+          setView({ scale, tx: g.tx + (mx - g.x), ty: g.ty + (my - g.y) })
+        } else {
+          // Zoom about the pinch midpoint (relative to the measured canvas centre).
+          const k = scale / g.scale
+          setView({
+            scale,
+            tx: (mx - g.cx) - k * ((g.x - g.cx) - g.tx),
+            ty: (my - g.cy) - k * ((g.y - g.cy) - g.ty),
+          })
+        }
       } else if (touches.length === 1) {
         const t = touches[0]
         if (g.mode !== 1) {
-          gesture.current = { mode: 1, dist: 0, x: t.pageX, y: t.pageY, scale: v.scale, tx: v.tx, ty: v.ty }
+          gesture.current = { mode: 1, dist: 0, x: t.pageX, y: t.pageY, scale: v.scale, tx: v.tx, ty: v.ty, cx: 0, cy: 0 }
           return
         }
         setView({ scale: v.scale, tx: g.tx + t.pageX - g.x, ty: g.ty + t.pageY - g.y })
