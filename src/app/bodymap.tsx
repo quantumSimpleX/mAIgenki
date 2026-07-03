@@ -612,8 +612,8 @@ function ConditionRipples({
 
 // Desktop keeps the slim interactive rail; on any touch viewport (native or mobile web)
 // the rail is always expanded so it's draggable without a prior tap.
-const RAIL_W_INACTIVE = IS_DESKTOP ? sc(14) : sc(36)
-const RAIL_W_ACTIVE   = IS_DESKTOP ? sc(18) : sc(36)
+const RAIL_W_INACTIVE = IS_DESKTOP ? sc(14) : sc(18)
+const RAIL_W_ACTIVE   = IS_DESKTOP ? sc(18) : sc(18)
 
 function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const {
@@ -623,6 +623,9 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   } = useAppStore()
 
   const [railH, setRailH] = useState(SH * 0.6)
+  // True only while the thumb is being actively dragged — gates the date/age label
+  // so it appears exclusively during a drag, not at rest.
+  const [dragging, setDragging] = useState(false)
   const [widthAnim] = useState(() => new Animated.Value(IS_WEB ? RAIL_W_ACTIVE : RAIL_W_INACTIVE))
   const didDrag = useRef(false)
   const wasActiveOnGrant = useRef(false)
@@ -701,11 +704,13 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       snapRef.current(ev.clientY - railTopRef.current)
     }
     const onUp = () => {
+      setDragging(false)
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
     const onDown = (ev: MouseEvent) => {
       didDrag.current = false
+      setDragging(true)
       railTopRef.current = node.getBoundingClientRect().top
       activateRef.current()
       snapRef.current(ev.clientY - railTopRef.current)
@@ -722,6 +727,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       snapRef.current(ev.touches[0].clientY - railTopRef.current)
     }
     const onTouchEnd = () => {
+      setDragging(false)
       window.removeEventListener('touchmove', onTouchMove)
       window.removeEventListener('touchend', onTouchEnd)
       window.removeEventListener('touchcancel', onTouchEnd)
@@ -730,6 +736,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       if (ev.touches.length !== 1) return
       ev.preventDefault()
       didDrag.current = false
+      setDragging(true)
       railTopRef.current = node.getBoundingClientRect().top
       activateRef.current()
       snapRef.current(ev.touches[0].clientY - railTopRef.current)
@@ -767,6 +774,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
         onResponderGrant: (e: GestureResponderEvent) => {
           wasActiveOnGrant.current = timeRailActive
           didDrag.current = false
+          setDragging(true)
           activateRail()
           snapToNearest(e.nativeEvent.locationY)
         },
@@ -776,9 +784,10 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
         },
         // tap on already-active rail collapses it; drag also collapses on release
         onResponderRelease: () => {
+          setDragging(false)
           if (didDrag.current || wasActiveOnGrant.current) deactivateRail()
         },
-        onResponderTerminate: () => deactivateRail(),
+        onResponderTerminate: () => { setDragging(false); deactivateRail() },
       })}
     >
       <View style={styles.railTrack} />
@@ -803,7 +812,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
           )
         })}
       <View style={[styles.railThumb, { top: thumbTop - sc(4) }]} />
-      {timeRailActive && (
+      {dragging && (
         <View style={[styles.railLabel, { top: Math.max(0, thumbTop - 14), pointerEvents: 'none' }]}>
           <Text style={styles.railLabelText} numberOfLines={1}>
             {formatDateDisplay(currentYear, timeDisplayMode, birthYear, birthMonth)}
@@ -1738,7 +1747,7 @@ const styles = StyleSheet.create({
 
   legendPanel: {
     position: 'absolute', top: 0, left: 0,
-    backgroundColor: 'rgba(10,12,20,0.92)', overflow: 'hidden', zIndex: 5,
+    backgroundColor: 'rgba(10,12,20,0.4)', overflow: 'hidden', zIndex: 5,
   },
   legendInner: { paddingVertical: sc(10), paddingHorizontal: sc(12) },
   legendRow: { flexDirection: 'row', alignItems: 'flex-end', gap: sc(8), paddingVertical: sc(5) },
