@@ -5,7 +5,7 @@ import {
   Pressable, ScrollView, StyleSheet, Text, TextInput,
   TouchableOpacity, useWindowDimensions, View,
 } from 'react-native'
-import { IS_WEB, S, fs, sc } from '@/lib/scale'
+import { IS_WEB, IS_DESKTOP, S, fs, sc } from '@/lib/scale'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, {
   Circle, Ellipse, G, Line, Path as SvgPath, Rect,
@@ -120,6 +120,21 @@ function GearIcon({ color = 'rgba(255,255,255,0.55)', size = fs(20) }: { color?:
         stroke={color} strokeWidth={1.6} fill="none" strokeLinecap="round" strokeLinejoin="round"
       />
       <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={1.6} fill="none" />
+    </Svg>
+  )
+}
+
+function PencilIcon({ size = fs(13) }: { size?: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <SvgPath
+        d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"
+        stroke={C.inkMuted} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" fill="none"
+      />
+      <SvgPath
+        d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"
+        stroke={C.inkMuted} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" fill="none"
+      />
     </Svg>
   )
 }
@@ -241,6 +256,7 @@ function NavBar() {
   const {
     currentYear, timeDisplayMode, birthYear, birthMonth,
     toggleTimeDisplayMode, toggleSettings, toggleLegend, legendOpen,
+    relocatingCondition, cancelRelocation, preferredLanguage,
   } = useAppStore()
 
   return (
@@ -249,23 +265,36 @@ function NavBar() {
         <Text style={styles.logoM}>m</Text>
         <Text style={styles.logoAI}>AI</Text>
         <Text style={styles.logoGenki}> Genki</Text>
-        {/* SVG chevron — geometrically centered, rotates 180° when open. */}
         <View style={[styles.navChevronBox, legendOpen && styles.navChevronBoxOpen]}>
           <Svg width={fs(10)} height={fs(6)} viewBox="0 0 10 6" fill="none">
             <SvgPath d="M1 1L5 5L9 1" stroke="rgba(255,255,255,0.4)" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
           </Svg>
         </View>
       </TouchableOpacity>
-      <View style={styles.navRight}>
-        <TouchableOpacity style={styles.datePill} onPress={toggleTimeDisplayMode} hitSlop={8}>
-          <Text style={styles.datePillText}>
-            {formatDateDisplay(currentYear, timeDisplayMode, birthYear, birthMonth)}
+      {relocatingCondition ? (
+        <>
+          <Text
+            style={[styles.navRelocationText, { color: SYSTEM_META[relocatingCondition.system]?.color ?? C.aqua }]}
+            numberOfLines={1}
+          >
+            Tap to place · {getLocalName(relocatingCondition, preferredLanguage)}
           </Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={toggleSettings} hitSlop={12}>
-          <GearIcon />
-        </TouchableOpacity>
-      </View>
+          <TouchableOpacity onPress={cancelRelocation} hitSlop={12}>
+            <Text style={styles.navRelocationCancel}>✕</Text>
+          </TouchableOpacity>
+        </>
+      ) : (
+        <View style={styles.navRight}>
+          <TouchableOpacity style={styles.datePill} onPress={toggleTimeDisplayMode} hitSlop={8}>
+            <Text style={styles.datePillText}>
+              {formatDateDisplay(currentYear, timeDisplayMode, birthYear, birthMonth)}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={toggleSettings} hitSlop={12}>
+            <GearIcon />
+          </TouchableOpacity>
+        </View>
+      )}
     </View>
   )
 }
@@ -581,9 +610,8 @@ function ConditionRipples({
 
 // ─── Vertical Time Rail ──────────────────────────────────────────────────────
 
-const RAIL_W_INACTIVE = sc(14)
-// In the browser the rail stays expanded; keep it at half the previous desktop
-// width (slimmer drag target) while native keeps the larger touch width.
+// On native the rail is always expanded (no tap-to-expand dance on a touch screen).
+const RAIL_W_INACTIVE = IS_WEB ? sc(14) : sc(36)
 const RAIL_W_ACTIVE = IS_WEB ? sc(18) : sc(36)
 
 function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
@@ -953,7 +981,7 @@ function ConditionSheet() {
                   onPress={() => startRelocation(selectedCondition)}
                   hitSlop={10}
                 >
-                  <Text style={{ color: meta.color, fontSize: fs(13) }}>✏️</Text>
+                  <PencilIcon />
                 </TouchableOpacity>
               )}
             </View>
@@ -1005,7 +1033,7 @@ function ConditionSheet() {
                   hitSlop={8}
                   style={styles.datePencilBtn}
                 >
-                  <Text style={styles.datePencil}>✎</Text>
+                  <PencilIcon />
                 </TouchableOpacity>
               </View>
             )}
@@ -1273,7 +1301,7 @@ function SettingsSheet() {
 
       <View style={styles.birthGenderRow}>
         <View style={styles.birthCol}>
-          <Text style={styles.settingsSectionLabel}>Birth</Text>
+          <Text style={styles.settingsSectionLabel}>Birth: Inferred</Text>
           <View style={styles.dobRow}>
             <TextInput
               style={styles.dobYearInput}
@@ -1291,11 +1319,11 @@ function SettingsSheet() {
             />
             <MonthDropdown value={birthMonth} onChange={setBirthMonth} />
           </View>
-          <Text style={styles.settingsHint}>Privacy: Date isn&apos;t stored</Text>
+          <Text style={styles.settingsHint}>Tap to correct.</Text>
         </View>
 
         <View style={styles.genderCol}>
-          <Text style={styles.settingsSectionLabel}>Gender</Text>
+          <Text style={styles.settingsSectionLabel}>Gender: Inferred</Text>
           <View style={styles.genderRow}>
             {(['female', 'male'] as Gender[]).map((g) => (
               <TouchableOpacity
@@ -1314,7 +1342,7 @@ function SettingsSheet() {
               </TouchableOpacity>
             ))}
           </View>
-          <Text style={styles.settingsHint}>Inferred — tap to correct.</Text>
+          <Text style={styles.settingsHint}>Tap to correct.</Text>
         </View>
       </View>
     </Animated.View>
@@ -1330,11 +1358,11 @@ function UploadShortcuts({
   viewTransformed: boolean
 }) {
   const {
-    uploadPanelOpen, setUploadPanelOpen, uploadBtnsHovered, setUploadBtnsHovered,
+    uploadPanelOpen, setUploadPanelOpen,
     startAnalyze, openHealthChat,
   } = useAppStore()
 
-  const btnsOpacity = !uploadPanelOpen ? 0 : uploadBtnsHovered ? 0.85 : 0.2
+  const btnsOpacity = !uploadPanelOpen ? 0 : 1
 
   return (
     <View style={styles.uploadWrap}>
@@ -1350,24 +1378,23 @@ function UploadShortcuts({
       {uploadPanelOpen && (
         <Pressable
           style={[styles.uploadBtns, { opacity: btnsOpacity }]}
-          onHoverIn={() => setUploadBtnsHovered(true)}
-          onHoverOut={() => setUploadBtnsHovered(false)}
         >
           <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
             <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
-              <SvgPath d="M7 3h7l4 4v14H7z" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
-              <SvgPath d="M14 3v4h4" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
+              <SvgPath d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+                stroke={C.purpleLight} strokeWidth={1.6} fill="none" strokeLinejoin="round" />
+              <SvgPath d="M14 2v6h6" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
+              <SvgPath d="M12 18v-6M9 15l3-3 3 3" stroke={C.purpleLight} strokeWidth={1.6}
+                strokeLinecap="round" strokeLinejoin="round" fill="none" />
             </Svg>
           </TouchableOpacity>
-          {!IS_WEB && (
-            <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
-              <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
-                <Rect x={3} y={7} width={18} height={13} rx={2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
-                <Circle cx={12} cy={13} r={3.2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
-                <SvgPath d="M8 7l1.5-2h5L16 7" stroke={C.aqua} strokeWidth={1.6} fill="none" />
-              </Svg>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
+            <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
+              <Rect x={3} y={7} width={18} height={13} rx={2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
+              <Circle cx={12} cy={13} r={3.2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
+              <SvgPath d="M8 7l1.5-2h5L16 7" stroke={C.aqua} strokeWidth={1.6} fill="none" />
+            </Svg>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
             <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
               <Rect x={3} y={4} width={18} height={16} rx={2} stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
@@ -1394,7 +1421,7 @@ export default function BodyMapScreen() {
     activeSystems, selectCondition,
     currentYear, sheetOpen, settingsOpen,
     condDateOverrides, selectedCondition,
-    preferredLanguage, relocatingCondition, cancelRelocation,
+    relocatingCondition, cancelRelocation,
   } = useAppStore()
 
   const [conditions, refreshConditions] = useConditions()
@@ -1538,23 +1565,6 @@ export default function BodyMapScreen() {
                 currentYear={currentYear}
                 condDateOverrides={condDateOverrides}
               />
-              {relocatingCondition && (() => {
-                const rMeta = SYSTEM_META[relocatingCondition.system]
-                return (
-                  <View style={styles.relocationBanner} pointerEvents="none">
-                    <Text style={[styles.relocationText, { color: rMeta?.color ?? C.aqua }]}>
-                      Tap to place · {getLocalName(relocatingCondition, preferredLanguage)}
-                    </Text>
-                    <TouchableOpacity
-                      onPress={cancelRelocation}
-                      hitSlop={10}
-                      style={{ pointerEvents: 'box-only' } as object}
-                    >
-                      <Text style={styles.relocationCancel}>✕</Text>
-                    </TouchableOpacity>
-                  </View>
-                )
-              })()}
             </View>
           </View>
 
@@ -1599,6 +1609,12 @@ const styles = StyleSheet.create({
   navChevronBox: { marginLeft: sc(8), width: fs(14), height: fs(14), alignItems: 'center', justifyContent: 'center', alignSelf: 'center', transform: [{ rotate: '0deg' }] },
   navChevronBoxOpen: { transform: [{ rotate: '180deg' }] },
   navRight: { flexDirection: 'row', alignItems: 'center', gap: sc(10) },
+  navRelocationText: {
+    flex: 1, textAlign: 'center',
+    fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(13), letterSpacing: sc(0.2),
+    paddingHorizontal: sc(6),
+  },
+  navRelocationCancel: { fontSize: fs(18), color: C.inkMuted, padding: sc(4) },
   datePill: {
     paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(14),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
@@ -1608,7 +1624,7 @@ const styles = StyleSheet.create({
   // True-black canvas; userSelect keeps rail drags from selecting the layers on web
   canvas: { flex: 1, position: 'relative', overflow: 'hidden', backgroundColor: '#000', userSelect: 'none' },
 
-  bodyWrap: { position: 'absolute', top: 0, left: 0, right: RAIL_W_INACTIVE, bottom: 0 },
+  bodyWrap: { position: 'absolute', top: 0, left: IS_DESKTOP ? 0 : sc(90), right: RAIL_W_INACTIVE, bottom: 0 },
   bodyAspect: { height: '100%', aspectRatio: 260 / 460, alignSelf: 'center', position: 'relative' },
   bodySvg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 

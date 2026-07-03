@@ -31,7 +31,7 @@ async function migrateSystemCodes(db: SQLiteDatabase): Promise<void> {
 async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
   for (const c of CONDITIONS) {
     await db.runAsync(
-      'UPDATE conditions SET cx = ?, cy = ? WHERE id = ?',
+      'UPDATE conditions SET cx = ?, cy = ? WHERE id = ? AND (cx IS NULL OR cy IS NULL)',
       [c.cx, c.cy, c.id],
     )
   }
