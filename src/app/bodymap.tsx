@@ -693,6 +693,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
     if (!IS_WEB) return
     const node = railRef.current as unknown as HTMLElement | null
     if (!node?.addEventListener) return
+    // ── Mouse (desktop) ──
     const onMove = (ev: MouseEvent) => {
       didDrag.current = true
       snapRef.current(ev.clientY - railTopRef.current)
@@ -709,11 +710,41 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       window.addEventListener('mousemove', onMove)
       window.addEventListener('mouseup', onUp)
     }
+    // ── Touch (mobile web) ── mobile browsers don't synthesize mouse events during
+    // a drag, so the rail needs its own touch listeners. preventDefault stops the
+    // page from scrolling while the thumb tracks the finger.
+    const onTouchMove = (ev: TouchEvent) => {
+      if (ev.touches.length !== 1) return
+      ev.preventDefault()
+      didDrag.current = true
+      snapRef.current(ev.touches[0].clientY - railTopRef.current)
+    }
+    const onTouchEnd = () => {
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+      window.removeEventListener('touchcancel', onTouchEnd)
+    }
+    const onTouchStart = (ev: TouchEvent) => {
+      if (ev.touches.length !== 1) return
+      ev.preventDefault()
+      didDrag.current = false
+      railTopRef.current = node.getBoundingClientRect().top
+      activateRef.current()
+      snapRef.current(ev.touches[0].clientY - railTopRef.current)
+      window.addEventListener('touchmove', onTouchMove, { passive: false })
+      window.addEventListener('touchend', onTouchEnd)
+      window.addEventListener('touchcancel', onTouchEnd)
+    }
     node.addEventListener('mousedown', onDown)
+    node.addEventListener('touchstart', onTouchStart, { passive: false })
     return () => {
       node.removeEventListener('mousedown', onDown)
+      node.removeEventListener('touchstart', onTouchStart)
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      window.removeEventListener('touchmove', onTouchMove)
+      window.removeEventListener('touchend', onTouchEnd)
+      window.removeEventListener('touchcancel', onTouchEnd)
     }
   }, [])
 
@@ -1514,6 +1545,10 @@ export default function BodyMapScreen() {
       })
     }
     const onTouchEnd = () => { twoFingerActive = false }
+    // iOS Safari ignores user-scalable=no and fires proprietary gesture* events for
+    // pinch-zoom. Swallowing them at the document level is the only reliable way to
+    // stop Safari from zooming the whole page instead of just the body-map layers.
+    const onGesture = (e: Event) => e.preventDefault()
 
     node.addEventListener('wheel', onWheel, { passive: false })
     node.addEventListener('contextmenu', onContextMenu)
@@ -1522,6 +1557,9 @@ export default function BodyMapScreen() {
     node.addEventListener('touchmove', onTouchMove, { passive: false })
     node.addEventListener('touchend', onTouchEnd)
     node.addEventListener('touchcancel', onTouchEnd)
+    document.addEventListener('gesturestart', onGesture, { passive: false })
+    document.addEventListener('gesturechange', onGesture, { passive: false })
+    document.addEventListener('gestureend', onGesture, { passive: false })
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', onMouseUp)
     return () => {
@@ -1532,6 +1570,9 @@ export default function BodyMapScreen() {
       node.removeEventListener('touchmove', onTouchMove)
       node.removeEventListener('touchend', onTouchEnd)
       node.removeEventListener('touchcancel', onTouchEnd)
+      document.removeEventListener('gesturestart', onGesture)
+      document.removeEventListener('gesturechange', onGesture)
+      document.removeEventListener('gestureend', onGesture)
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseup', onMouseUp)
     }
@@ -1667,7 +1708,11 @@ const styles = StyleSheet.create({
   // True-black canvas; userSelect keeps rail drags from selecting the layers on web
   canvas: { flex: 1, position: 'relative', overflow: 'hidden', backgroundColor: '#000', userSelect: 'none' },
 
-  bodyWrap: { position: 'absolute', top: 0, left: IS_DESKTOP ? 0 : sc(90), right: RAIL_W_INACTIVE, bottom: 0 },
+  bodyWrap: {
+    position: 'absolute', top: 0, left: IS_DESKTOP ? 0 : sc(90), right: RAIL_W_INACTIVE, bottom: 0,
+    // Browser must not claim touch gestures here — our JS handles all pinch/pan.
+    ...(IS_WEB ? { touchAction: 'none' as const } : {}),
+  },
   bodyAspect: { height: '100%', aspectRatio: 260 / 460, alignSelf: 'center', position: 'relative' },
   bodySvg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
 
@@ -1699,6 +1744,8 @@ const styles = StyleSheet.create({
   railWrap: {
     position: 'absolute', top: 0, right: 0, bottom: 0,
     backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'visible', zIndex: 3,
+    // Browser must not vertically scroll when the finger drags the rail.
+    ...(IS_WEB ? { touchAction: 'none' as const } : {}),
   },
   railTrack: { position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
   railDash: { position: 'absolute', left: sc(3), right: sc(3), height: 2, borderRadius: 1 },

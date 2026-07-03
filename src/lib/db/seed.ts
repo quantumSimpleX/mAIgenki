@@ -25,14 +25,27 @@ async function migrateSystemCodes(db: SQLiteDatabase): Promise<void> {
   }
 }
 
+// Bump this whenever the canonical CONDITIONS positions change AND you need every
+// existing DB to be force-corrected once (wiping any user relocations). Earlier
+// builds shipped a migration that zeroed cx/cy, so DBs in the wild have dots stuck
+// at (0,0); this one-time reset repairs them.
+const POSITIONS_VERSION = '2'
+
 // Runs on every startup so existing seeded DBs pick up repositioned condition dots.
-// Only updates cx/cy — these are guaranteed by ALTER_COLUMNS_SQL. render_x/render_y
-// are handled separately via ALTER_COLUMNS_SQL so they may not exist in very old DBs.
 async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
+  const ver = await getSetting(db, 'positions_version')
+  if (ver !== POSITIONS_VERSION) {
+    // One-time hard reset: force every demo condition back to its canonical position,
+    // repairing DBs corrupted by the earlier zeroing migration.
+    for (const c of CONDITIONS) {
+      await db.runAsync('UPDATE conditions SET cx = ?, cy = ? WHERE id = ?', [c.cx, c.cy, c.id])
+    }
+    await upsertSetting(db, 'positions_version', POSITIONS_VERSION)
+    return
+  }
+  // Steady state: only backfill genuinely missing positions so user relocations persist.
   for (const c of CONDITIONS) {
     await db.runAsync(
-      // cx=0/cy=0 means an earlier buggy migration zeroed out the positions; treat
-      // those the same as NULL so they get corrected to the hardcoded defaults.
       'UPDATE conditions SET cx = ?, cy = ? WHERE id = ? AND (cx IS NULL OR cy IS NULL OR (cx = 0 AND cy = 0))',
       [c.cx, c.cy, c.id],
     )
