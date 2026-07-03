@@ -5,8 +5,9 @@ import {
   type ConditionRow,
   type ConditionLocalNameRow,
 } from './schema'
-import type {
-  ConditionRecord, DesignCondition, SupportedLang, SystemId,
+import {
+  CONDITIONS,
+  type ConditionRecord, type DesignCondition, type SupportedLang, type SystemId,
 } from '@/model/conditions'
 
 // ── UUID ──────────────────────────────────────────────────────────────────────
@@ -424,6 +425,9 @@ export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition
   const result: DesignCondition[] = []
   for (const row of rows) {
     const localNames = await getLocalNamesForCondition(db, row.id)
+    // Fall back to hardcoded positions when null — covers old DBs where cx/cy
+    // columns were added via ALTER TABLE and migration hasn't populated them yet.
+    const hardcoded = CONDITIONS.find((c) => c.id === row.id)
     result.push({
       id: row.id,
       system: row.system as SystemId,
@@ -432,8 +436,8 @@ export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition
       localNames,
       date: row.date_diagnosed ?? row.date_onset ?? '',
       yearFrac: row.year_frac ?? 0,
-      cx: row.cx ?? 0,
-      cy: row.cy ?? 0,
+      cx: row.cx ?? hardcoded?.cx ?? 0,
+      cy: row.cy ?? hardcoded?.cy ?? 0,
       note: row.notes ?? '',
       evidence: row.evidence ?? '',
     })
