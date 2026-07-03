@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   CONDITIONS, CONDITION_RECORDS, ConditionRecord, DesignCondition,
 } from '@/model/conditions'
@@ -7,21 +7,18 @@ import { getConditions, getConditionRecords } from '@/lib/db/queries'
 
 // Loads seeded conditions from SQLite, falling back to the hardcoded CONDITIONS
 // (used in tests, before the DB is seeded, or when the DB is unavailable on web).
-export function useConditions(): DesignCondition[] {
+export function useConditions(): [DesignCondition[], () => void] {
   const [conditions, setConditions] = useState<DesignCondition[]>([])
   const db = useOptionalDatabase()
 
-  useEffect(() => {
-    if (!db) {
-      setConditions(CONDITIONS)
-      return
-    }
-    getConditions(db)
-      .then(setConditions)
-      .catch(() => setConditions(CONDITIONS))
+  const refresh = useCallback(() => {
+    if (!db) { setConditions(CONDITIONS); return }
+    getConditions(db).then(setConditions).catch(() => setConditions(CONDITIONS))
   }, [db])
 
-  return conditions.length > 0 ? conditions : CONDITIONS
+  useEffect(() => { refresh() }, [refresh])
+
+  return [conditions.length > 0 ? conditions : CONDITIONS, refresh]
 }
 
 // Loads a condition's attached records from SQLite, falling back to the

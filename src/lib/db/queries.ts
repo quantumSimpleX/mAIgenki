@@ -441,6 +441,15 @@ export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition
   return result
 }
 
+export async function updateConditionPosition(
+  db: SQLiteDatabase, id: string, cx: number, cy: number,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE conditions SET cx = ?, cy = ? WHERE id = ?',
+    [cx, cy, id],
+  )
+}
+
 export async function getConditionsByDateRange(
   db: SQLiteDatabase,
   startDate: string,

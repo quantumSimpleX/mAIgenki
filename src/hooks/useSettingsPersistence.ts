@@ -23,7 +23,7 @@ export function inferGenderFromConditions(conds: DesignCondition[]): Gender {
 // and the store keeps its in-memory defaults.
 export function useSettingsPersistence(): void {
   const db = useOptionalDatabase()
-  const conditions = useConditions()
+  const [conditions] = useConditions()
   const preferredLanguage = useAppStore((s) => s.preferredLanguage)
   const birthYear = useAppStore((s) => s.birthYear)
   const birthMonth = useAppStore((s) => s.birthMonth)

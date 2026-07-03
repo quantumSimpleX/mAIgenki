@@ -19,6 +19,8 @@ import {
   SYSTEM_META, SupportedLang, getLocalName,
 } from '@/model/conditions'
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
+import { useOptionalDatabase } from '@/lib/db/provider'
+import { updateConditionPosition } from '@/lib/db/queries'
 
 const { height: SH } = Dimensions.get('window')
 
@@ -400,11 +402,12 @@ function BodyLayers({ activeSystems }: { activeSystems: SystemId[] }) {
 // between tightly-clustered dots and (b) SVG z-order eclipsing where a higher-layer dot's
 // hit area would block a lower-layer dot from ever being reachable.
 function GhostDots({
-  conditions, activeSystems, onPress,
+  conditions, activeSystems, onPress, onRelocationPlace,
 }: {
   conditions: DesignCondition[]
   activeSystems: SystemId[]
   onPress: (c: DesignCondition) => void
+  onRelocationPlace?: (cx: number, cy: number) => void
 }) {
   const visible = conditions.filter((c) => activeSystems.includes(c.system))
   const [nativeSize, setNativeSize] = useState({ w: 260, h: 460 })
@@ -442,10 +445,9 @@ function GhostDots({
           {...({
             onClick: (e: any) => {
               const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
-              pressNearest(
-                (e.clientX - rect.left) * 260 / rect.width,
-                (e.clientY - rect.top) * 460 / rect.height,
-              )
+              const svgX = (e.clientX - rect.left) * 260 / rect.width
+              const svgY = (e.clientY - rect.top) * 460 / rect.height
+              if (onRelocationPlace) { onRelocationPlace(svgX, svgY) } else { pressNearest(svgX, svgY) }
             },
           } as object)}
         />
@@ -456,10 +458,11 @@ function GhostDots({
             const { width, height } = e.nativeEvent.layout
             setNativeSize({ w: width, h: height })
           }}
-          onPress={(e) => pressNearest(
-            (e.nativeEvent.locationX / nativeSize.w) * 260,
-            (e.nativeEvent.locationY / nativeSize.h) * 460,
-          )}
+          onPress={(e) => {
+            const svgX = (e.nativeEvent.locationX / nativeSize.w) * 260
+            const svgY = (e.nativeEvent.locationY / nativeSize.h) * 460
+            if (onRelocationPlace) { onRelocationPlace(svgX, svgY) } else { pressNearest(svgX, svgY) }
+          }}
         />
       )}
     </>
@@ -468,7 +471,7 @@ function GhostDots({
 
 function BodySvg({
   activeSystems, conditions, onConditionPress, currentYear,
-  condDateOverrides, selectedCondition,
+  condDateOverrides, selectedCondition, relocatingCondition,
 }: {
   activeSystems: SystemId[]
   conditions: DesignCondition[]
@@ -476,6 +479,7 @@ function BodySvg({
   currentYear: number
   condDateOverrides: Record<string, string>
   selectedCondition: DesignCondition | null
+  relocatingCondition: DesignCondition | null
 }) {
   const visibleConds = conditions.filter((c) => {
     if (!activeSystems.includes(c.system)) return false
@@ -492,11 +496,12 @@ function BodySvg({
           handler property". On native, use onPress. */}
       {visibleConds.map((c) => {
         const isSelected = selectedCondition?.id === c.id
+        const isRelocating = relocatingCondition?.id === c.id
         const color = SYSTEM_META[c.system]?.color ?? '#fff'
         return (
           <Circle
             key={c.id} cx={c.cx} cy={c.cy}
-            r={isSelected ? 2.5 : 1.5}
+            r={isRelocating ? 4 : isSelected ? 2.5 : 1.5}
             fill={color}
             pointerEvents="none"
           />
@@ -824,6 +829,7 @@ function ConditionSheet() {
     preferredLanguage, selectedRecords,
     condDateOverrides, editingCondDate, editDateInput,
     startEditDate, setEditDateInput, confirmEditDate, cancelEditDate,
+    startRelocation,
   } = useAppStore()
 
   const condRecords = useConditionRecords(selectedCondition?.id)
@@ -935,12 +941,22 @@ function ConditionSheet() {
               )}
             </>
           ) : (
-            <Text
-              style={[styles.sheetSysLabel, meta && { color: meta.color }]}
-              numberOfLines={1}
-            >
-              {meta ? meta.label.toUpperCase() : 'HEALTH ASSISTANT'}
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc(8) }}>
+              <Text
+                style={[styles.sheetSysLabel, meta && { color: meta.color }]}
+                numberOfLines={1}
+              >
+                {meta ? meta.label.toUpperCase() : 'HEALTH ASSISTANT'}
+              </Text>
+              {selectedCondition && meta && (
+                <TouchableOpacity
+                  onPress={() => startRelocation(selectedCondition)}
+                  hitSlop={10}
+                >
+                  <Text style={{ color: meta.color, fontSize: fs(13) }}>✏️</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
         </View>
         <TouchableOpacity onPress={closeSheet} hitSlop={12}>
@@ -1378,13 +1394,22 @@ export default function BodyMapScreen() {
     activeSystems, selectCondition,
     currentYear, sheetOpen, settingsOpen,
     condDateOverrides, selectedCondition,
+    preferredLanguage, relocatingCondition, cancelRelocation,
   } = useAppStore()
 
-  const conditions = useConditions()
+  const [conditions, refreshConditions] = useConditions()
+  const db = useOptionalDatabase()
 
   const handleConditionPress = useCallback((c: DesignCondition) => {
     selectCondition(c)
   }, [selectCondition])
+
+  const handleRelocationPlace = useCallback(async (cx: number, cy: number) => {
+    if (!relocatingCondition) return
+    if (db) await updateConditionPosition(db, relocatingCondition.id, cx, cy)
+    refreshConditions()
+    cancelRelocation()
+  }, [relocatingCondition, db, refreshConditions, cancelRelocation])
 
   // ── Body-map zoom & pan ──
   // Mobile: two-finger pinch zooms, one-finger drag pans.
@@ -1499,11 +1524,13 @@ export default function BodyMapScreen() {
                 currentYear={currentYear}
                 condDateOverrides={condDateOverrides}
                 selectedCondition={selectedCondition}
+                relocatingCondition={relocatingCondition}
               />
               <GhostDots
                 conditions={conditions}
                 activeSystems={activeSystems}
                 onPress={handleConditionPress}
+                onRelocationPlace={relocatingCondition ? handleRelocationPlace : undefined}
               />
               <ConditionRipples
                 conditions={conditions}
@@ -1511,6 +1538,23 @@ export default function BodyMapScreen() {
                 currentYear={currentYear}
                 condDateOverrides={condDateOverrides}
               />
+              {relocatingCondition && (() => {
+                const rMeta = SYSTEM_META[relocatingCondition.system]
+                return (
+                  <View style={styles.relocationBanner} pointerEvents="none">
+                    <Text style={[styles.relocationText, { color: rMeta?.color ?? C.aqua }]}>
+                      Tap to place · {getLocalName(relocatingCondition, preferredLanguage)}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={cancelRelocation}
+                      hitSlop={10}
+                      style={{ pointerEvents: 'box-only' } as object}
+                    >
+                      <Text style={styles.relocationCancel}>✕</Text>
+                    </TouchableOpacity>
+                  </View>
+                )
+              })()}
             </View>
           </View>
 
@@ -1567,6 +1611,20 @@ const styles = StyleSheet.create({
   bodyWrap: { position: 'absolute', top: 0, left: 0, right: RAIL_W_INACTIVE, bottom: 0 },
   bodyAspect: { height: '100%', aspectRatio: 260 / 460, alignSelf: 'center', position: 'relative' },
   bodySvg: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0 },
+
+  relocationBanner: {
+    position: 'absolute', top: sc(12), left: sc(8), right: sc(8),
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    backgroundColor: 'rgba(10,12,20,0.85)', borderRadius: sc(10),
+    paddingHorizontal: sc(14), paddingVertical: sc(8),
+  },
+  relocationText: {
+    fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(13),
+    flex: 1, letterSpacing: sc(0.3),
+  },
+  relocationCancel: {
+    fontSize: fs(16), color: 'rgba(255,255,255,0.55)', paddingLeft: sc(12),
+  },
 
   legendPanel: {
     position: 'absolute', top: 0, left: 0,

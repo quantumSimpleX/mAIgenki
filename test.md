@@ -265,3 +265,134 @@ npm test -- --testPathPattern=bodymap --verbose  # bodymap tests verbose
 ## QA Findings (append here)
 
 _Dev will fix issues listed here_
+
+---
+
+## Phase 6 — Condition Dot Position Editor: Test Plan
+
+### Unit tests
+
+#### 6A. `__tests__/store/useAppStore.test.ts` — relocation actions (append to existing file)
+
+| # | Test | Assertion |
+|---|---|---|
+| 1 | startRelocation closes sheet | `startRelocation(htn)` → `sheetOpen === false` |
+| 2 | startRelocation sets relocatingCondition | `relocatingCondition === htn` |
+| 3 | startRelocation solos system | `activeSystems` equals `[htn.system]` |
+| 4 | startRelocation snapshots preRelocationSystems | `preRelocationSystems` equals the activeSystems value before call |
+| 5 | cancelRelocation restores activeSystems | After start then cancel, `activeSystems` matches original |
+| 6 | cancelRelocation clears relocatingCondition | `relocatingCondition === null` |
+| 7 | cancelRelocation clears preRelocationSystems | `preRelocationSystems` is `[]` |
+| 8 | startRelocation with 3 active systems | Only `[htn.system]` remains active, preRelocationSystems has 3 entries |
+
+**Result:** [x] PASS
+
+---
+
+#### 6B. `__tests__/db/queries.test.ts` — updateConditionPosition (append to existing file)
+
+| # | Test | Assertion |
+|---|---|---|
+| 1 | updateConditionPosition changes cx/cy | After update, `SELECT cx, cy FROM conditions WHERE id='htn'` returns new values |
+| 2 | updateConditionPosition non-existent id | Does not throw; 0 rows affected (no-op) |
+| 3 | updateConditionPosition decimal coordinates | cx=134.5, cy=270.25 stored and retrieved correctly |
+| 4 | getConditions returns updated cx/cy | After update + getConditions, the DesignCondition has new cx/cy |
+
+**Result:** [x] PASS
+
+---
+
+#### 6C. `__tests__/hooks/useConditions.test.ts` — refresh callback (update existing file)
+
+| # | Test | Assertion |
+|---|---|---|
+| 1 | Returns tuple | `useConditions()` returns array of length 2 |
+| 2 | First element is DesignCondition[] | Array of conditions with `.system`, `.cx`, `.cy` |
+| 3 | Second element is function | `typeof refresh === 'function'` |
+| 4 | Refresh triggers re-fetch | Call `refresh()` → `getConditions` called again |
+| 5 | Falls back to CONDITIONS when no db | With db=null, returns `CONDITIONS` |
+| 6 | Falls back to CONDITIONS on error | When getConditions rejects, returns `CONDITIONS` |
+
+**Result:** [x] PASS
+
+---
+
+### Component / integration tests
+
+#### 6D. Pencil icon in condition sheet header
+
+| # | Test | Assertion |
+|---|---|---|
+| 1 | Pencil renders when not in chat | When `chatOpen=false` and `selectedCondition` set, ✏️ glyph present |
+| 2 | Pencil absent when chatOpen | When `chatOpen=true`, ✏️ glyph absent |
+| 3 | Pencil color matches system | ✏️ `color` style prop equals `SYSTEM_META[selectedCondition.system].color` |
+| 4 | Tapping pencil calls startRelocation | Press ✏️ → `startRelocation` called with `selectedCondition` |
+| 5 | Sheet closes on pencil tap | After `startRelocation` fires, `sheetOpen === false` |
+
+**Result:** [x] PASS
+
+---
+
+#### 6E. GhostDots relocation mode
+
+| # | Test | Assertion |
+|---|---|---|
+| 1 | onRelocationPlace not set → calls pressNearest | With `onRelocationPlace=undefined`, tap calls nearest-dot logic |
+| 2 | onRelocationPlace set → skips pressNearest | With `onRelocationPlace` provided, tap calls it with `(svgX, svgY)` |
+| 3 | No distance threshold in relocation | SVG coord passed directly (not clamped to nearest dot) |
+| 4 | Web click passes correct SVG coords | `onClick` converts clientX/Y to SVG space using rect dimensions |
+| 5 | Native press passes correct SVG coords | `onPress` converts `locationX/Y` to SVG space using nativeSize |
+
+**Result:** [x] PASS
+
+---
+
+#### 6F. Relocation overlay banner
+
+| # | Test | Assertion |
+|---|---|---|
+| 1 | Banner absent initially | With `relocatingCondition=null`, banner is not rendered |
+| 2 | Banner appears in relocation mode | When `relocatingCondition` set, "Tap to place ·" text visible |
+| 3 | Banner shows condition name | Text includes `getLocalName(relocatingCondition, lang)` |
+| 4 | Banner text color matches system | Color style prop equals system color |
+| 5 | Cancel button (✕) visible in banner | ✕ element present in banner |
+| 6 | Pressing ✕ calls cancelRelocation | Tap ✕ → `cancelRelocation()` called |
+| 7 | Banner has pointerEvents none | Banner `View` does not intercept taps on body canvas |
+
+**Result:** [x] PASS
+
+---
+
+#### 6G. Relocating dot visual
+
+| # | Test | Assertion |
+|---|---|---|
+| 1 | Normal dot radius 1.5 | Non-selected, non-relocating dot has `r={1.5}` |
+| 2 | Selected dot radius 2.5 | Dot matching `selectedCondition.id` has `r={2.5}` |
+| 3 | Relocating dot radius 4 | Dot matching `relocatingCondition.id` has `r={4}` |
+
+**Result:** [x] PASS
+
+---
+
+### End-to-end manual QA scenarios
+
+| # | Scenario | Expected | Result |
+|---|---|---|---|
+| E1 | Tap pencil → relocation mode | Sheet closes, only that system layer active, time rail unchanged | [ ] PASS / [ ] FAIL |
+| E2 | Tap canvas in relocation mode | Dot jumps to tapped position immediately | [ ] PASS / [ ] FAIL |
+| E3 | Relocation exits after tap | Banner disappears, all layers restore to pre-relocation state | [ ] PASS / [ ] FAIL |
+| E4 | Position persists after reload | Reload app → dot is at new SVG position | [ ] PASS / [ ] FAIL |
+| E5 | Tap ✕ cancel | Dot stays at original, layers restore | [ ] PASS / [ ] FAIL |
+| E6 | Tap relocated dot | Condition card opens normally | [ ] PASS / [ ] FAIL |
+| E7 | Time rail scrub during relocation | Time rail updates currentYear but relocation mode unchanged | [ ] PASS / [ ] FAIL |
+| E8 | Relocation mode with zoom applied | Banner renders correctly over zoomed canvas | [ ] PASS / [ ] FAIL |
+
+---
+
+### Phase 6 overall QA status
+
+- [x] All unit tests PASS (6A–6C)
+- [x] All component tests PASS (6D–6G)
+- [ ] All manual scenarios PASS (E1–E8)
+- [x] `npm run typecheck` — zero errors

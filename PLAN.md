@@ -153,6 +153,21 @@ It does not block Phases 0–2, but must be completed before Phase 3 polish.
 
 ---
 
+## Phase 4 — Condition Dot Position Editor ✓
+> Goal: users can tap a pencil icon in the condition card to enter relocation mode and reposition any condition dot on the body map canvas; new position persisted to SQLite.
+> Spec: SPEC.md § "Condition Dot Position Editor"
+
+- [x] **Task 4.1** — Zustand store: add relocation state + actions (`src/store/useAppStore.ts`)
+- [x] **Task 4.2** — SQLite query helper (`src/lib/db/queries.ts`)
+- [x] **Task 4.3** — `useConditions` refresh (`src/hooks/useConditions.ts`)
+- [x] **Task 4.4** — Pencil icon in ConditionSheet (`src/app/bodymap.tsx`)
+- [x] **Task 4.5** — GhostDots relocation click mode (`src/app/bodymap.tsx`)
+- [x] **Task 4.6** — `handleRelocationPlace` commit handler (`src/app/bodymap.tsx`)
+- [x] **Task 4.7** — Relocation overlay banner (`src/app/bodymap.tsx`)
+- [x] **Task 4.8** — Relocating dot visual (`src/app/bodymap.tsx`)
+
+---
+
 ## Implementation Order
 
 ```
@@ -161,6 +176,8 @@ Phase 0 ✓ → Phase 1 ✓ → Phase 2 (Task 2.6 remaining)
                                           ▼
                               Phase 3 (after 2.6 + Track C)
 Track C ────────────────────────────────────────────────►┘
+
+Phase 4 (condition dot position editor — independent of Phases 2/3)
 ```
 
 **Next up:** Task 2.6 — wire upload → pipeline → body map data flow.

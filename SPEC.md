@@ -368,6 +368,50 @@ mAIgenki/
 
 ---
 
+## Condition Dot Position Editor
+
+Users can correct the anatomical placement of any condition dot directly from the condition card.
+
+### Trigger
+
+A pencil icon (✏️) appears next to the organ-system name (styled in the system's color) in the condition card header, in the `!chatOpen` view. The pencil is hidden when the chat panel is open.
+
+### Entering relocation mode
+
+Tapping the pencil:
+1. Closes the condition card (sheet slides down)
+2. Solos the condition's organ system — all other layers turn off, same effect as tapping "Only" next to that system in the legend
+3. A "Tap to place · {condition name}" instruction banner appears at the top of the body canvas, in the system's color
+4. A cancel button (✕) appears in the banner
+5. The time-rail position does not change; scrubbing is not blocked but has no visual effect on relocation mode
+
+### Placing the dot
+
+- Any tap on the body canvas during relocation mode places the condition's dot at the exact SVG coordinate (no nearest-dot search; the tapped position is used directly)
+- The dot moves immediately (optimistic update)
+- The new `cx` / `cy` is written to SQLite (`UPDATE conditions SET cx=?, cy=? WHERE id=?`)
+- Conditions are refreshed from SQLite (so the moved dot appears at its new position)
+- Relocation mode exits; all layer visibility is restored to the state it was in before relocation began (the pre-relocation `activeSystems` snapshot)
+
+### After placement
+
+- The dot appears at its new position
+- The user can tap the dot to open the condition card as normal
+- The time-rail position is unchanged
+
+### Cancelling
+
+- Tapping ✕ in the banner exits relocation mode without changing the dot position
+- All layers are restored to the pre-relocation state
+
+### Constraints
+
+- Only one condition can be relocated at a time
+- The time-rail position (`currentYear`) is not modified by relocation mode
+- Relocating a condition that falls outside the current time window's visible dot set is still permitted — the ghost dot (always-visible, 30% opacity) is what the user sees and taps
+
+---
+
 ## Open Questions
 
 - **Anatomy SVG paths:** Final organ paths need to be traced into the 260×460 coordinate space per body type. Placeholder ellipses are used during development. This is 2–3 days of design/tracing work.

@@ -38,6 +38,8 @@ type AppState = {
   editDateInput: string
   dragging: boolean
   uploadBtnsHovered: boolean
+  relocatingCondition: DesignCondition | null
+  preRelocationSystems: SystemId[]
 }
 
 type AppActions = {
@@ -77,6 +79,8 @@ type AppActions = {
   setUploadBtnsHovered: (h: boolean) => void
   setDragging: (d: boolean) => void
   startAnalyze: () => void
+  startRelocation: (c: DesignCondition) => void
+  cancelRelocation: () => void
 }
 
 export const useAppStore = create<AppState & AppActions>((set, get) => ({
@@ -109,6 +113,8 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   editDateInput: '',
   dragging: false,
   uploadBtnsHovered: false,
+  relocatingCondition: null,
+  preRelocationSystems: [],
 
   setScreen: (screen) => set({ screen }),
   setDragOver: (dragOver) => set({ dragOver }),
@@ -202,4 +208,16 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   setUploadBtnsHovered: (uploadBtnsHovered) => set({ uploadBtnsHovered }),
   setDragging: (dragging) => set({ dragging }),
   startAnalyze: () => set({ screen: 'analyzing', analyzeProgress: 0, analyzePhase: 0 }),
+  startRelocation: (c) => set((s) => ({
+    preRelocationSystems: [...s.activeSystems],
+    activeSystems: [c.system],
+    relocatingCondition: c,
+    sheetOpen: false,
+    selectedCondition: null,
+  })),
+  cancelRelocation: () => set((s) => ({
+    activeSystems: [...s.preRelocationSystems],
+    relocatingCondition: null,
+    preRelocationSystems: [],
+  })),
 }))

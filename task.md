@@ -256,3 +256,279 @@ Impl: `'Chronic migraine visual aura, 4–6 episodes/month. On topiramate 50mg d
 
 **B10 — TypeScript errors in test files** (implicit `any` params)
 5 errors in `__tests__/screens/analyzing.test.tsx`, `__tests__/screens/bodymap.test.tsx`, `__tests__/screens/upload.test.tsx` — parameter types not annotated. Runtime/production code unaffected.
+
+---
+
+## Phase 6 — Condition Dot Position Editor
+
+Tasks must be implemented in order. Mark each `[x]` when done.
+
+### Task 6.1 — Zustand store: relocation state + actions
+**File:** `src/store/useAppStore.ts`
+
+Add to `AppState` type (after `uploadBtnsHovered: boolean`):
+```ts
+relocatingCondition: DesignCondition | null
+preRelocationSystems: SystemId[]
+```
+
+Add initial values in the `create` body (after `uploadBtnsHovered: false`):
+```ts
+relocatingCondition: null,
+preRelocationSystems: [],
+```
+
+Add to `AppActions` type:
+```ts
+startRelocation: (c: DesignCondition) => void
+cancelRelocation: () => void
+```
+
+Implement actions:
+```ts
+startRelocation: (c) => set((s) => ({
+  preRelocationSystems: [...s.activeSystems],
+  activeSystems: [c.system],
+  relocatingCondition: c,
+  sheetOpen: false,
+  selectedCondition: null,
+})),
+cancelRelocation: () => set((s) => ({
+  activeSystems: [...s.preRelocationSystems],
+  relocatingCondition: null,
+  preRelocationSystems: [],
+})),
+```
+
+- [x] Done
+
+---
+
+### Task 6.2 — SQLite query: updateConditionPosition
+**File:** `src/lib/db/queries.ts`
+
+Add after `getConditions`:
+```ts
+export async function updateConditionPosition(
+  db: SQLiteDatabase, id: string, cx: number, cy: number,
+): Promise<void> {
+  await db.runAsync(
+    'UPDATE conditions SET cx = ?, cy = ? WHERE id = ?',
+    [cx, cy, id],
+  )
+}
+```
+
+- [x] Done
+
+---
+
+### Task 6.3 — useConditions: add refresh callback
+**File:** `src/hooks/useConditions.ts`
+
+Change `useConditions` signature from returning `DesignCondition[]` to `[DesignCondition[], () => void]`:
+
+```ts
+import { useCallback, useEffect, useState } from 'react'
+
+export function useConditions(): [DesignCondition[], () => void] {
+  const [conditions, setConditions] = useState<DesignCondition[]>([])
+  const db = useOptionalDatabase()
+
+  const refresh = useCallback(() => {
+    if (!db) { setConditions(CONDITIONS); return }
+    getConditions(db).then(setConditions).catch(() => setConditions(CONDITIONS))
+  }, [db])
+
+  useEffect(() => { refresh() }, [refresh])
+
+  return [conditions.length > 0 ? conditions : CONDITIONS, refresh]
+}
+```
+
+**Also update the one caller in `src/app/bodymap.tsx`:**
+- Find `const conditions = useConditions()` (in `BodyMapScreen`) and change to:
+  `const [conditions, refreshConditions] = useConditions()`
+
+- [x] Done
+
+---
+
+### Task 6.4 — Pencil icon in ConditionSheet header
+**File:** `src/app/bodymap.tsx` — `ConditionSheet` function
+
+1. Add `startRelocation` to the destructured store values in `ConditionSheet`.
+
+2. In the `!chatOpen` header branch, replace the bare `<Text style={styles.sheetSysLabel}>` with a row that includes a pencil icon. Find this block (around line 937):
+```tsx
+) : (
+  <Text
+    style={[styles.sheetSysLabel, meta && { color: meta.color }]}
+    numberOfLines={1}
+  >
+    {meta ? meta.label.toUpperCase() : 'HEALTH ASSISTANT'}
+  </Text>
+)}
+```
+Replace with:
+```tsx
+) : (
+  <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc(8) }}>
+    <Text
+      style={[styles.sheetSysLabel, meta && { color: meta.color }]}
+      numberOfLines={1}
+    >
+      {meta ? meta.label.toUpperCase() : 'HEALTH ASSISTANT'}
+    </Text>
+    {selectedCondition && meta && (
+      <TouchableOpacity
+        onPress={() => startRelocation(selectedCondition)}
+        hitSlop={10}
+      >
+        <Text style={{ color: meta.color, fontSize: fs(13) }}>✏️</Text>
+      </TouchableOpacity>
+    )}
+  </View>
+)}
+```
+
+- [x] Done
+
+---
+
+### Task 6.5 — GhostDots: relocation placement mode
+**File:** `src/app/bodymap.tsx` — `GhostDots` function
+
+Add `onRelocationPlace?: (cx: number, cy: number) => void` prop to `GhostDots`.
+
+In **both** click handlers, branch on whether `onRelocationPlace` is set:
+
+Web `onClick`:
+```ts
+onClick: (e: any) => {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const svgX = (e.clientX - rect.left) * 260 / rect.width
+  const svgY = (e.clientY - rect.top) * 460 / rect.height
+  if (onRelocationPlace) { onRelocationPlace(svgX, svgY) } else { pressNearest(svgX, svgY) }
+},
+```
+
+Native `onPress`:
+```ts
+onPress={(e) => {
+  const svgX = (e.nativeEvent.locationX / nativeSize.w) * 260
+  const svgY = (e.nativeEvent.locationY / nativeSize.h) * 460
+  if (onRelocationPlace) { onRelocationPlace(svgX, svgY) } else { pressNearest(svgX, svgY) }
+}}
+```
+
+- [x] Done
+
+---
+
+### Task 6.6 — handleRelocationPlace + wire everything in BodyMapScreen
+**File:** `src/app/bodymap.tsx` — `BodyMapScreen` function
+
+1. Add `relocatingCondition` and `cancelRelocation` to the destructured store.
+2. Add `preferredLanguage` to the destructured store (if not already present).
+3. Import `updateConditionPosition` from `@/lib/db/queries`.
+4. Import `useOptionalDatabase` from `@/lib/db/provider` (if not already imported).
+5. Add `const db = useOptionalDatabase()` in `BodyMapScreen`.
+
+6. Add handler after `handleConditionPress`:
+```ts
+const handleRelocationPlace = useCallback(async (cx: number, cy: number) => {
+  if (!relocatingCondition) return
+  if (db) await updateConditionPosition(db, relocatingCondition.id, cx, cy)
+  await refreshConditions()
+  cancelRelocation()
+}, [relocatingCondition, db, refreshConditions, cancelRelocation])
+```
+
+7. Update `<GhostDots>`:
+```tsx
+<GhostDots
+  conditions={conditions}
+  activeSystems={activeSystems}
+  onPress={handleConditionPress}
+  onRelocationPlace={relocatingCondition ? handleRelocationPlace : undefined}
+/>
+```
+
+- [x] Done
+
+---
+
+### Task 6.7 — Relocation overlay banner
+**File:** `src/app/bodymap.tsx` — inside `bodyAspect` View in `BodyMapScreen`
+
+After `<ConditionRipples .../>`, add the banner (before the closing `</View>` of `bodyAspect`):
+```tsx
+{relocatingCondition && (() => {
+  const rMeta = SYSTEM_META[relocatingCondition.system]
+  return (
+    <View style={styles.relocationBanner} pointerEvents="none">
+      <Text style={[styles.relocationText, { color: rMeta?.color ?? C.aqua }]}>
+        Tap to place · {getLocalName(relocatingCondition, preferredLanguage)}
+      </Text>
+      <TouchableOpacity
+        onPress={cancelRelocation}
+        hitSlop={10}
+        style={{ pointerEvents: 'box-only' } as object}
+      >
+        <Text style={styles.relocationCancel}>✕</Text>
+      </TouchableOpacity>
+    </View>
+  )
+})()}
+```
+
+Add styles to `StyleSheet.create`:
+```ts
+relocationBanner: {
+  position: 'absolute', top: sc(12), left: sc(8), right: sc(8),
+  flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+  backgroundColor: 'rgba(10,12,20,0.85)', borderRadius: sc(10),
+  paddingHorizontal: sc(14), paddingVertical: sc(8),
+},
+relocationText: {
+  fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(13),
+  flex: 1, letterSpacing: sc(0.3),
+},
+relocationCancel: {
+  fontSize: fs(16), color: 'rgba(255,255,255,0.55)', paddingLeft: sc(12),
+},
+```
+
+- [x] Done
+
+---
+
+### Task 6.8 — Relocating dot visual (enlarged, full opacity)
+**File:** `src/app/bodymap.tsx` — `BodySvg` function
+
+1. Add `relocatingCondition: DesignCondition | null` prop to `BodySvg`.
+2. In the dots renderer, update radius and opacity based on relocation state:
+```tsx
+const isRelocating = relocatingCondition?.id === c.id
+<Circle
+  key={c.id} cx={c.cx} cy={c.cy}
+  r={isRelocating ? 4 : isSelected ? 2.5 : 1.5}
+  fill={color}
+  pointerEvents="none"
+/>
+```
+3. Pass `relocatingCondition={relocatingCondition}` to `<BodySvg>` in `BodyMapScreen`.
+
+- [x] Done
+
+---
+
+### Phase 6 Verification checklist (run after all tasks done)
+
+- [x] `npm run typecheck` — zero new errors
+- [ ] Open condition card → tap ✏️ → sheet closes, only that system layer is active, timeline position unchanged
+- [ ] Tap body canvas in relocation mode → dot moves to tapped position, banner disappears, all layers restore to pre-relocation state
+- [ ] New dot position persists after app reload (SQLite saved)
+- [ ] Tap ✕ in banner → dot stays at original position, layers restore
+- [ ] Tap the relocated dot → condition card opens at new position normally

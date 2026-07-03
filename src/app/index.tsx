@@ -92,7 +92,7 @@ function QSBadge({ s, size }: { s: Styles; size: number }) {
 
 export default function UploadScreen() {
   const startAnalyze = useAppStore((s) => s.startAnalyze)
-  const conditions = useConditions()
+  const [conditions] = useConditions()
   const { height: winH } = useWindowDimensions()
 
   // Live stats from the seeded conditions (falls back to bundled demo data when
