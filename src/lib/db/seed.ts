@@ -31,7 +31,9 @@ async function migrateSystemCodes(db: SQLiteDatabase): Promise<void> {
 async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
   for (const c of CONDITIONS) {
     await db.runAsync(
-      'UPDATE conditions SET cx = ?, cy = ? WHERE id = ? AND (cx IS NULL OR cy IS NULL)',
+      // cx=0/cy=0 means an earlier buggy migration zeroed out the positions; treat
+      // those the same as NULL so they get corrected to the hardcoded defaults.
+      'UPDATE conditions SET cx = ?, cy = ? WHERE id = ? AND (cx IS NULL OR cy IS NULL OR (cx = 0 AND cy = 0))',
       [c.cx, c.cy, c.id],
     )
   }

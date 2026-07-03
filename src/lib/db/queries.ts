@@ -436,8 +436,9 @@ export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition
       localNames,
       date: row.date_diagnosed ?? row.date_onset ?? '',
       yearFrac: row.year_frac ?? 0,
-      cx: row.cx ?? hardcoded?.cx ?? 0,
-      cy: row.cy ?? hardcoded?.cy ?? 0,
+      // Use != null (not ??) so explicit 0 values from a broken migration also fall back.
+      cx: row.cx != null && row.cx !== 0 ? row.cx : (hardcoded?.cx ?? 0),
+      cy: row.cy != null && row.cy !== 0 ? row.cy : (hardcoded?.cy ?? 0),
       note: row.notes ?? '',
       evidence: row.evidence ?? '',
     })

@@ -610,9 +610,10 @@ function ConditionRipples({
 
 // ─── Vertical Time Rail ──────────────────────────────────────────────────────
 
-// On native the rail is always expanded (no tap-to-expand dance on a touch screen).
-const RAIL_W_INACTIVE = IS_WEB ? sc(14) : sc(36)
-const RAIL_W_ACTIVE = IS_WEB ? sc(18) : sc(36)
+// Desktop keeps the slim interactive rail; on any touch viewport (native or mobile web)
+// the rail is always expanded so it's draggable without a prior tap.
+const RAIL_W_INACTIVE = IS_DESKTOP ? sc(14) : sc(36)
+const RAIL_W_ACTIVE   = IS_DESKTOP ? sc(18) : sc(36)
 
 function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const {
@@ -1319,7 +1320,7 @@ function SettingsSheet() {
             />
             <MonthDropdown value={birthMonth} onChange={setBirthMonth} />
           </View>
-          <Text style={styles.settingsHint}>Tap to correct.</Text>
+          <Text style={styles.settingsHint}>Privacy: date not stored.</Text>
         </View>
 
         <View style={styles.genderCol}>
@@ -1480,15 +1481,57 @@ export default function BodyMapScreen() {
       lastY = e.clientY
     }
     const onMouseUp = () => { panning = false }
+    // Touch handlers for mobile web: 2-finger pinch = scale, 2-finger drag = pan.
+    // Must use non-passive listeners so preventDefault() blocks the browser's
+    // own pinch-to-zoom (which would scale the whole viewport, not just the layers).
+    let twoFingerActive = false
+    let tfStartDist = 0, tfStartMx = 0, tfStartMy = 0
+    let tfStartScale = 1, tfStartTx = 0, tfStartTy = 0
+    const touchInfo = (t: TouchList) => ({
+      dist: Math.hypot(t[1].clientX - t[0].clientX, t[1].clientY - t[0].clientY),
+      mx: (t[0].clientX + t[1].clientX) / 2,
+      my: (t[0].clientY + t[1].clientY) / 2,
+    })
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length === 2) {
+        e.preventDefault()
+        twoFingerActive = true
+        const { dist, mx, my } = touchInfo(e.touches)
+        tfStartDist = dist; tfStartMx = mx; tfStartMy = my
+        tfStartScale = viewRef.current.scale
+        tfStartTx = viewRef.current.tx
+        tfStartTy = viewRef.current.ty
+      }
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (!twoFingerActive || e.touches.length !== 2) return
+      e.preventDefault()
+      const { dist, mx, my } = touchInfo(e.touches)
+      setView({
+        scale: clampScale(tfStartScale * (dist / tfStartDist)),
+        tx: tfStartTx + (mx - tfStartMx),
+        ty: tfStartTy + (my - tfStartMy),
+      })
+    }
+    const onTouchEnd = () => { twoFingerActive = false }
+
     node.addEventListener('wheel', onWheel, { passive: false })
     node.addEventListener('contextmenu', onContextMenu)
     node.addEventListener('mousedown', onMouseDown)
+    node.addEventListener('touchstart', onTouchStart, { passive: false })
+    node.addEventListener('touchmove', onTouchMove, { passive: false })
+    node.addEventListener('touchend', onTouchEnd)
+    node.addEventListener('touchcancel', onTouchEnd)
     window.addEventListener('mousemove', onMouseMove)
     window.addEventListener('mouseup', onMouseUp)
     return () => {
       node.removeEventListener('wheel', onWheel)
       node.removeEventListener('contextmenu', onContextMenu)
       node.removeEventListener('mousedown', onMouseDown)
+      node.removeEventListener('touchstart', onTouchStart)
+      node.removeEventListener('touchmove', onTouchMove)
+      node.removeEventListener('touchend', onTouchEnd)
+      node.removeEventListener('touchcancel', onTouchEnd)
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseup', onMouseUp)
     }
@@ -1504,17 +1547,17 @@ export default function BodyMapScreen() {
       const g = gesture.current
       const v = viewRef.current
       if (touches.length >= 2) {
-        const dist = Math.hypot(
-          touches[0].pageX - touches[1].pageX,
-          touches[0].pageY - touches[1].pageY,
-        )
+        const t0 = touches[0], t1 = touches[1]
+        const dist = Math.hypot(t0.pageX - t1.pageX, t0.pageY - t1.pageY)
+        const mx = (t0.pageX + t1.pageX) / 2
+        const my = (t0.pageY + t1.pageY) / 2
         if (g.mode !== 2) {
-          gesture.current = { mode: 2, dist, x: 0, y: 0, scale: v.scale, tx: v.tx, ty: v.ty }
+          // Capture initial mid-point and state for both pinch and pan.
+          gesture.current = { mode: 2, dist, x: mx, y: my, scale: v.scale, tx: v.tx, ty: v.ty }
           return
         }
         const scale = clampScale(g.scale * (dist / g.dist))
-        const k = scale / g.scale
-        setView({ scale, tx: g.tx * k, ty: g.ty * k })
+        setView({ scale, tx: g.tx + (mx - g.x), ty: g.ty + (my - g.y) })
       } else if (touches.length === 1) {
         const t = touches[0]
         if (g.mode !== 1) {
