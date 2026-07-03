@@ -86,11 +86,10 @@ It does not block Phases 0–2, but must be completed before Phase 3 polish.
 - [x] **Task 2.3** — Body map screen (`src/app/bodymap.tsx`)
   - NavBar (back | "Health Story" | settings gear)
   - LegendPanel: 11 colored system chips, toggleable, each with an ONLY solo button (layer order per SPEC.md system table)
-  - BodySvg: SVG placeholder (viewBox `0 0 260 460`), organ highlight ellipses + condition dots per system
+  - BodyLayers: 11 stacked PNG layers (one per system) from `assets/maigenki-systems-2colorized/`; BodySvg overlays condition dots + relocation ghost in `0 0 260 460` SVG space
   - Time rail: vertical right side, log-scale K=2.5, 14px inactive / 36px active ticks
-  - Tab switcher: Body Map | Timeline (`bodyMapMode` state)
-  - UploadPanel FAB (bottom-right)
-  - ⚠️ Reads from demo `CONDITIONS` constant — not yet reading from SQLite
+  - UploadPanel FAB (bottom-right); tab switcher removed (bodyMapMode state removed in Phase 3.1)
+  - Reads conditions via `useConditions()` hook (SQLite with hardcoded fallback)
 
 - [x] **Task 2.4** — Condition sheet (bottom sheet within bodymap)
   - Animated slide-up on condition dot tap
@@ -106,24 +105,22 @@ It does not block Phases 0–2, but must be completed before Phase 3 polish.
   - OpenRouter API key input
 
 - [ ] **Task 2.6** — Wire upload → pipeline → bodymap data flow *(next)*
-  - `index.tsx`: connect upload zone tap to `processHealthRecord(uri)` → navigate to `analyzing`
+  - `index.tsx`: connect upload handlers to `processHealthRecord(uri)` — currently only calls `startAnalyze()` animation; URI never reaches pipeline
   - `analyzing.tsx`: drive progress bar from actual pipeline phase callbacks instead of timers
-  - `bodymap.tsx`: read conditions from SQLite via `useSQLiteContext` + `getAllConditions` instead of demo `CONDITIONS`
+  - [x] `bodymap.tsx`: reads conditions from SQLite via `useConditions()` hook (with hardcoded fallback) — done
   - On first real upload: prompt user to keep or delete demo data (`clearDemoData`)
-  - Zustand store updated with real `ConditionRow[]` after pipeline completes
-  - Files: `src/app/index.tsx`, `src/app/analyzing.tsx`, `src/app/bodymap.tsx`, `src/store/useAppStore.ts`
+  - Zustand store updated with real conditions after pipeline completes
+  - Files: `src/app/index.tsx`, `src/app/analyzing.tsx`, `src/store/useAppStore.ts`
 
 ---
 
 ## Phase 3 — Integration & Polish
 > Goal: real anatomy SVG paths, body type inference, end-to-end device test.
-> Depends on: Phase 2 fully wired + Track C anatomy paths.
+> Depends on: Task 2.6 fully wired + Track C C.3 (female reproductive variant).
 
-- [ ] **Task 3.1** — Replace placeholder SVG ellipses with accurate organ paths
-  - Each of the 11 systems gets traced SVG `<Path>` elements in the 260×460 coordinate space
-  - Male + female variants (reproductive system differs)
-  - Body type inferred from conditions; user prompted only if indeterminate
-  - Files: `src/components/anatomy/BodyCanvas.tsx`, organ path constants
+- [x] **Task 3.1** — Replace placeholder SVG ellipses with accurate organ paths
+  - Implemented via 11 colorized transparent PNGs in `assets/maigenki-systems-2colorized/` (PNG approach chosen over SVG paths); wired into `BodyLayers` component
+  - Male variant complete (all 11 systems); female reproductive variant not yet done (see C.3)
 
 - [ ] **Task 3.2** — Body type inference (`src/lib/inference/bodyType.ts`)
   - Scan conditions + evidence text for gender indicators
@@ -141,15 +138,14 @@ It does not block Phases 0–2, but must be completed before Phase 3 polish.
 ---
 
 ## Track C — Anatomy Asset Production (parallel, design task)
-> SVG paths in viewBox `0 0 260 460` coordinate space. Must complete before Task 3.1.
-> Note: Current implementation uses placeholder ellipses. Final artwork will be traced SVG paths
-> (or high-res transparent PNGs composited via react-native-svg `<Image>` — TBD based on art style).
+> PNG approach chosen over SVG paths. 11 colorized transparent PNGs (1018×2436px canvas, aligned)
+> in `assets/maigenki-systems-2colorized/`, composited via stacked `Image` components in `BodyLayers`.
 
-- [ ] **C.1** — Trace or render male anterior body silhouette (integumentary layer)
-- [ ] **C.2** — Trace or render male organ paths for 10 internal systems
-- [ ] **C.3** — Female variant: reproductive system + any silhouette differences
-- [ ] **C.4** — Verify all paths share identical 260×460 coordinate space
-- [ ] **C.5** — Export to `src/components/anatomy/paths/` (SVG path strings) or `assets/anatomy/` (PNGs)
+- [x] **C.1** — Male anterior body silhouette (integumentary layer) — `00-integumentary.png`
+- [x] **C.2** — Male organ layers for 10 internal systems — all 10 PNGs present
+- [ ] **C.3** — Female variant: `10-reproductive-f.png` (no `-f` file yet; only `-m` exists)
+- [x] **C.4** — All layers share identical 1018×2436px canvas → align correctly when stacked
+- [x] **C.5** — Exported to `assets/maigenki-systems-2colorized/`
 
 ---
 
