@@ -396,3 +396,171 @@ _Dev will fix issues listed here_
 - [x] All component tests PASS (6D–6G)
 - [ ] All manual scenarios PASS (E1–E8)
 - [x] `npm run typecheck` — zero errors
+
+---
+
+## Phase 7 — Backup / Restore: Test Plan
+
+Files under test: `src/lib/db/backup.ts` (module), `src/app/bodymap.tsx` `SettingsSheet` (UI),
+`__tests__/db/backup.test.ts` (automated). Automated tests run against the same in-memory
+fake-SQLite harness style as `__tests__/db/pipeline.test.ts` (expo-sqlite is native and cannot
+load under jest). Leave every Result field for the QA agent to fill.
+
+#### 7A. backup.ts — build + round-trip (automated)
+
+| # | Test | Assertion | Result |
+|---|---|---|---|
+| 1 | `buildBackup` envelope | `app === 'maigenki'`, `formatVersion === 1`, `exportedAt` is a string | [x] PASS |
+| 2 | `buildBackup` captures all 10 tables | `Object.keys(tables)` equals `BACKUP_TABLES` (set-equal) | [x] PASS |
+| 3 | `buildBackup` seeded conditions | `tables.conditions.length === 22` after `seedDemoData` | [x] PASS |
+| 4 | Round-trip restores mutated value | Mutate htn `cx` via `updateConditionPosition` → `restoreBackup` → htn `cx_percent` back to backed-up value (not the mutation) | [x] PASS |
+| 5 | Round-trip preserves row counts | After restore, per-table row counts equal the original backup's for every `BACKUP_TABLES` entry | [x] PASS |
+| 6 | Restore is idempotent on counts | `conditions.length === 22` after restore | [x] PASS |
+
+**Result:** [x] PASS
+
+QA notes: ran `npx jest __tests__/db/backup.test.ts` directly (2026-07-04) — all 5 original tests green.
+Also added a 6th test (`leaves the DB untouched when envelope validation rejects the backup`) to strengthen
+7B.3 coverage; see 7B below. Full file now has 6 tests, all passing.
+
+---
+
+#### 7B. backup.ts — envelope validation (automated)
+
+| # | Test | Assertion | Result |
+|---|---|---|---|
+| 1 | Wrong `app` rejected | `restoreBackup(db, { app: 'someOtherApp', … })` rejects with an error mentioning "mAIgenki backup" | [x] PASS |
+| 2 | Unsupported `formatVersion` rejected | `restoreBackup(db, { app: 'maigenki', formatVersion: 2, … })` rejects with an error mentioning "formatVersion" | [x] PASS |
+| 3 | Validation happens before writes | Envelope is checked before `withTransactionAsync` runs (no DELETE on a bad envelope) | [x] PASS |
+
+**Result:** [x] PASS
+
+QA notes: code review of `src/lib/db/backup.ts:50-58` confirms both `if` checks throw
+*before* `db.withTransactionAsync(...)` is ever called — structurally impossible to reach
+the DELETE loop on a bad envelope. The original two tests (`rejects a backup with the
+wrong app envelope`, `rejects an unsupported formatVersion`) only asserted the throw, not
+DB state, so I added a new test — `leaves the DB untouched when envelope validation
+rejects the backup` — that snapshots `buildBackup` before/after a rejected restore and
+asserts every `BACKUP_TABLES` row count is unchanged. Passes.
+
+---
+
+#### 7C. backup.ts — schema-drift tolerance (automated)
+
+| # | Test | Assertion | Result |
+|---|---|---|---|
+| 1 | Unknown column skipped | A `conditions` backup row with an extra `bogus_column` restores without throwing | [x] PASS |
+| 2 | Known columns still restored | After the drift restore, `conditions.length === 22` and htn is present | [x] PASS |
+| 3 | Column set is PRAGMA ∩ row keys | Only columns present in both `PRAGMA table_info(<t>)` and the backup row are inserted | [x] PASS |
+
+**Result:** [x] PASS
+
+QA notes: verified 3 by code inspection — `src/lib/db/backup.ts:68-77` builds `liveColumns`
+strictly from `PRAGMA table_info(<t>)` (fixed live schema), then `cols` is the intersection
+`liveColumns.filter(c => Object.prototype.hasOwnProperty.call(r, c))`. Column identifiers
+used in the generated `INSERT INTO ${t} (${cols.join(', ')})` SQL always come from the
+PRAGMA result (server-controlled), never from raw backup-row keys — so a malicious/crafted
+backup file cannot inject arbitrary column or table identifiers into the SQL text. Table
+names (`t`) are always drawn from the hardcoded `BACKUP_TABLES` const, never from
+`backup.tables` keys, closing the same class of injection at the table level. No defect.
+
+---
+
+#### 7D. SettingsSheet — Backup UI (component / manual)
+
+| # | Test | Assertion | Result |
+|---|---|---|---|
+| 1 | Backup section renders | "Backup" label + Export / Import buttons appear after the Birth/Gender section | [x] PASS (code review) |
+| 2 | Two-step import confirm | First "Import" tap reveals Confirm / Cancel + "Import replaces all current data." warning | [x] PASS (code review) |
+| 3 | Cancel resets confirm | Tapping Cancel returns to the single "Import" button, warning gone | [x] PASS (code review) |
+| 4 | Disabled when `db === null` | Both buttons disabled + "Storage unavailable — backup disabled." note shown | [x] PASS (code review) |
+| 5 | Export error surfaced inline | A thrown export error shows short inline `backupWarn` text, no crash | [x] PASS (code review) |
+| 6 | Import cancel (picker dismissed) | `pickAndReadBackup` returns null → confirm state resets, no reload, DB untouched | [x] PASS (code review) |
+
+**Result:** [x] PASS (code-inspection only — no component/render test exists for `SettingsSheet`'s
+Backup section and no browser session was available this run; see notes below)
+
+QA notes (`src/app/bodymap.tsx:1284-1470`):
+- #1: "Backup" section label + button row sit directly after the `birthGenderRow` View,
+  before the sheet's closing tag — matches spec order. Confirmed by reading source.
+- #2/#3: `importConfirm` state gates a ternary — `false` renders the single Import button,
+  `true` renders Confirm/Cancel plus the `backupWarn` "Import replaces all current data."
+  text (line 1463-1465). Cancel's `onPress` is `() => setImportConfirm(false)`, which also
+  hides the warning text since it's conditionally rendered on `importConfirm`. Logic is
+  correct; not exercised in a live DOM.
+- #4: both TouchableOpacity elements carry `disabled={!db}` and dim via
+  `!db && { opacity: 0.4 }`; the hint text is gated on `!db` (line 1467-1469). Correct by
+  inspection.
+- #5: `handleExport`/`handleImport` both wrap their body in try/catch and set
+  `backupError`, rendered via `styles.backupWarn` (line 1466). No unguarded throw path
+  found.
+- #6: `handleImport` checks `if (!backup) { setImportConfirm(false); return }` immediately
+  after `pickAndReadBackup()`, before `restoreBackup` is ever called — cancel path never
+  touches the DB or reloads. Correct by inspection.
+- Caveat: none of the above were run through Testing Library or a browser; this is static
+  verification only. Recommend a `SettingsSheet` component test (RNTL) in a future pass to
+  turn 7D into a true automated gate rather than relying on code review each time.
+
+---
+
+### End-to-end manual QA scenarios (web dev server)
+
+| # | Scenario | Expected | Result |
+|---|---|---|---|
+| E1 | Export backup downloads a file | Settings → Export → `maigenki-backup-YYYY-MM-DD.json` downloads, JSON contains all 10 tables | [x] PASS (Playwright, 2026-07-04) |
+| E2 | Import restores a relocated dot | Relocate a demo dot → import a pre-relocation backup → after reload dot is back at backed-up position | [x] PASS (Playwright, 2026-07-04) |
+| E3 | Import into a wiped store | Freshly-wiped OPFS store → import backup → full data restored after reload | [x] PASS (Playwright, 2026-07-04) |
+| E4 | Import cancel path | Open import, dismiss the file picker → no reload, existing data unchanged | [x] PASS (Playwright, 2026-07-04 — see note on picker cancel) |
+| E5 | Malformed file rejected | Import a non-JSON / wrong-envelope file → inline error message shown, DB untouched (no partial wipe) | [x] PASS (Playwright, 2026-07-04) |
+| E6 | Native unaffected | On native, Backup is unavailable: buttons disabled with "Backup is web-only for now." note; handlers early-return | [x] PASS (static verification — B-P7-1 fix gates all backup I/O behind `IS_WEB`) |
+
+QA notes (live Playwright run against `npx expo start --web`, Chromium, 2026-07-04):
+- **E1**: Export downloaded `maigenki-backup-2026-07-04.json` — valid envelope
+  (`app: maigenki`, `formatVersion: 1`, ISO `exportedAt`), all 10 tables present
+  (health_records 1, conditions 22, condition_localnames 88, condition_records 47,
+  settings 6, others 0), htn at canonical 46.42/11.95.
+- **E2**: Relocated htn via pencil → canvas tap to ~59.98/29.97 (persisted across a page
+  reload, confirmed by re-export). Imported a pre-relocation backup → app auto-reloaded →
+  re-export showed htn back at exactly 46.42/11.95 with all row counts unchanged.
+- **E3**: Wiped the `expo-sqlite` OPFS directory from a static page, reloaded (fresh
+  seed), imported a backup with a distinct marker position (htn 33.33/44.44) → after the
+  auto-reload, export confirmed htn at 33.33/44.44 — proving the data came from the
+  imported file, not the demo reseed — with all 10 tables' counts restored.
+- **E4**: Two-step confirm verified live: first Import tap shows Confirm / Cancel +
+  "Import replaces all current data."; Cancel resets to the plain Export/Import row with
+  the warning gone, no reload, DB untouched. Picker-dismiss cancel: `expo-document-picker`
+  (web) resolves `{ canceled: true }` from the file input's native `cancel` event, which
+  Chromium fires on real user dismissal — dispatching it live reset the confirm state
+  correctly. (Playwright's programmatic chooser-cancel doesn't emit that event, so pure
+  automation appears to hang — automation artifact, not a defect.)
+- **E5**: Imported `{ app: 'someOtherApp', … }` → inline error "Selected file is not a
+  valid mAIgenki backup", no reload, confirm state reset; immediate re-export proved the
+  DB byte-identical in content (htn 46.42/11.95, all counts unchanged).
+- **E6**: After the B-P7-1 fix, `backupAvailable = !!db && IS_WEB` gates both buttons
+  (disabled + "Backup is web-only for now." note on native) and both handlers early-return,
+  so no native code path reaches file I/O or the un-refreshed restore. `exportBackupToFile`'s
+  own `Platform.OS !== 'web'` throw remains as a defensive backstop.
+- Test DB state was reset to a clean canonical reseed after the run (store wiped, fresh
+  seed at positions_version 4).
+
+---
+
+### Phase 7 overall QA status
+
+- [x] All automated tests PASS (7A–7C) — `npx jest __tests__/db/backup.test.ts` (6/6 green,
+  1 test added by QA to strengthen 7B.3 coverage)
+- [x] SettingsSheet UI behaviors PASS (7D) — code inspection + all behaviors subsequently
+  exercised live in the Playwright browser session (see E1–E5 notes)
+- [x] All manual scenarios PASS (E1–E6) — executed live via Playwright against the web dev
+  server on 2026-07-04 (see per-scenario notes above); E6 verified statically
+- [x] `npm run typecheck` — zero errors
+- [x] `npx expo lint` — no new warnings in changed files (5 pre-existing warnings elsewhere,
+  confirmed via `git diff` that none are in the Phase 7 diff)
+- [x] Full regression suite — `npx jest` 270/270 passing (269 pre-existing + 1 new), no
+  regressions from this change
+
+**Verdict: ALL GREEN. The one defect found (B-P7-1 — native Import had no post-restore
+refresh path) was fixed the same day: all backup I/O is now gated behind `IS_WEB`
+(`backupAvailable = !!db && IS_WEB` in `SettingsSheet`), with a "Backup is web-only for
+now." note on native. Fix re-verified: typecheck clean, lint clean, 270/270 jest, and the
+full E1–E5 browser pass ran against the fixed build. Phase 7 is done.**

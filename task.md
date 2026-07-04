@@ -257,6 +257,52 @@ Impl: `'Chronic migraine visual aura, 4–6 episodes/month. On topiramate 50mg d
 **B10 — TypeScript errors in test files** (implicit `any` params)
 5 errors in `__tests__/screens/analyzing.test.tsx`, `__tests__/screens/bodymap.test.tsx`, `__tests__/screens/upload.test.tsx` — parameter types not annotated. Runtime/production code unaffected.
 
+### Phase 7 QA findings (2026-07-04)
+
+**B-P7-1 — Native Import has no post-restore refresh path** (`src/app/bodymap.tsx` line 1308-1324, `src/lib/db/backup.ts` line 50-85)
+Severity: Medium. Impact: on native (iOS/Android), a user who imports a backup gets a
+silently stale app — the SQLite write succeeds but nothing re-hydrates the Zustand store
+or re-renders `bodymap.tsx`, so the UI keeps showing pre-import data until the app is force-
+restarted. Likelihood: only reachable once native builds exist and `db !== null` (currently
+web-first, so low likelihood today, but nothing in the code prevents it from firing right
+now if a native dev build is used).
+Expected (per SPEC.md line 451, "After a successful import on web, the app reloads to
+re-hydrate all state") and per repo convention (`IS_WEB` from `@/lib/scale` gates every
+other platform-diverging behavior in `bodymap.tsx`, e.g. lines 472, 630, 658, 699, 1580,
+1688): either (a) guard the Import button/flow behind `IS_WEB` like every other web-only
+affordance in this file, matching the spec's implicit web-only Import scope and the
+existing `Platform.OS === 'web'` guard already used for export in `backup.ts:92`, or (b)
+add a native-appropriate re-hydration step (e.g. re-run the store's DB-load routine) after
+`restoreBackup` resolves on native.
+Actual: `handleImport` (bodymap.tsx:1308-1324) calls `restoreBackup(db, backup)`
+unconditionally, then only does `if (Platform.OS === 'web') window.location.reload()`
+(line 1319) — no `else` branch for native. The Import button itself is enabled whenever
+`db` is non-null (line 1445 `disabled={!db}`), with no `IS_WEB` check, unlike every other
+platform-diverging UI element in this file.
+Recommendation: smallest fix is to also disable/hide the Import (and Export, already
+throws but silently via inline error) affordances via `!IS_WEB` until native re-hydration
+is implemented, consistent with the "web-first" framing of Phase 7's own task.md heading.
+
+**Status: FIXED (2026-07-04)** — Applied option (a). In `src/app/bodymap.tsx` `SettingsSheet`,
+added `const backupAvailable = !!db && IS_WEB`; both `handleExport`/`handleImport` early-return
+unless `backupAvailable` (stale-state path can no longer fire on native), and both buttons are
+disabled (opacity 0.4) when `!backupAvailable`. Native now shows a "Backup is web-only for now."
+hint (the `db === null` case still shows "Storage unavailable — backup disabled."). Verified:
+`npm run typecheck` clean, `npx expo lint` no new warnings, `npx jest` full suite 270 passing.
+
+**Note (not a defect):** `restoreBackup`'s DELETE-then-INSERT loop (`backup.ts:58-84`) does
+not wrap individual PRAGMA/INSERT calls in the kind of "table absent from live schema"
+guard the spec describes (SPEC.md line ~450) as an explicit check — it relies on
+`PRAGMA table_info` returning an empty array for a nonexistent table (so `cols.length === 0`
+short-circuits the insert loop). This is correct real-SQLite behavior and matches the
+schema-drift tests in `__tests__/db/backup.test.ts`, but the equivalent DELETE loop
+(`backup.ts:60-62`) issues `DELETE FROM ${t}` for every entry in the hardcoded
+`BACKUP_TABLES` regardless of whether it exists live — currently safe only because
+`BACKUP_TABLES` is kept in lockstep with `schema.ts`. If a future schema migration drops a
+table without updating `BACKUP_TABLES`, `DELETE FROM <dropped-table>` will throw
+"no such table" and abort the whole restore transaction. Flagging for awareness; no action
+needed today since the two lists are currently in sync (verified against `schema.ts`).
+
 ---
 
 ## Phase 6 — Condition Dot Position Editor
@@ -532,3 +578,110 @@ const isRelocating = relocatingCondition?.id === c.id
 - [ ] New dot position persists after app reload (SQLite saved)
 - [ ] Tap ✕ in banner → dot stays at original position, layers restore
 - [ ] Tap the relocated dot → condition card opens at new position normally
+
+---
+
+## Phase 7 — Backup / Restore (Export + Import, web-first, plain JSON)
+
+Spec: SPEC.md § "Backup & Restore (Export / Import)". Plan: PLAN.md Phase 5.
+Tasks must be implemented in order. Mark each `[x]` when done.
+
+### Task 7.1 — Backup module: types + table order
+**File:** NEW `src/lib/db/backup.ts`
+
+- [x] `BACKUP_TABLES: readonly string[]` — the 10 tables in FK-safe parent→child order:
+  `facilities`, `providers`, `health_records`, `conditions`, `condition_providers`,
+  `measurements`, `medications`, `condition_localnames`, `condition_records`, `settings`
+  (verify against `src/lib/db/schema.ts`)
+- [x] Export type:
+  ```ts
+  export type BackupFile = {
+    app: 'maigenki'
+    formatVersion: 1
+    exportedAt: string
+    tables: Record<string, unknown[]>
+  }
+  ```
+- [x] No new dependencies. Code style: 2-space, single quotes, no semicolons, named exports,
+  no `any` (use `unknown` + narrowing).
+
+### Task 7.2 — `buildBackup(db)`
+**File:** `src/lib/db/backup.ts`
+
+- [x] `export async function buildBackup(db: SQLiteDatabase): Promise<BackupFile>`
+- [x] For each table in `BACKUP_TABLES`: `db.getAllAsync('SELECT * FROM ' + t)` (same read
+  style as `queries.ts`), collected into `tables`
+- [x] `exportedAt: new Date().toISOString()`
+
+### Task 7.3 — `restoreBackup(db, backup)`
+**File:** `src/lib/db/backup.ts`
+
+- [x] `export async function restoreBackup(db: SQLiteDatabase, backup: BackupFile): Promise<void>`
+- [x] Validate before any write: `backup.app === 'maigenki'` and `backup.formatVersion === 1`;
+  throw a descriptive Error otherwise
+- [x] Inside `db.withTransactionAsync`:
+  - DELETE all rows from every table in reverse `BACKUP_TABLES` order (children first —
+    same ordering principle as `seed.ts` `clearDemoData`)
+  - For each table in `BACKUP_TABLES` order (parents first):
+    - read live columns via `PRAGMA table_info(<t>)`
+    - for each backup row, INSERT using only `Object.keys(row) ∩ liveColumns`
+      (schema-drift tolerance: older/newer backups still restore)
+    - skip tables absent from the live schema; skip unknown columns silently
+- [x] All-or-nothing: any thrown error inside the transaction rolls back
+
+### Task 7.4 — Web file I/O: `exportBackupToFile` + `pickAndReadBackup`
+**File:** `src/lib/db/backup.ts`
+
+- [x] `export async function exportBackupToFile(db: SQLiteDatabase): Promise<void>` —
+  guard `Platform.OS === 'web'` (throw clear 'not supported on native yet' otherwise);
+  `buildBackup` → `JSON.stringify` → `new Blob([json], { type: 'application/json' })` →
+  `URL.createObjectURL` → temporary `<a download="maigenki-backup-YYYY-MM-DD.json">` click →
+  `URL.revokeObjectURL`
+- [x] `export async function pickAndReadBackup(): Promise<BackupFile | null>` —
+  `DocumentPicker.getDocumentAsync({ type: 'application/json', copyToCacheDirectory: true })`
+  (same pattern as `index.tsx` PDF pick); return `null` on cancel;
+  `fetch(asset.uri).then(r => r.text())` → `JSON.parse` → validate shape (type guard, no `any`)
+  → `BackupFile`; throw descriptive Error on malformed JSON / wrong envelope
+- [x] Never log backup contents
+
+### Task 7.5 — Settings UI: Backup section in `SettingsSheet`
+**File:** `src/app/bodymap.tsx` — `SettingsSheet` (~line 1283)
+
+- [x] Add `const db = useOptionalDatabase()` inside `SettingsSheet` (hook already imported
+  at top of file)
+- [x] After the Birth/Gender section, before `</Animated.View>`: section label "Backup"
+  (existing `settingsSectionLabel` style) + two buttons:
+  - **Export backup** → `exportBackupToFile(db)`; errors caught → short inline error text
+  - **Import backup** → inline two-step confirm (component state, NO platform dialogs):
+    first tap reveals "This replaces all current data — Confirm / Cancel"; Confirm →
+    `pickAndReadBackup()` → if non-null `restoreBackup(db, backup)` →
+    `window.location.reload()` (web); Cancel resets confirm state
+- [x] Both buttons disabled + short note when `db === null` (SQLite unavailable/demo fallback)
+- [x] Add styles `backupBtn`, `backupBtnText`, `backupWarn` next to existing settings styles,
+  matching existing visual language
+
+### Task 7.6 — Round-trip test
+**File:** NEW `__tests__/db/backup.test.ts`
+
+- [x] Follow the existing `__tests__/db` harness (see `__tests__/db/pipeline.test.ts` /
+  `queries.test.ts` for the expo-sqlite test setup)
+- [x] Round trip: open test DB → `initDatabase` + `seedDemoData` → `buildBackup` →
+  mutate (e.g. `updateConditionPosition(htn)`) and/or delete rows → `restoreBackup` →
+  assert: htn `cx`/`name_medical` back to backed-up values; per-table row counts equal
+  the original backup's
+- [x] Envelope validation: `restoreBackup` rejects `{ app: 'other' }` and unknown
+  `formatVersion` without touching the DB
+- [x] Schema-drift tolerance: a backup row containing an extra unknown column restores
+  without error (unknown key skipped)
+
+### Phase 7 Verification checklist (run after all tasks done)
+
+- [x] `npm run typecheck` — zero new errors
+- [x] `npx expo lint` — no new warnings in changed files
+- [x] `npx jest __tests__/db/backup.test.ts` — all green (5 tests) + full suite `npx jest` 269 passing
+- [x] Manual (web dev server): Settings → Export backup downloads `maigenki-backup-*.json`
+  containing all 10 tables — PASS (Playwright, 2026-07-04)
+- [x] Manual: relocate a demo dot → import a pre-relocation backup → after reload the dot
+  is back at the backed-up position — PASS (Playwright, 2026-07-04)
+- [x] Manual: import into a freshly-wiped OPFS store → full restore — PASS (Playwright, 2026-07-04)
+- [x] Native unaffected (all web file I/O is `Platform.OS === 'web'`-guarded)

@@ -412,6 +412,59 @@ Tapping the pencil:
 
 ---
 
+## Backup & Restore (Export / Import)
+
+All health data lives in on-device SQLite. On the deployed web build, that is OPFS —
+per-origin browser storage that does **not** migrate to a new phone, does not sync across
+browsers, and (without `navigator.storage.persist()`) can be evicted by the browser
+(iOS Safari drops unused-site storage after ~7 days). For an app meant to track decades of
+records, users need a way to carry their data across devices without violating the
+no-cloud/no-auth constraint. The answer is a **user-owned backup file**.
+
+### Format
+
+- **Plain (unencrypted) JSON** — v1 decision. Encryption may be added later as a format bump.
+- Envelope: `{ app: 'maigenki', formatVersion: 1, exportedAt: ISO-8601, tables: { <table>: rows[] } }`
+- Contains every row from all 10 SQLite tables: `facilities`, `providers`, `health_records`,
+  `conditions`, `condition_providers`, `measurements`, `medications`, `condition_localnames`,
+  `condition_records`, `settings`.
+- Filename: `maigenki-backup-YYYY-MM-DD.json`
+
+### Export
+
+- Settings sheet → **Backup** section → **Export backup**
+- Serializes the whole DB (`SELECT * FROM <table>` per table) and downloads the JSON file
+  (web: Blob + `<a download>`). The user saves it anywhere they like (Files, Drive, email
+  to self) — the app never uploads it.
+
+### Import
+
+- Settings sheet → **Backup** section → **Import backup**
+- Import is **destructive**: it replaces all current data. An inline two-step confirm
+  ("This replaces all current data — Confirm / Cancel") is required before the file picker
+  opens. No platform dialogs.
+- File is validated (`app === 'maigenki'`, known `formatVersion`) before any write.
+- Restore runs inside a single transaction: delete children→parents, then insert
+  parents→children. Rows are inserted using only the intersection of backup keys and the
+  live table's columns (`PRAGMA table_info`), so backups survive schema drift across app
+  versions in either direction.
+- After a successful import on web, the app reloads to re-hydrate all state.
+
+### Platform scope
+
+- **Web-first (v1).** Export/import file I/O is `Platform.OS === 'web'`-guarded.
+- Native export/sharing (`expo-sharing`) is deferred to a later phase.
+- If SQLite is unavailable (demo fallback, `db === null`), both buttons are disabled with
+  a short explanatory note.
+
+### Constraints
+
+- The backup file stays user-owned: never uploaded, never logged.
+- Import must be all-or-nothing (transactional) — a failed import must not leave a
+  half-restored DB.
+
+---
+
 ## Open Questions
 
 - **Anatomy SVG paths:** Final organ paths need to be traced into the 260×460 coordinate space per body type. Placeholder ellipses are used during development. This is 2–3 days of design/tracing work.

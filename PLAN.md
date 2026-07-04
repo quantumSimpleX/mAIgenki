@@ -164,6 +164,27 @@ It does not block Phases 0–2, but must be completed before Phase 3 polish.
 
 ---
 
+## Phase 5 — Backup / Restore (Export + Import) ✓
+Goal: user-owned backup file — export the entire SQLite DB to plain JSON, import it on a
+new device to restore. Web-first (deployed platform); native deferred.
+Spec: SPEC.md § "Backup & Restore (Export / Import)". Done 2026-07-04: all tasks
+implemented, 270/270 jest green, E1–E6 QA scenarios passed (test.md Phase 7).
+
+- [x] **Task 5.1** — Backup module (`src/lib/db/backup.ts`)
+  - `BACKUP_TABLES` (10 tables, FK-safe parent→child order), `BackupFile` type
+  - `buildBackup(db)` — `SELECT *` per table into the JSON envelope
+  - `restoreBackup(db, backup)` — validate envelope; transactional delete children→parents +
+    insert parents→children using `PRAGMA table_info` ∩ backup keys (schema-drift tolerant)
+  - `exportBackupToFile(db)` — web Blob + `<a download>`; `pickAndReadBackup()` — reuse
+    `expo-document-picker` pattern from `index.tsx`
+- [x] **Task 5.2** — Settings UI (`src/app/bodymap.tsx` `SettingsSheet`)
+  - Backup section: Export / Import buttons, inline two-step destructive-import confirm,
+    reload after import (web), buttons disabled when `db` is null
+- [x] **Task 5.3** — Tests (`__tests__/db/backup.test.ts`)
+  - Round-trip: seed → build → mutate/clear → restore → assert rows + counts match
+
+---
+
 ## Implementation Order
 
 ```

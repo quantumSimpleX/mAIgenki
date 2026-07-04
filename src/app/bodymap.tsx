@@ -21,6 +21,7 @@ import {
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
 import { useOptionalDatabase } from '@/lib/db/provider'
 import { updateConditionPosition } from '@/lib/db/queries'
+import { exportBackupToFile, pickAndReadBackup, restoreBackup } from '@/lib/db/backup'
 
 const { height: SH } = Dimensions.get('window')
 
@@ -1290,6 +1291,42 @@ function SettingsSheet() {
     gender, setGender,
   } = useAppStore()
 
+  const db = useOptionalDatabase()
+  const [importConfirm, setImportConfirm] = useState(false)
+  const [backupError, setBackupError] = useState<string | null>(null)
+
+  // Backup file I/O is web-only for now (native has no post-restore refresh path,
+  // so a native import would leave the Zustand store / UI stale until restart).
+  const backupAvailable = !!db && IS_WEB
+
+  async function handleExport() {
+    if (!backupAvailable || !db) return
+    try {
+      setBackupError(null)
+      await exportBackupToFile(db)
+    } catch (e) {
+      setBackupError(e instanceof Error ? e.message : 'Export failed')
+    }
+  }
+
+  async function handleImport() {
+    if (!backupAvailable || !db) return
+    try {
+      setBackupError(null)
+      const backup = await pickAndReadBackup()
+      if (!backup) {
+        setImportConfirm(false)
+        return
+      }
+      await restoreBackup(db, backup)
+      setImportConfirm(false)
+      if (Platform.OS === 'web') window.location.reload()
+    } catch (e) {
+      setBackupError(e instanceof Error ? e.message : 'Import failed')
+      setImportConfirm(false)
+    }
+  }
+
   // Local draft so the year field can be typed freely; only a valid 4-digit year
   // is committed to the store (and persisted). Re-syncs when birthYear changes
   // externally, e.g. when settings are hydrated from SQLite.
@@ -1392,6 +1429,50 @@ function SettingsSheet() {
           <Text style={styles.settingsHint}>Tap to correct.</Text>
         </View>
       </View>
+
+      <Text style={styles.settingsSectionLabel}>Backup</Text>
+      <View style={{ flexDirection: 'row', gap: sc(8) }}>
+        <TouchableOpacity
+          style={[styles.backupBtn, !backupAvailable && { opacity: 0.4 }]}
+          onPress={handleExport}
+          disabled={!backupAvailable}
+        >
+          <Text style={styles.backupBtnText}>Export</Text>
+        </TouchableOpacity>
+        {!importConfirm ? (
+          <TouchableOpacity
+            style={[styles.backupBtn, !backupAvailable && { opacity: 0.4 }]}
+            onPress={() => {
+              setBackupError(null)
+              setImportConfirm(true)
+            }}
+            disabled={!backupAvailable}
+          >
+            <Text style={styles.backupBtnText}>Import</Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={[styles.backupBtn, { borderColor: C.aqua }]}
+              onPress={handleImport}
+            >
+              <Text style={[styles.backupBtnText, { color: C.aqua }]}>Confirm</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.backupBtn} onPress={() => setImportConfirm(false)}>
+              <Text style={styles.backupBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+      {importConfirm && (
+        <Text style={styles.backupWarn}>Import replaces all current data.</Text>
+      )}
+      {backupError && <Text style={styles.backupWarn}>{backupError}</Text>}
+      {!db ? (
+        <Text style={styles.settingsHint}>Storage unavailable — backup disabled.</Text>
+      ) : !IS_WEB ? (
+        <Text style={styles.settingsHint}>Backup is web-only for now.</Text>
+      ) : null}
     </Animated.View>
   )
 }
@@ -1962,6 +2043,17 @@ const styles = StyleSheet.create({
   genderOptLetter: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(14), color: C.inkMuted },
   genderOptTextActive: { color: '#fff' },
   settingsHint: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.inkMuted, marginBottom: sc(12) },
+
+  // Backup
+  backupBtn: {
+    flex: 1, paddingVertical: sc(10), borderRadius: sc(8), borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)', backgroundColor: C.surfaceHigh, alignItems: 'center',
+  },
+  backupBtnText: {
+    fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(13), color: C.ink,
+    textTransform: 'uppercase', letterSpacing: sc(0.5),
+  },
+  backupWarn: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: '#E5A24B', marginTop: sc(8) },
 
   // Upload shortcuts
   uploadWrap: { position: 'absolute', bottom: sc(20), left: sc(16), alignItems: 'flex-start', zIndex: 4 },
