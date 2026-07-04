@@ -25,8 +25,9 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     let opened: SQLiteDatabase | null = null
 
     async function setup() {
+      let database: SQLiteDatabase | null = null
       try {
-        const database = await openDatabaseAsync('maigenki.db')
+        database = await openDatabaseAsync('maigenki.db')
         await initDatabase(database)
         await seedDemoData(database)
         if (cancelled) {
@@ -37,6 +38,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
         setDb(database)
       } catch (e) {
         console.warn('[SQLite] unavailable, using bundled demo data:', (e as Error).message)
+        await database?.closeAsync().catch(() => {})
       }
     }
 
