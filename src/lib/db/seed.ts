@@ -55,15 +55,21 @@ async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
 export async function seedDemoData(db: SQLiteDatabase): Promise<void> {
   await migrateSystemCodes(db)
   await migrateConditionPositions(db)
-  if (await isDemoDataPresent(db)) return
+  const alreadySeeded = await isDemoDataPresent(db)
 
-  await db.runAsync(
-    `INSERT OR IGNORE INTO health_records
-       (id, filename, record_type, uploaded_at, processed_at)
-     VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
-    [DEMO_RECORD_ID, 'Demo Patient — Sample Health History', 'demo'],
-  )
+  if (!alreadySeeded) {
+    await db.runAsync(
+      `INSERT OR IGNORE INTO health_records
+         (id, filename, record_type, uploaded_at, processed_at)
+       VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
+      [DEMO_RECORD_ID, 'Demo Patient — Sample Health History', 'demo'],
+    )
+  }
 
+  // Always run: INSERT OR IGNORE is a no-op for rows that already exist, but this
+  // backfills any demo condition added to CONDITIONS after a device's first seed
+  // (e.g. the female->male reproductive swap left bph/ed missing on devices that
+  // had already seeded, since they're new ids, not reused ones).
   for (const c of CONDITIONS) {
     const icdCode = c.medName.match(/ICD-10:\s*([A-Z]\d+[\d.]*)/)?.[1] ?? null
 
