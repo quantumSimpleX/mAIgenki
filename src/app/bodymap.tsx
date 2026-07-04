@@ -1482,7 +1482,7 @@ export default function BodyMapScreen() {
     if (!relocatingCondition) return
     const cxPercent = (cx / 260) * 100
     const cyPercent = (cy / 460) * 100
-    console.log(`[Condition Relocated] ${relocatingCondition.label}: ${cxPercent.toFixed(2)}% x ${cyPercent.toFixed(2)}%`)
+    // console.log(`[Condition Relocated] ${relocatingCondition.label}: ${cxPercent.toFixed(2)}% x ${cyPercent.toFixed(2)}%`)
     if (db) await updateConditionPosition(db, relocatingCondition.id, cxPercent, cyPercent)
     refreshConditions()
     cancelRelocation()
