@@ -38,7 +38,7 @@ async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
     // One-time hard reset: force every demo condition back to its canonical position,
     // repairing DBs corrupted by the earlier zeroing migration.
     for (const c of CONDITIONS) {
-      await db.runAsync('UPDATE conditions SET cx = ?, cy = ? WHERE id = ?', [c.cx_percent, c.cy_percent, c.id])
+      await db.runAsync('UPDATE conditions SET cx = ?, cy = ? WHERE id = ?', [c.cx, c.cy, c.id])
     }
     await upsertSetting(db, 'positions_version', POSITIONS_VERSION)
     return
@@ -47,7 +47,7 @@ async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
   for (const c of CONDITIONS) {
     await db.runAsync(
       'UPDATE conditions SET cx = ?, cy = ? WHERE id = ? AND (cx IS NULL OR cy IS NULL OR (cx = 0 AND cy = 0))',
-      [c.cx_percent, c.cy_percent, c.id],
+      [c.cx, c.cy, c.id],
     )
   }
 }
@@ -69,16 +69,15 @@ export async function seedDemoData(db: SQLiteDatabase): Promise<void> {
 
     // Use the design id as the primary key so getConditions / getConditionRecords
     // are addressable by 'htn', 'eczema', … and re-seeding is idempotent.
-    // REPLACE ensures coordinates are always set correctly, even if record exists.
     await db.runAsync(
-      `REPLACE INTO conditions (
+      `INSERT OR IGNORE INTO conditions (
          id, record_id, name_medical, name_common, icd_code, system,
          render_x, render_y, cx, cy, year_frac,
          status, certainty, date_diagnosed, evidence, notes
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         c.id, DEMO_RECORD_ID, c.medName, c.label, icdCode, c.system,
-        c.cx_percent, c.cy_percent, c.cx_percent, c.cy_percent, c.yearFrac,
+        c.cx, c.cy, c.cx, c.cy, c.yearFrac,
         'documented', 'confirmed', c.date, c.evidence, c.note,
       ],
     )

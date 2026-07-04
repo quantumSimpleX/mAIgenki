@@ -428,8 +428,6 @@ export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition
     // Fall back to hardcoded positions when null — covers old DBs where cx/cy
     // columns were added via ALTER TABLE and migration hasn't populated them yet.
     const hardcoded = CONDITIONS.find((c) => c.id === row.id)
-    const cx_percent = row.cx != null && row.cx !== 0 ? row.cx : (hardcoded?.cx_percent ?? 0)
-    const cy_percent = row.cy != null && row.cy !== 0 ? row.cy : (hardcoded?.cy_percent ?? 0)
     result.push({
       id: row.id,
       system: row.system as SystemId,
@@ -438,8 +436,9 @@ export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition
       localNames,
       date: row.date_diagnosed ?? row.date_onset ?? '',
       yearFrac: row.year_frac ?? 0,
-      cx_percent,
-      cy_percent,
+      // Use != null (not ??) so explicit 0 values from a broken migration also fall back.
+      cx: row.cx != null && row.cx !== 0 ? row.cx : (hardcoded?.cx ?? 0),
+      cy: row.cy != null && row.cy !== 0 ? row.cy : (hardcoded?.cy ?? 0),
       note: row.notes ?? '',
       evidence: row.evidence ?? '',
     })

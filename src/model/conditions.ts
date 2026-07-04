@@ -6,23 +6,6 @@ export type SupportedLang = 'en' | 'zh-TW' | 'ja' | 'es'
 
 export type ChatMessage = { role: 'user' | 'assistant'; content: string }
 
-// Image asset dimensions (1018×2436px). Coordinates are stored as percentages of these dimensions.
-export const IMAGE_ASSET_WIDTH = 1018
-export const IMAGE_ASSET_HEIGHT = 2436
-
-// SVG viewBox dimensions used for rendering
-export const SVG_VIEW_BOX_WIDTH = 260
-export const SVG_VIEW_BOX_HEIGHT = 460
-
-// Convert percentage coordinate (0-100) of asset to SVG viewBox coordinate
-export function getSvgX(cx_percent: number): number {
-  return (cx_percent / 100) * SVG_VIEW_BOX_WIDTH
-}
-
-export function getSvgY(cy_percent: number): number {
-  return (cy_percent / 100) * SVG_VIEW_BOX_HEIGHT
-}
-
 export type DesignCondition = {
   id: string
   system: SystemId
@@ -31,8 +14,8 @@ export type DesignCondition = {
   localNames: Partial<Record<SupportedLang, string>>
   date: string
   yearFrac: number
-  cx_percent: number
-  cy_percent: number
+  cx: number
+  cy: number
   note: string
   evidence: string
 }
@@ -85,7 +68,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Atopic dermatitis',
     medName: 'Atopic dermatitis with eosinophilia',
     localNames: { ja: 'アトピー性皮膚炎', es: 'Dermatitis atópica', 'zh-TW': '特應性皮膚炎' },
-    date: '2013-MAR-17', yearFrac: parseDateFrac('2013-MAR-17'), cx_percent: 46.15, cy_percent: 14.78,
+    date: '2013-MAR-17', yearFrac: parseDateFrac('2013-MAR-17'), cx: 120, cy: 68,
     note: 'Chronic eczema with flares on forearms and neck. Managed with topical corticosteroids and emollients.',
     evidence: 'Dr. Sarah Kim · Bay Area Skin & Allergy Institute · Oakland, CA, US',
   },
@@ -94,7 +77,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Plaque psoriasis',
     medName: 'Psoriasis vulgaris',
     localNames: { ja: '尋常性乾癬', es: 'Psoriasis en placas', 'zh-TW': '銀屑病' },
-    date: '2018-NOV-04', yearFrac: parseDateFrac('2018-NOV-04'), cx_percent: 41.54, cy_percent: 64.78,
+    date: '2018-NOV-04', yearFrac: parseDateFrac('2018-NOV-04'), cx: 108, cy: 298,
     note: 'Moderate plaque psoriasis on elbows and knees. On methotrexate 15mg weekly with good response.',
     evidence: 'Dr. Meera Patel · St. Claire Medical Center · Boston, MA, US',
   },
@@ -103,7 +86,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Fibromyalgia',
     medName: 'Fibromyalgia syndrome (FMS)',
     localNames: { ja: '線維筋痛症', es: 'Fibromialgia', 'zh-TW': '纖維肌痛症' },
-    date: '2019-JUL-22', yearFrac: parseDateFrac('2019-JUL-22'), cx_percent: 40.38, cy_percent: 23.91,
+    date: '2019-JUL-22', yearFrac: parseDateFrac('2019-JUL-22'), cx: 105, cy: 110,
     note: 'Widespread musculoskeletal pain with fatigue and sleep disturbance. On duloxetine 60mg and graded exercise.',
     evidence: 'Dr. Luis Torres · Northwestern Memorial Hospital · Chicago, IL, US',
   },
@@ -112,7 +95,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Rotator cuff tear',
     medName: 'Partial-thickness supraspinatus tear',
     localNames: { ja: '腱板断裂', es: 'Desgarro del manguito rotador', 'zh-TW': '旋轉肌袖撕裂' },
-    date: '2022-SEP-13', yearFrac: parseDateFrac('2022-SEP-13'), cx_percent: 28.08, cy_percent: 18.48,
+    date: '2022-SEP-13', yearFrac: parseDateFrac('2022-SEP-13'), cx: 73, cy: 85,
     note: 'Partial thickness supraspinatus tear confirmed on MRI. Conservative management — physiotherapy ongoing.',
     evidence: 'Dr. James Nguyen · Virginia Mason Medical Center · Seattle, WA, US',
   },
@@ -121,7 +104,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'L4–L5 disc herniation',
     medName: 'Lumbar disc herniation L4-L5 with radiculopathy',
     localNames: { ja: '腰椎椎間板ヘルニア（L4–L5）', es: 'Hernia discal L4–L5', 'zh-TW': '腰椎椎間盤突出' },
-    date: '2020-AUG-11', yearFrac: parseDateFrac('2020-AUG-11'), cx_percent: 46.15, cy_percent: 45.22,
+    date: '2020-AUG-11', yearFrac: parseDateFrac('2020-AUG-11'), cx: 120, cy: 208,
     note: 'MRI-confirmed disc herniation with mild L5 radiculopathy. Managed with PT and NSAIDs.',
     evidence: 'Dr. Richard Okafor · Houston Methodist Hospital · Houston, TX, US',
   },
@@ -130,7 +113,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Osteopenia',
     medName: 'Osteopenia (T-score −1.8, lumbar spine)',
     localNames: { ja: '骨減少症', es: 'Osteopenia', 'zh-TW': '骨質減少症' },
-    date: '2023-FEB-28', yearFrac: parseDateFrac('2023-FEB-28'), cx_percent: 46.15, cy_percent: 41.96,
+    date: '2023-FEB-28', yearFrac: parseDateFrac('2023-FEB-28'), cx: 120, cy: 193,
     note: 'DEXA scan T-score −1.8 at lumbar spine. Calcium + vitamin D supplementation. Follow-up in 2 years.',
     evidence: 'Dr. Christine Lee · Oregon Health & Science University · Portland, OR, US',
   },
@@ -139,7 +122,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Hypertension',
     medName: 'Essential hypertension, stage 1',
     localNames: { ja: '高血圧症', es: 'Hipertensión arterial', 'zh-TW': '高血壓' },
-    date: '2019-OCT-14', yearFrac: parseDateFrac('2019-OCT-14'), cx_percent: 43.08, cy_percent: 27.83,
+    date: '2019-OCT-14', yearFrac: parseDateFrac('2019-OCT-14'), cx: 112, cy: 128,
     note: 'Systolic BP >140 mmHg across multiple visits. Currently managed with lisinopril 10mg daily.',
     evidence: 'Dr. Anuj Sharma · Cleveland Clinic · Cleveland, OH, US',
   },
@@ -148,7 +131,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Atrial fibrillation',
     medName: 'Paroxysmal atrial fibrillation',
     localNames: { ja: '心房細動', es: 'Fibrilación auricular', 'zh-TW': '心房顫動' },
-    date: '2021-MAR-02', yearFrac: parseDateFrac('2021-MAR-02'), cx_percent: 46.15, cy_percent: 25.65,
+    date: '2021-MAR-02', yearFrac: parseDateFrac('2021-MAR-02'), cx: 120, cy: 118,
     note: 'Paroxysmal AF detected on 48-hour Holter monitor. Anticoagulated with apixaban.',
     evidence: "Dr. Patrick Walsh · St. Mary's Medical Center · New York, NY, US",
   },
@@ -157,7 +140,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Reactive lymphadenopathy',
     medName: 'Reactive cervical lymphadenopathy',
     localNames: { ja: '反応性リンパ節腫脹', es: 'Linfadenopatía reactiva', 'zh-TW': '反應性淋巴結病' },
-    date: '2016-JUN-09', yearFrac: parseDateFrac('2016-JUN-09'), cx_percent: 43.08, cy_percent: 14.57,
+    date: '2016-JUN-09', yearFrac: parseDateFrac('2016-JUN-09'), cx: 112, cy: 67,
     note: 'Bilateral cervical lymph node enlargement. Resolved following antibiotic treatment for streptococcal pharyngitis.',
     evidence: 'Dr. Emily Brennan · Penn Medicine · Philadelphia, PA, US',
   },
@@ -166,7 +149,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Infectious mononucleosis',
     medName: 'EBV-associated infectious mononucleosis',
     localNames: { ja: '伝染性単核球症', es: 'Mononucleosis infecciosa', 'zh-TW': '傳染性單核細胞增多症' },
-    date: '2014-SEP-03', yearFrac: parseDateFrac('2014-SEP-03'), cx_percent: 56.92, cy_percent: 33.70,
+    date: '2014-SEP-03', yearFrac: parseDateFrac('2014-SEP-03'), cx: 148, cy: 155,
     note: 'EBV-confirmed mononucleosis with splenomegaly. Full recovery over 6 weeks. No sports for 8 weeks.',
     evidence: 'Dr. Thomas Park · University of Michigan Health · Ann Arbor, MI, US',
   },
@@ -175,7 +158,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Migraine disorder',
     medName: 'Migraine with visual aura (ICHD-3)',
     localNames: { ja: '片頭痛', es: 'Migraña con aura', 'zh-TW': '偏頭痛' },
-    date: '2018-MAY-23', yearFrac: parseDateFrac('2018-MAY-23'), cx_percent: 46.15, cy_percent: 6.96,
+    date: '2018-MAY-23', yearFrac: parseDateFrac('2018-MAY-23'), cx: 120, cy: 32,
     note: 'Chronic migraine with visual aura, 4–6 episodes/month. On topiramate 50mg daily.',
     evidence: 'Dr. Nina Rodriguez · Cedars-Sinai Medical Center · Los Angeles, CA, US',
   },
@@ -184,7 +167,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Carpal tunnel syndrome',
     medName: 'Median nerve entrapment at the carpal tunnel',
     localNames: { ja: '手根管症候群', es: 'Síndrome del túnel carpiano', 'zh-TW': '腕管綜合症' },
-    date: '2021-DEC-07', yearFrac: parseDateFrac('2021-DEC-07'), cx_percent: 20.00, cy_percent: 61.96,
+    date: '2021-DEC-07', yearFrac: parseDateFrac('2021-DEC-07'), cx: 52, cy: 285,
     note: 'Right median nerve compression confirmed on NCS. Night splints and corticosteroid injection. Awaiting surgical consult.',
     evidence: 'Dr. Fumiko Yamamoto · El Camino Health · San Jose, CA, US',
   },
@@ -193,7 +176,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Asthma',
     medName: 'Mild persistent asthma (GINA step 2)',
     localNames: { ja: '気管支喘息', es: 'Asma bronquial', 'zh-TW': '支氣管哮喘' },
-    date: '2015-APR-18', yearFrac: parseDateFrac('2015-APR-18'), cx_percent: 46.15, cy_percent: 20.22,
+    date: '2015-APR-18', yearFrac: parseDateFrac('2015-APR-18'), cx: 120, cy: 93,
     note: 'Mild persistent asthma, well-controlled on ICS/LABA. FEV1 88% predicted.',
     evidence: 'Dr. Brian Chen · UCHealth Medical Center · Denver, CO, US',
   },
@@ -202,7 +185,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'COVID-19',
     medName: 'SARS-CoV-2 infection, moderate severity',
     localNames: { ja: '新型コロナウイルス感染症', es: 'COVID-19', 'zh-TW': '新冠肺炎' },
-    date: '2022-FEB-17', yearFrac: parseDateFrac('2022-FEB-17'), cx_percent: 38.46, cy_percent: 23.48,
+    date: '2022-FEB-17', yearFrac: parseDateFrac('2022-FEB-17'), cx: 100, cy: 108,
     note: 'Moderate infection with 8-day course. No hospitalization. Full pulmonary recovery confirmed at 3-month follow-up.',
     evidence: "Dr. Marcus Johnson · St. David's Medical Center · Austin, TX, US",
   },
@@ -211,7 +194,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'GERD',
     medName: 'Gastroesophageal reflux disease, erosive (LA grade B)',
     localNames: { ja: '胃食道逆流症', es: 'Enfermedad por reflujo gastroesofágico', 'zh-TW': '胃食管反流病' },
-    date: '2016-MAR-30', yearFrac: parseDateFrac('2016-MAR-30'), cx_percent: 46.92, cy_percent: 30.43,
+    date: '2016-MAR-30', yearFrac: parseDateFrac('2016-MAR-30'), cx: 122, cy: 140,
     note: 'Erosive esophagitis (LA grade B) confirmed on EGD. On pantoprazole 40mg daily with good symptom control.',
     evidence: 'Dr. Harpreet Singh · Emory University Hospital · Atlanta, GA, US',
   },
@@ -220,7 +203,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Irritable bowel syndrome',
     medName: 'Irritable bowel syndrome — mixed type (IBS-M)',
     localNames: { ja: '過敏性腸症候群', es: 'Síndrome del intestino irritable', 'zh-TW': '腸易激綜合症' },
-    date: '2017-AUG-15', yearFrac: parseDateFrac('2017-AUG-15'), cx_percent: 46.15, cy_percent: 45.65,
+    date: '2017-AUG-15', yearFrac: parseDateFrac('2017-AUG-15'), cx: 120, cy: 210,
     note: 'IBS-mixed type diagnosed per Rome IV criteria. Low-FODMAP diet with partial response. Mebeverine PRN.',
     evidence: 'Dr. Olivia Murphy · Massachusetts General Hospital · Boston, MA, US',
   },
@@ -229,7 +212,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Kidney stones',
     medName: 'Calcium oxalate nephrolithiasis',
     localNames: { ja: '尿路結石', es: 'Litiasis renal', 'zh-TW': '腎結石' },
-    date: '2021-SEP-05', yearFrac: parseDateFrac('2021-SEP-05'), cx_percent: 53.08, cy_percent: 36.96,
+    date: '2021-SEP-05', yearFrac: parseDateFrac('2021-SEP-05'), cx: 138, cy: 170,
     note: '4mm left ureteral calculus — calcium oxalate. Passed spontaneously. Low-oxalate diet commenced.',
     evidence: 'Dr. Kevin Williams · Northwestern Memorial Hospital · Chicago, IL, US',
   },
@@ -238,7 +221,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Recurrent UTIs',
     medName: 'Recurrent uncomplicated urinary tract infections',
     localNames: { ja: '再発性尿路感染症', es: 'Infecciones urinarias recurrentes', 'zh-TW': '復發性尿路感染' },
-    date: '2020-APR-11', yearFrac: parseDateFrac('2020-APR-11'), cx_percent: 45.38, cy_percent: 47.83,
+    date: '2020-APR-11', yearFrac: parseDateFrac('2020-APR-11'), cx: 118, cy: 220,
     note: 'Three culture-confirmed UTIs in 12 months. E. coli predominant. Post-coital prophylaxis with nitrofurantoin.',
     evidence: 'Dr. Divya Patel · Valleywise Health Medical Center · Phoenix, AZ, US',
   },
@@ -247,7 +230,7 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Hypothyroidism',
     medName: 'Primary hypothyroidism',
     localNames: { ja: '甲状腺機能低下症', es: 'Hipotiroidismo', 'zh-TW': '甲狀腺功能減退症' },
-    date: '2017-NOV-19', yearFrac: parseDateFrac('2017-NOV-19'), cx_percent: 46.92, cy_percent: 13.48,
+    date: '2017-NOV-19', yearFrac: parseDateFrac('2017-NOV-19'), cx: 122, cy: 62,
     note: 'TSH 8.2 mIU/L at diagnosis. On levothyroxine 75mcg daily; now euthyroid with TSH 1.4 mIU/L.',
     evidence: 'Dr. Yuna Kim · Mayo Clinic Health System · Minneapolis, MN, US',
   },
@@ -256,27 +239,27 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Vitamin D deficiency',
     medName: '25-OH Vitamin D deficiency (< 30 nmol/L)',
     localNames: { ja: 'ビタミンD欠乏症', es: 'Deficiencia de vitamina D', 'zh-TW': '維生素D缺乏症' },
-    date: '2015-JUL-08', yearFrac: parseDateFrac('2015-JUL-08'), cx_percent: 39.62, cy_percent: 32.61,
+    date: '2015-JUL-08', yearFrac: parseDateFrac('2015-JUL-08'), cx: 103, cy: 150,
     note: '25-OH vitamin D 14 nmol/L. Loading dose completed; now on maintenance 1000 IU daily. Annual monitoring.',
     evidence: 'Dr. Brian Chen · UCHealth Medical Center · Denver, CO, US',
   },
   {
-    id: 'bph', system: 'reproductive',
-    label: 'Benign prostatic hyperplasia',
-    medName: 'Benign prostatic hyperplasia (BPH) with lower urinary tract symptoms',
-    localNames: { ja: '前立腺肥大症', es: 'Hiperplasia prostática benigna', 'zh-TW': '良性前列腺增生' },
-    date: '2018-MAR-11', yearFrac: parseDateFrac('2018-MAR-11'), cx_percent: 43.08, cy_percent: 46.09,
-    note: 'PSA 3.2 ng/mL. Moderate LUTS with nocturia ×3/night. On tamsulosin 0.4mg daily with good symptom control.',
-    evidence: 'Dr. James Rodriguez · Mayo Clinic · Phoenix, AZ, US',
+    id: 'fibroid', system: 'reproductive',
+    label: 'Uterine fibroids',
+    medName: 'Uterine leiomyomata, multiple intramural',
+    localNames: { ja: '子宮筋腫', es: 'Fibromas uterinos', 'zh-TW': '子宮肌瘤' },
+    date: '2020-JUN-22', yearFrac: parseDateFrac('2020-JUN-22'), cx: 112, cy: 212,
+    note: 'Multiple intramural fibroids (largest 3.2cm) on pelvic ultrasound. Managed conservatively. Annual scan.',
+    evidence: 'Dr. Adaeze Obi · George Washington University Hospital · Washington, DC, US',
   },
   {
-    id: 'ed', system: 'reproductive',
-    label: 'Erectile dysfunction',
-    medName: 'Erectile dysfunction, moderate severity',
-    localNames: { ja: '勃起不全', es: 'Disfunción eréctil', 'zh-TW': '勃起功能障礙' },
-    date: '2019-JAN-08', yearFrac: parseDateFrac('2019-JAN-08'), cx_percent: 46.15, cy_percent: 44.57,
-    note: 'IIEF-5 score 16 indicating moderate ED. Etiology: multifactorial (HTN, metabolic). On tadalafil PRN.',
-    evidence: 'Dr. Michael Torres · University of Texas Health · San Antonio, TX, US',
+    id: 'pcos', system: 'reproductive',
+    label: 'Polycystic ovary syndrome',
+    medName: 'Polycystic ovary syndrome (Rotterdam criteria)',
+    localNames: { ja: '多嚢胞性卵巣症候群', es: 'Síndrome de ovario poliquístico', 'zh-TW': '多囊卵巢綜合症' },
+    date: '2016-OCT-29', yearFrac: parseDateFrac('2016-OCT-29'), cx: 120, cy: 205,
+    note: 'Rotterdam criteria met: oligo-ovulation, hyperandrogenism, polycystic ovaries on USS. On combined OCP.',
+    evidence: 'Dr. Sachi Nakamura · UCSF Medical Center · San Francisco, CA, US',
   },
 ]
 
