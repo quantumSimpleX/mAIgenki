@@ -16,7 +16,7 @@ import { useAppStore, Gender } from '@/store/useAppStore'
 import { useConditions, useConditionRecords } from '@/hooks/useConditions'
 import {
   ALL_SYSTEMS, ConditionRecord, DesignCondition, SystemId,
-  SYSTEM_META, SupportedLang, getLocalName,
+  SYSTEM_META, SupportedLang, getLocalName, getSvgX, getSvgY,
 } from '@/model/conditions'
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
 import { useOptionalDatabase } from '@/lib/db/provider'
@@ -445,7 +445,7 @@ function GhostDots({
     let nearest: DesignCondition | null = null
     let minDist = 8  // SVG units — must click within this radius of a dot
     for (const c of visible) {
-      const d = Math.hypot(c.cx - svgX, c.cy - svgY)
+      const d = Math.hypot(getSvgX(c.cx_percent) - svgX, getSvgY(c.cy_percent) - svgY)
       if (d < minDist) { minDist = d; nearest = c }
     }
     if (nearest) onPress(nearest)
@@ -461,7 +461,7 @@ function GhostDots({
       >
         {visible.map((c) => (
           <Circle
-            key={c.id} cx={c.cx} cy={c.cy} r={1.5}
+            key={c.id} cx={getSvgX(c.cx_percent)} cy={getSvgY(c.cy_percent)} r={1.5}
             fill={SYSTEM_META[c.system]?.color ?? '#fff'} fillOpacity={0.3}
             pointerEvents="none"
           />
@@ -529,7 +529,7 @@ function BodySvg({
         const color = SYSTEM_META[c.system]?.color ?? '#fff'
         return (
           <Circle
-            key={c.id} cx={c.cx} cy={c.cy}
+            key={c.id} cx={getSvgX(c.cx_percent)} cy={getSvgY(c.cy_percent)}
             r={isRelocating ? 4 : isSelected ? 2.5 : 1.5}
             fill={color}
             pointerEvents="none"
@@ -594,8 +594,8 @@ function ConditionRipples({
           key={c.id}
           style={{
             position: 'absolute',
-            left: `${(c.cx / 260) * 100}%`,
-            top: `${(c.cy / 460) * 100}%`,
+            left: `${c.cx_percent}%`,
+            top: `${c.cy_percent}%`,
             width: 0, height: 0,
           }}
         >
@@ -1480,7 +1480,9 @@ export default function BodyMapScreen() {
 
   const handleRelocationPlace = useCallback(async (cx: number, cy: number) => {
     if (!relocatingCondition) return
-    if (db) await updateConditionPosition(db, relocatingCondition.id, cx, cy)
+    const cxPercent = (cx / 260) * 100
+    const cyPercent = (cy / 460) * 100
+    if (db) await updateConditionPosition(db, relocatingCondition.id, cxPercent, cyPercent)
     refreshConditions()
     cancelRelocation()
   }, [relocatingCondition, db, refreshConditions, cancelRelocation])

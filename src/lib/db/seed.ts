@@ -29,7 +29,7 @@ async function migrateSystemCodes(db: SQLiteDatabase): Promise<void> {
 // existing DB to be force-corrected once (wiping any user relocations). Earlier
 // builds shipped a migration that zeroed cx/cy, so DBs in the wild have dots stuck
 // at (0,0); this one-time reset repairs them.
-const POSITIONS_VERSION = '2'
+const POSITIONS_VERSION = '3'
 
 // Runs on every startup so existing seeded DBs pick up repositioned condition dots.
 async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
@@ -38,7 +38,7 @@ async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
     // One-time hard reset: force every demo condition back to its canonical position,
     // repairing DBs corrupted by the earlier zeroing migration.
     for (const c of CONDITIONS) {
-      await db.runAsync('UPDATE conditions SET cx = ?, cy = ? WHERE id = ?', [c.cx, c.cy, c.id])
+      await db.runAsync('UPDATE conditions SET cx = ?, cy = ? WHERE id = ?', [c.cx_percent, c.cy_percent, c.id])
     }
     await upsertSetting(db, 'positions_version', POSITIONS_VERSION)
     return
@@ -47,7 +47,7 @@ async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
   for (const c of CONDITIONS) {
     await db.runAsync(
       'UPDATE conditions SET cx = ?, cy = ? WHERE id = ? AND (cx IS NULL OR cy IS NULL OR (cx = 0 AND cy = 0))',
-      [c.cx, c.cy, c.id],
+      [c.cx_percent, c.cy_percent, c.id],
     )
   }
 }
@@ -77,7 +77,7 @@ export async function seedDemoData(db: SQLiteDatabase): Promise<void> {
        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         c.id, DEMO_RECORD_ID, c.medName, c.label, icdCode, c.system,
-        c.cx, c.cy, c.cx, c.cy, c.yearFrac,
+        c.cx_percent, c.cy_percent, c.cx_percent, c.cy_percent, c.yearFrac,
         'documented', 'confirmed', c.date, c.evidence, c.note,
       ],
     )

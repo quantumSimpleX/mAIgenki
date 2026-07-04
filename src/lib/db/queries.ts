@@ -437,8 +437,8 @@ export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition
       date: row.date_diagnosed ?? row.date_onset ?? '',
       yearFrac: row.year_frac ?? 0,
       // Use != null (not ??) so explicit 0 values from a broken migration also fall back.
-      cx: row.cx != null && row.cx !== 0 ? row.cx : (hardcoded?.cx ?? 0),
-      cy: row.cy != null && row.cy !== 0 ? row.cy : (hardcoded?.cy ?? 0),
+      cx_percent: row.cx != null && row.cx !== 0 ? row.cx : (hardcoded?.cx_percent ?? 0),
+      cy_percent: row.cy != null && row.cy !== 0 ? row.cy : (hardcoded?.cy_percent ?? 0),
       note: row.notes ?? '',
       evidence: row.evidence ?? '',
     })
@@ -447,11 +447,11 @@ export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition
 }
 
 export async function updateConditionPosition(
-  db: SQLiteDatabase, id: string, cx: number, cy: number,
+  db: SQLiteDatabase, id: string, cxPercent: number, cyPercent: number,
 ): Promise<void> {
   await db.runAsync(
     'UPDATE conditions SET cx = ?, cy = ? WHERE id = ?',
-    [cx, cy, id],
+    [cxPercent, cyPercent, id],
   )
 }
 
