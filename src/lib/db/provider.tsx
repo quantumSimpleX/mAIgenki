@@ -26,9 +26,13 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
 
     async function setup() {
       try {
+        // console.log('[SQLite] opening maigenki.db...')
         const database = await openDatabaseAsync('maigenki.db')
+        // console.log('[SQLite] initializing schema...')
         await initDatabase(database)
+        // console.log('[SQLite] seeding demo data...')
         await seedDemoData(database)
+        // console.log('[SQLite] setup complete ✓')
         if (cancelled) {
           await database.closeAsync()
           return

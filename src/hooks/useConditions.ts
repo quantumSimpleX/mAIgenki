@@ -14,10 +14,16 @@ export function useConditions(): [DesignCondition[], () => void] {
   const db = useOptionalDatabase()
 
   const refresh = useCallback(() => {
-    if (!db) return // initial/current state already holds the fallback
+    if (!db) return
     getConditions(db)
-      .then((rows) => setConditions(rows.length > 0 ? rows : CONDITIONS))
-      .catch(() => setConditions(CONDITIONS))
+      .then((rows) => {
+        // console.log(`[useConditions] loaded ${rows.length} conditions from SQLite`)
+        setConditions(rows.length > 0 ? rows : CONDITIONS)
+      })
+      .catch((err) => {
+        // console.error('[useConditions] error loading from SQLite:', err)
+        setConditions(CONDITIONS)
+      })
   }, [db])
 
   useEffect(() => { refresh() }, [refresh])
