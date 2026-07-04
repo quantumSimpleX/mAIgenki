@@ -29,7 +29,7 @@ async function migrateSystemCodes(db: SQLiteDatabase): Promise<void> {
 // existing DB to be force-corrected once (wiping any user relocations). Earlier
 // builds shipped a migration that zeroed cx/cy, so DBs in the wild have dots stuck
 // at (0,0); this one-time reset repairs them.
-const POSITIONS_VERSION = '3'
+const POSITIONS_VERSION = '4'
 
 // Runs on every startup so existing seeded DBs pick up repositioned condition dots.
 async function migrateConditionPositions(db: SQLiteDatabase): Promise<void> {
