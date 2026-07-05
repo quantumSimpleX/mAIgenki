@@ -185,6 +185,39 @@ implemented, 270/270 jest green, E1–E6 QA scenarios passed (test.md Phase 7).
 
 ---
 
+## Phase 6 — Storage Durability (web) ✓
+
+Goal: make the OPFS self-heal wipe survivable — auto-snapshot the DB into IndexedDB after
+every write and restore it after a heal, plus `navigator.storage.persist()`. Spec: SPEC.md
+"Storage Durability (web)". Task breakdown: task.md Phase 8.
+
+Done 2026-07-04: all subtasks implemented, 293/293 jest green, QA findings B-P8-1/2/3 fixed
+and re-verified, manual scenarios M1–M5 passed (test.md Phase 8).
+
+- [x] **Task 6.1** — Snapshot module (`src/lib/db/snapshot.ts`)
+  - Promise wrapper over raw IndexedDB (`maigenki-meta` DB, `snapshots` store, key `latest`)
+  - `saveSnapshotNow(db)` (buildBackup → IDB put, never throws), `scheduleSnapshot(db)`
+    (3 s debounce + `pagehide` flush), `loadSnapshot()`, `clearSnapshot()`
+  - All entry points no-op unless web with `indexedDB` available
+- [x] **Task 6.2** — Provider: persist() + restore-on-heal (`src/lib/db/provider.tsx`)
+  - Fire-and-forget `navigator.storage.persist()` on web setup
+  - After heal wipe + reopen: `loadSnapshot()` → `restoreBackup`; on failure warn + continue
+  - Extract open/heal/restore sequence into exported `openDatabaseWithRecovery()` for tests
+  - Restore-on-boot guard (added for QA finding B-P8-3): on a successful open, if the
+    snapshot has user records and the live DB has none, restore before consumers can write
+    (covers OPFS loss via VFS self-repair that never throws CANTOPEN)
+- [x] **Task 6.3** — Snapshot trigger wiring (one line per write site)
+  - `src/lib/pipeline.ts` (after persist step), `src/app/bodymap.tsx` (dot relocation;
+    `saveSnapshotNow` after import), `src/hooks/useSettingsPersistence.ts` (4 setting
+    effects), `src/lib/llm/refresh.ts` (chain check timestamp)
+- [x] **Task 6.4** — Tests (>90% coverage of new code; `fake-indexeddb` devDependency)
+  - `__tests__/db/snapshot.test.ts`: save/load round-trip, debounce collapse, empty/bad
+    envelope, save failure doesn't throw
+  - `__tests__/db/provider-recovery.test.ts`: CANTOPEN → wipe → reopen → restore; no-snapshot
+    path; restore-failure path
+
+---
+
 ## Implementation Order
 
 ```

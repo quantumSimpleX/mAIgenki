@@ -22,6 +22,7 @@ import { parseEvidence, formatDateDisplay } from '@/lib/support'
 import { useOptionalDatabase } from '@/lib/db/provider'
 import { updateConditionPosition } from '@/lib/db/queries'
 import { exportBackupToFile, pickAndReadBackup, restoreBackup } from '@/lib/db/backup'
+import { scheduleSnapshot, saveSnapshotNow } from '@/lib/db/snapshot'
 
 const { height: SH } = Dimensions.get('window')
 
@@ -1319,6 +1320,7 @@ function SettingsSheet() {
         return
       }
       await restoreBackup(db, backup)
+      await saveSnapshotNow(db)
       setImportConfirm(false)
       if (Platform.OS === 'web') window.location.reload()
     } catch (e) {
@@ -1564,7 +1566,10 @@ export default function BodyMapScreen() {
     const cxPercent = (cx / 260) * 100
     const cyPercent = (cy / 460) * 100
     // console.log(`[Condition Relocated] ${relocatingCondition.label}: ${cxPercent.toFixed(2)}% x ${cyPercent.toFixed(2)}%`)
-    if (db) await updateConditionPosition(db, relocatingCondition.id, cxPercent, cyPercent)
+    if (db) {
+      await updateConditionPosition(db, relocatingCondition.id, cxPercent, cyPercent)
+      scheduleSnapshot(db)
+    }
     refreshConditions()
     cancelRelocation()
   }, [relocatingCondition, db, refreshConditions, cancelRelocation])

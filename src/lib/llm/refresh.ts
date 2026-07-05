@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
 import { DEFAULT_MODELS, updateModelChain, callLLMWithFallback } from './client'
 import { upsertSetting } from '../db/queries'
+import { scheduleSnapshot } from '../db/snapshot'
 
 // ── Weights ───────────────────────────────────────────────────────────────────
 // Ordered by relevance to medical text extraction + structured JSON output.
@@ -190,6 +191,7 @@ export async function refreshModelChain(
     // Step 5 — persist chain + timestamp
     await updateModelChain(db, chain)
     await upsertSetting(db, 'llm_chain_last_checked', new Date().toISOString())
+    scheduleSnapshot(db)
 
     return chain
   } catch {

@@ -5,6 +5,8 @@ import { Platform } from 'react-native'
 import { openDatabaseAsync, type SQLiteDatabase } from 'expo-sqlite'
 import { initDatabase } from './queries'
 import { seedDemoData } from './seed'
+import { restoreBackup } from './backup'
+import { loadSnapshot } from './snapshot'
 
 // A resilient SQLite provider. Unlike expo's <SQLiteProvider>, it renders its
 // children immediately (db starts null) and never blocks the tree if the DB
@@ -54,6 +56,82 @@ async function wipeOpfsSqliteStore(): Promise<void> {
   await root.removeEntry('expo-sqlite', { recursive: true }).catch(() => {})
 }
 
+// True when any health_records row is a real user upload rather than the
+// seeded demo record (seed.ts marks its record with record_type 'demo').
+function hasUserRecords(rows: { record_type?: unknown }[]): boolean {
+  return rows.some((r) => r.record_type !== 'demo')
+}
+
+// Restore-on-boot guard (B-P8-3): OPFS data can be lost WITHOUT a CANTOPEN heal —
+// e.g. the VFS silently self-repairs corrupted pool headers and opens a fresh
+// store. The app then boots "successfully" empty, and the first post-boot write
+// would overwrite the surviving IndexedDB snapshot, destroying the last copy of
+// the user's data. So: if the snapshot holds user records and the live DB holds
+// none, restore before any consumer can write. Never throws — a guard failure
+// must not turn a successful open into a failed one.
+async function restoreSnapshotIfBootLostData(database: SQLiteDatabase): Promise<void> {
+  try {
+    const snap = await loadSnapshot()
+    if (!snap) return
+    const snapRecords = snap.tables.health_records
+    if (!Array.isArray(snapRecords) || !hasUserRecords(snapRecords as { record_type?: unknown }[])) return
+    const liveRecords = await database.getAllAsync<{ record_type?: unknown }>(
+      'SELECT * FROM health_records',
+    )
+    if (hasUserRecords(liveRecords)) return
+    await restoreBackup(database, snap)
+  } catch (e) {
+    console.warn('[SQLite] restore-on-boot failed, continuing with live data:', (e as Error).message)
+  }
+}
+
+// Opens the DB with the full web recovery sequence. Exported for direct jest
+// coverage. On a wedged OPFS pool (SQLITE_CANTOPEN) it wipes the store, reopens,
+// then restores the latest IndexedDB snapshot over the reseeded demo rows so the
+// wipe becomes an invisible repair. A restore failure leaves the seeded DB in
+// place. Non-heal failures keep the non-destructive demo fallback unchanged.
+// A successful open still runs the restore-on-boot guard above.
+export async function openDatabaseWithRecovery(): Promise<SQLiteDatabase | null> {
+  if (Platform.OS === 'web' && typeof navigator !== 'undefined') {
+    // Fire-and-forget: a persistent-storage grant greatly reduces eviction risk.
+    // persist() resolves a boolean (false = denied), it does not reject on denial;
+    // a denial is logged, not treated as an error, and never blocks the open.
+    navigator.storage?.persist?.()
+      .then((granted) => { if (!granted) console.debug('[storage] persistent storage denied') })
+      .catch(() => {})
+  }
+
+  let database: SQLiteDatabase | null = null
+  try {
+    database = await openInitSeed()
+    await restoreSnapshotIfBootLostData(database)
+  } catch (e) {
+    const msg = (e as Error).message ?? ''
+    if (Platform.OS === 'web' && OPFS_EXHAUSTED.test(msg)) {
+      console.warn('[SQLite] OPFS store wedged, resetting and retrying once:', msg)
+      await wipeOpfsSqliteStore()
+      try {
+        database = await openInitSeed()
+        const snap = await loadSnapshot()
+        if (snap) {
+          try {
+            await restoreBackup(database, snap)
+          } catch (re) {
+            console.warn('[SQLite] snapshot restore failed, continuing with seeded data:', (re as Error).message)
+          }
+        }
+      } catch (e2) {
+        console.warn('[SQLite] retry after reset failed, using bundled demo data:', (e2 as Error).message)
+        database = null
+      }
+    } else {
+      console.warn('[SQLite] unavailable, using bundled demo data:', msg)
+      database = null
+    }
+  }
+  return database
+}
+
 export function DatabaseProvider({ children }: { children: ReactNode }) {
   const [db, setDb] = useState<SQLiteDatabase | null>(null)
 
@@ -62,25 +140,7 @@ export function DatabaseProvider({ children }: { children: ReactNode }) {
     let opened: SQLiteDatabase | null = null
 
     async function setup() {
-      let database: SQLiteDatabase | null = null
-      try {
-        database = await openInitSeed()
-      } catch (e) {
-        const msg = (e as Error).message ?? ''
-        if (Platform.OS === 'web' && OPFS_EXHAUSTED.test(msg)) {
-          console.warn('[SQLite] OPFS store wedged, resetting and retrying once:', msg)
-          await wipeOpfsSqliteStore()
-          try {
-            database = await openInitSeed()
-          } catch (e2) {
-            console.warn('[SQLite] retry after reset failed, using bundled demo data:', (e2 as Error).message)
-            database = null
-          }
-        } else {
-          console.warn('[SQLite] unavailable, using bundled demo data:', msg)
-          database = null
-        }
-      }
+      const database = await openDatabaseWithRecovery()
 
       if (cancelled) {
         await database?.closeAsync().catch(() => {})

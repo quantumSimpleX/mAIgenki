@@ -685,3 +685,204 @@ Tasks must be implemented in order. Mark each `[x]` when done.
   is back at the backed-up position — PASS (Playwright, 2026-07-04)
 - [x] Manual: import into a freshly-wiped OPFS store → full restore — PASS (Playwright, 2026-07-04)
 - [x] Native unaffected (all web file I/O is `Platform.OS === 'web'`-guarded)
+
+---
+
+## Phase 8 — Storage Durability (web): persist() + IndexedDB auto-snapshot + restore-on-heal
+
+Plan: PLAN.md Phase 6. Spec: SPEC.md "Storage Durability (web)". Reuses the Phase 7 backup
+module (`buildBackup`/`restoreBackup`/`BackupFile`) wholesale — the snapshot payload IS a
+`BackupFile`. Zero runtime dependencies; `fake-indexeddb` as devDependency for tests.
+
+### Task 8.1 — Snapshot module (`src/lib/db/snapshot.ts`, NEW)
+
+- [x] 8.1.1 Minimal promise wrapper over raw IndexedDB (no `idb` package): open DB
+  `maigenki-meta` (version 1, `onupgradeneeded` creates object store `snapshots`), plus
+  `get`/`put`/`delete` helpers for key `latest`. Value shape:
+  `{ savedAt: string (ISO-8601), backup: BackupFile }`
+- [x] 8.1.2 Web gate: a single `snapshotAvailable()` check (`Platform.OS === 'web' &&
+  typeof indexedDB !== 'undefined'`); every exported entry point no-ops (resolves
+  null/undefined) when unavailable — native and jest-without-fake-idb are safe by default
+- [x] 8.1.3 `saveSnapshotNow(db: SQLiteDatabase): Promise<void>` — `buildBackup(db)` →
+  IDB put under `latest`. All failures caught + `console.warn('[snapshot] ...')`; NEVER
+  throws into callers. Must not log snapshot contents (health data)
+- [x] 8.1.4 `scheduleSnapshot(db: SQLiteDatabase): void` — module-singleton debounce,
+  `SNAPSHOT_DEBOUNCE_MS = 3000`; each call resets the timer; timer fires `saveSnapshotNow`.
+  Registers (once) a `pagehide` listener that flushes a pending debounced snapshot
+  best-effort
+- [x] 8.1.5 `loadSnapshot(): Promise<BackupFile | null>` — IDB get; envelope sanity check
+  (`app === 'maigenki'`, `formatVersion === 1`, `tables` object) before returning; returns
+  null on missing/invalid/error
+- [x] 8.1.6 `clearSnapshot(): Promise<void>` — IDB delete of `latest` (tests + future use)
+
+### Task 8.2 — Provider: persist() + restore-on-heal (`src/lib/db/provider.tsx`)
+
+- [x] 8.2.1 On web setup, fire-and-forget `navigator.storage?.persist?.().catch(() => {})`
+  (never blocks open; result may be console.debug-logged, no health data involved)
+- [x] 8.2.2 Extract the open/heal sequence from the effect into an exported
+  `async function openDatabaseWithRecovery(): Promise<SQLiteDatabase | null>` (same
+  behavior; effect body calls it). Exported for direct jest coverage
+- [x] 8.2.3 Restore-on-heal: in the CANTOPEN branch, after `wipeOpfsSqliteStore()` and a
+  successful retry `openInitSeed()`: `const snap = await loadSnapshot()`; if non-null,
+  `await restoreBackup(database, snap)`. On restore failure: `console.warn`, continue with
+  the seeded DB (snapshot stays in IDB untouched)
+- [x] 8.2.4 Non-heal open failures keep existing behavior exactly (demo fallback, no wipe,
+  no restore)
+
+### Task 8.3 — Snapshot trigger wiring (one line per existing write site)
+
+- [x] 8.3.1 `src/lib/pipeline.ts` — `scheduleSnapshot(db)` once after the persist step
+  (after the insertHealthRecord/insertCondition/insertMeasurement writes complete)
+- [x] 8.3.2 `src/app/bodymap.tsx` — `scheduleSnapshot(db)` after `updateConditionPosition`
+  in the relocation drop handler (~line 1567)
+- [x] 8.3.3 `src/app/bodymap.tsx` — `await saveSnapshotNow(db)` after `restoreBackup` in
+  `handleImport` (~line 1321), BEFORE `window.location.reload()` (page reloads immediately,
+  so the debounced path would be lost; also prevents a heal from resurrecting pre-import
+  data)
+- [x] 8.3.4 `src/hooks/useSettingsPersistence.ts` — `scheduleSnapshot(db)` in each of the
+  four `upsertSetting` effects (language, birth_year, birth_month, gender)
+- [x] 8.3.5 `src/lib/llm/refresh.ts` — `scheduleSnapshot(db)` after the
+  `llm_chain_last_checked` upsert
+- [x] 8.3.6 No snapshot on boot/seed (demo data self-rebuilds; nothing user-authored)
+
+### Task 8.4 — Tests (>90% line coverage of new/changed code)
+
+- [x] 8.4.1 Add `fake-indexeddb` to devDependencies (test-only; nothing ships)
+- [x] 8.4.2 `__tests__/db/snapshot.test.ts` (fake-indexeddb as `global.indexedDB` +
+  the fake-SQLite harness pattern from `__tests__/db/backup.test.ts`):
+  - save → load round-trip equals `buildBackup` output
+  - debounce collapses rapid `scheduleSnapshot` calls into one save (jest fake timers)
+  - `loadSnapshot` returns null when store empty
+  - `loadSnapshot` returns null for an invalid envelope (wrong app/formatVersion)
+  - `saveSnapshotNow` failure (e.g. IDB put rejects) does not throw
+  - all entry points no-op cleanly when `indexedDB` is undefined
+- [x] 8.4.3 `__tests__/db/provider-recovery.test.ts` (mock `expo-sqlite`'s
+  `openDatabaseAsync`):
+  - first open throws CANTOPEN → wipe runs → reopen succeeds → snapshot restored into new DB
+  - CANTOPEN with no snapshot in IDB → seeded demo path, no restore call
+  - CANTOPEN, snapshot present, but `restoreBackup` throws → provider still returns a
+    usable DB (seeded state)
+  - non-CANTOPEN failure → demo fallback (null), no wipe, no restore
+- [x] 8.4.4 Full suite green (`npx jest`, currently 271 passing) + `npm run typecheck` +
+  `npx expo lint` (no new warnings in changed files)
+
+### Phase 8 Verification checklist (run after all tasks done)
+
+- [x] `npm run typecheck` — zero errors
+- [x] `npx expo lint` — no new warnings in changed files
+- [x] `npx jest` — full suite green including the two new test files
+- [x] Coverage of `src/lib/db/snapshot.ts` and changed provider code > 90% lines
+- [x] Manual (web dev server): real UI write → past debounce → IDB
+  `maigenki-meta/snapshots/latest` contains it — PASS (Playwright live, 2026-07-04)
+- [x] Manual: destroy OPFS store → reload → user record + relocated dot survive via
+  restore (boot guard; CANTOPEN heal path covered by jest) — PASS (Playwright live, 2026-07-04)
+- [x] Manual: `navigator.storage.persisted()` false on automation profile, denial
+  logged `[storage] persistent storage denied` — PASS (Playwright live, 2026-07-04)
+- [x] Native unaffected: all snapshot entry points no-op off web
+- [x] Hard constraints upheld: snapshot never leaves the device, contents never logged
+
+### Phase 8 QA findings (2026-07-04)
+
+Independent QA verification: `npm run typecheck` (0 errors), `npx expo lint` (5 warnings, all
+confirmed pre-existing via `git stash` comparison — 0 new in touched files), `npx jest` (286/286
+passing), coverage of `snapshot.ts` 96.29% lines and `openDatabaseWithRecovery` 100% lines. Full
+results in test.md "Phase 8 overall QA status". Two non-blocking Low-severity findings:
+
+- **B-P8-1** (Low) — `navigator.storage.persist()` denial is silently dropped, not logged.
+  - File: `src/lib/db/provider.tsx:68`
+  - Expected (per SPEC.md "Storage Durability (web)" §1): "A denial is logged, not treated as
+    an error."
+  - Actual: `navigator.storage?.persist?.().catch(() => {})` only handles promise *rejection*.
+    `navigator.storage.persist()` resolves to a boolean (`false` on denial) — it does not
+    reject — so the `.catch()` never fires for a denial and nothing is ever logged, granted or
+    denied.
+  - Impact: cosmetic/diagnostic only — a denied persistent-storage grant has the same runtime
+    behavior either way (eviction risk unchanged from pre-Phase-8). No data-loss or correctness
+    risk. But it blocks manual scenario M3 from being observable via console, and the spec's
+    explicit requirement isn't met.
+  - Recommendation: `navigator.storage?.persist?.().then((granted) => { if (!granted) console.debug('[storage] persistent storage denied') }).catch(() => {})`.
+  - **Status: FIXED (2026-07-04)** — `src/lib/db/provider.tsx:68` now chains
+    `.then((granted) => { if (!granted) console.debug('[storage] persistent storage denied') })`
+    before `.catch(() => {})`, so a resolved `false` (denial) is logged while genuine throws
+    are still swallowed. No health data in the log. typecheck/lint/jest all green.
+
+- **B-P8-2** (Low) — Zero automated test coverage for the trigger wiring in `src/app/bodymap.tsx`
+  and `src/hooks/useSettingsPersistence.ts`.
+  - Files: `src/app/bodymap.tsx:1323` (`saveSnapshotNow` in `handleImport`), `:1571`
+    (`scheduleSnapshot` in `handleRelocationPlace`); `src/hooks/useSettingsPersistence.ts:78,85,92,99`
+    (one `scheduleSnapshot` call per settings effect)
+  - Evidence: `npx jest --coverage --collectCoverageFrom="src/app/bodymap.tsx" --collectCoverageFrom="src/hooks/useSettingsPersistence.ts"` shows `useSettingsPersistence.ts` at 0% (no test file
+    exists for this hook at all) and `bodymap.tsx` at ~2.9% lines. `__tests__/screens/bodymap.test.tsx`
+    never mocks `useOptionalDatabase` to return a non-null db, so every `if (db) { … }` /
+    `if (!backupAvailable || !db) return` guard around these call sites short-circuits and the
+    snapshot-trigger lines are never executed by any test.
+  - Impact: these are one-line wiring additions and manual/static code review confirms they are
+    currently correct (right call, right place, right order relative to `restoreBackup`/reload).
+    But there is no regression safety net — a future refactor of `handleImport`,
+    `handleRelocationPlace`, or the settings effects could silently drop the snapshot call (e.g.
+    reorder `saveSnapshotNow` after `window.location.reload()`) with no test catching it. This
+    is consistent with a pre-existing project pattern: `src/app/**` and `src/hooks/**` are
+    outside the `jest.config.js` coverage gate (`collectCoverageFrom` only covers `src/lib`,
+    `src/model`, `src/store`), so this isn't a regression introduced by Phase 8's own bar, but
+    it is a real gap for code this risk-sensitive (data durability).
+  - Recommendation: not blocking for this phase given the project's existing coverage-scope
+    convention. If addressed, a targeted test mocking `useOptionalDatabase` to return
+    `makeFakeDb()` and asserting `scheduleSnapshot`/`saveSnapshotNow` fire at the right call site
+    (via `jest.mock('@/lib/db/snapshot')`) would close the gap cheaply.
+  - **Status: FIXED (settings hook) / consciously skipped (bodymap) — 2026-07-04.**
+    - Settings hook (required minimum): new `__tests__/hooks/useSettingsPersistence.test.ts`
+      (2 tests). Mocks `@/lib/db/snapshot`, `@/lib/db/provider` (`useOptionalDatabase` → a stub
+      handle), `@/hooks/useConditions`, and `@/lib/db/queries`; renders the hook via
+      `renderHook` (RNTL v14) and asserts (a) a `birth_year` change and a `preferred_language`
+      change each schedule exactly one snapshot for the db handle, and (b) no snapshot is
+      scheduled when the db is `null`. This exercises the wiring at
+      `useSettingsPersistence.ts:78/85/92/99`.
+    - bodymap call sites (`handleImport` `saveSnapshotNow`, `handleRelocationPlace`
+      `scheduleSnapshot`): **consciously skipped.** These are closures inside the `BodyMapScreen`
+      component; asserting them requires a full render with a non-null db, plus mocks for the
+      document picker, `window.location.reload`, and the relocation gesture flow. The repo's
+      screen tests (`__tests__/screens/*.test.tsx`) deliberately avoid full component renders
+      due to React 19 / RNTL v14 interop issues, so forcing this would be a brittle, dispro-
+      portionate test. The one-line calls were verified by code inspection instead
+      (`bodymap.tsx:1323` and `:1571`).
+
+- **B-P8-3** (Medium) — OPFS loss WITHOUT a CANTOPEN heal clobbers the surviving snapshot
+  within seconds of boot; restore never fires.
+  - Files: `src/lib/db/provider.tsx` (`openDatabaseWithRecovery` success path),
+    `src/lib/db/snapshot.ts`
+  - Found via live Playwright QA (2026-07-04): corrupted all 6 OPFS pool-file headers to
+    induce the wedge. wa-sqlite's VFS did NOT throw CANTOPEN — it self-repaired
+    ("Disassociating file with bad digest" / "Remove file with unexpected flags" console
+    warnings), silently discarding the old DB and opening a fresh empty one. The app
+    reseeded demo data, the settings-hydration effects fired `scheduleSnapshot`, and ~4 s
+    after boot the IndexedDB snapshot (containing the pre-loss data) was OVERWRITTEN by a
+    demo-only snapshot (observed: pre-loss snapshot savedAt 21:48:54 replaced by 21:51:04).
+  - Expected: an OPFS-data-loss event with a surviving IndexedDB snapshot should restore the
+    snapshot (the whole point of Phase 8). Actual: restore only runs in the CANTOPEN heal
+    branch; the VFS self-repair path (header corruption from e.g. a crash mid-write) loses
+    OPFS data with NO error thrown, so the app boots "successfully" empty and immediately
+    destroys the last good copy.
+  - Impact: none today (demo-only web data), but defeats the feature's purpose for a future
+    real user in this scenario. The heal-only scoping assumed OPFS loss always surfaces as
+    CANTOPEN or full-origin eviction; live evidence shows a third path.
+  - Recommended fix (restore-on-boot guard, small): in `openDatabaseWithRecovery`'s SUCCESS
+    path, after `openInitSeed()`: load the snapshot; if the live DB has ZERO non-demo
+    `health_records` rows AND the snapshot contains ≥1 non-demo `health_records` row,
+    `restoreBackup(db, snap)` before returning (i.e. before any consumer/effect can write or
+    re-snapshot). The guard can never overwrite real live user data (only fires when live
+    has none), and demo-only snapshots never trigger it. Add tests: boot-with-empty-live +
+    user-snapshot → restores; boot with live user data → never restores; demo-only
+    snapshot → never restores.
+  - **Status: FIXED (2026-07-04)** — `src/lib/db/provider.tsx`: added
+    `restoreSnapshotIfBootLostData(database)` called from `openDatabaseWithRecovery`'s
+    success path immediately after `openInitSeed()` (before any consumer/effect can write
+    or re-snapshot). Guard: snapshot non-null AND snapshot `tables.health_records` has ≥1
+    row with `record_type !== 'demo'` AND live `health_records` has none → `restoreBackup`.
+    Never throws (internal try/catch + console.warn without data contents), so a guard
+    failure cannot turn a successful open into a heal/fallback. Heal-path restore unchanged
+    (unconditional after wipe). 5 new tests in `__tests__/db/provider-recovery.test.ts`
+    ("restore-on-boot guard (B-P8-3)" describe block) cover: restores when live is empty of
+    user records + snapshot has them; never restores over live user data; demo-only
+    snapshot ignored; no snapshot ignored; guard restore failure leaves usable seeded DB.
+    SPEC.md §3 retitled "Restore-on-heal and restore-on-boot"; PLAN.md Task 6.2 updated.
+    typecheck clean, lint no new warnings, full suite 293/293.

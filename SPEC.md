@@ -465,6 +465,65 @@ no-cloud/no-auth constraint. The answer is a **user-owned backup file**.
 
 ---
 
+## Storage Durability (web)
+
+Browser origin storage is evictable by design, and the wa-sqlite OPFS access-handle pool can
+wedge (`SQLITE_CANTOPEN`) after leaked handles (multi-tab, dev reloads). The existing
+self-heal recovers by wiping the entire `expo-sqlite` OPFS directory — which destroys all
+on-device data. Three mechanisms make this survivable without violating the no-cloud
+constraint:
+
+### 1. Persistent storage grant
+
+On web startup the app calls `navigator.storage.persist()` (fire-and-forget). When granted,
+the browser marks the origin's storage as persistent, greatly reducing eviction risk
+(e.g. iOS Safari's ~7-day inactivity purge). A denial is logged, not treated as an error.
+
+### 2. Auto-snapshot to IndexedDB
+
+- After every DB write (upload pipeline persist, condition dot relocation, settings changes,
+  backup import), a **debounced snapshot** (~3 s) serializes the whole DB via the backup
+  module's `buildBackup` and stores it in IndexedDB (`maigenki-meta` DB, `snapshots` store,
+  key `latest`).
+- The snapshot payload **is** a `BackupFile` — the exact same versioned envelope as a manual
+  export — so restore reuses the tested `restoreBackup` path unchanged.
+- IndexedDB is a separate storage subsystem from OPFS: a wedged access-handle pool cannot
+  corrupt or block it.
+- A `pagehide` listener flushes any pending debounced snapshot (best-effort) so quickly
+  closing the tab doesn't lose the last write.
+- Snapshot failures never break the app: they are caught and logged.
+
+### 3. Restore-on-heal and restore-on-boot
+
+When the OPFS self-heal fires (wipe + reopen), the provider loads the latest IndexedDB
+snapshot and runs `restoreBackup` on the fresh DB — replacing the reseeded demo rows with the
+user's real data. The wipe becomes an invisible repair instead of data loss. If restore
+fails, the app continues with seeded demo data and the snapshot stays untouched in IndexedDB.
+
+OPFS data can also be lost **without** a CANTOPEN heal: wa-sqlite's VFS silently self-repairs
+corrupted pool-file headers (e.g. after a crash mid-write) and opens a fresh empty store with
+no error. To cover this, a **restore-on-boot guard** runs on every successful open: if the
+IndexedDB snapshot contains at least one real (non-demo) health record and the live DB
+contains none, the snapshot is restored before any consumer can write — otherwise the first
+post-boot write would overwrite the snapshot, destroying the last copy of the user's data.
+The guard can never overwrite real live data (it only fires when the live DB has no user
+records), demo-only snapshots never trigger it, and a guard failure is logged and never turns
+a successful open into a failed one.
+
+### What this does NOT cover
+
+- **Full-origin eviction** ("clear site data", lost device): per the Storage spec, eviction is
+  per-origin all-or-nothing — OPFS and IndexedDB die together. The manual **Export backup**
+  file (user-owned, stored anywhere) is the only recovery for that.
+- Native builds: OS-managed SQLite is durable; all snapshot code no-ops off web.
+
+### Constraints
+
+- Snapshots never leave the device: IndexedDB is same-origin local storage, no network
+  involved. Snapshot contents are never uploaded or logged.
+
+---
+
 ## Open Questions
 
 - **Anatomy SVG paths:** Final organ paths need to be traced into the 260×460 coordinate space per body type. Placeholder ellipses are used during development. This is 2–3 days of design/tracing work.

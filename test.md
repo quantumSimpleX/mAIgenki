@@ -564,3 +564,95 @@ refresh path) was fixed the same day: all backup I/O is now gated behind `IS_WEB
 (`backupAvailable = !!db && IS_WEB` in `SettingsSheet`), with a "Backup is web-only for
 now." note on native. Fix re-verified: typecheck clean, lint clean, 270/270 jest, and the
 full E1–E5 browser pass ran against the fixed build. Phase 7 is done.**
+
+---
+
+## Phase 8 — Storage Durability (web): Test Plan
+
+Files under test: `src/lib/db/snapshot.ts` (new module), `src/lib/db/provider.tsx`
+(`openDatabaseWithRecovery`), plus the one-line trigger wiring in `src/lib/pipeline.ts`,
+`src/app/bodymap.tsx`, `src/hooks/useSettingsPersistence.ts`, `src/lib/llm/refresh.ts`.
+Automated tests: `__tests__/db/snapshot.test.ts`, `__tests__/db/provider-recovery.test.ts`.
+They run against `fake-indexeddb` (as `globalThis.indexedDB`) plus the shared in-memory
+fake-SQLite harness (`__tests__/db/fakeDb.ts`, extracted from `backup.test.ts`) — expo-sqlite
+is native and cannot load under jest. `Platform.OS` is forced to `'web'` to exercise the
+web-gated paths. Leave every Result field for the QA agent to fill.
+
+#### 8A. snapshot.ts — save / load / debounce / no-op (automated)
+
+| # | Test | Assertion | Result |
+|---|---|---|---|
+| 1 | Save → load round-trip | `saveSnapshotNow` then `loadSnapshot` returns exactly the `buildBackup` output (deep-equal) | PASS |
+| 2 | Debounce collapses calls | 3 rapid `scheduleSnapshot` calls + `advanceTimersByTime(3000)` → `buildBackup` invoked exactly once | PASS |
+| 3 | Empty store → null | `loadSnapshot` on an empty store resolves `null` | PASS |
+| 4 | Wrong-app envelope → null | Envelope with `backup.app !== 'maigenki'` → `loadSnapshot` returns `null` | PASS |
+| 5 | Wrong formatVersion → null | Envelope with `backup.formatVersion === 2` → `loadSnapshot` returns `null` | PASS |
+| 6 | Save failure swallowed | `buildBackup` rejects → `saveSnapshotNow` resolves (no throw), warns `[snapshot] save failed:` | PASS |
+| 7 | `clearSnapshot` deletes | After `saveSnapshotNow` then `clearSnapshot`, `loadSnapshot` returns `null` | PASS |
+| 8 | `pagehide` flush | A pending debounced snapshot is flushed when the registered `pagehide` handler fires | PASS |
+| 9 | No-op when `indexedDB` undefined | All entry points resolve null/undefined and never call `buildBackup` | PASS |
+| 10 | No-op off web | With `Platform.OS !== 'web'`, all entry points no-op (no `buildBackup`) | PASS |
+
+**Result:** PASS (10/10) — `npx jest __tests__/db/snapshot.test.ts` all green; assertions independently verified against `src/lib/db/snapshot.ts` source (deep-equal on payload, mock call counts, exact warn-message text — not just "doesn't throw"). Coverage: 96.29% lines / 89.32% stmts / 85% branch on `snapshot.ts`, exceeding the 90%-lines target. Uncovered lines 141-142, 157 are the trivial `console.warn` bodies of `loadSnapshot`'s and `clearSnapshot`'s IDB-error catch blocks — see task.md QA findings (B-P8-2, Low).
+
+#### 8B. provider.tsx — restore-on-heal (automated)
+
+`openDatabaseWithRecovery` is exercised directly with `expo-sqlite`'s `openDatabaseAsync`
+mocked; a CANTOPEN error is one whose message matches `/CANTOPEN|cannot create file|unable
+to open/i`. `navigator.storage.{persist,getDirectory}` are stubbed; the reopened DB is the
+shared fake seeded by the real `initDatabase` + `seedDemoData`.
+
+| # | Scenario | Assertion | Result |
+|---|---|---|---|
+| 1 | CANTOPEN → wipe → reopen → restore | First open throws CANTOPEN → wipe runs (`getDirectory` called once) → reopen seeds → snapshot restored (htn dot at sentinel 42.5%) | PASS |
+| 2 | CANTOPEN, no snapshot | Empty IDB → seeded demo path (22 conditions), `restoreBackup` never called | PASS |
+| 3 | CANTOPEN, restore throws | `restoreBackup` rejects → provider still returns a usable seeded DB (22 conditions), warns and continues | PASS |
+| 4 | CANTOPEN, reopen also fails | Both opens throw CANTOPEN → returns `null` after wipe, no restore | PASS |
+| 5 | Non-CANTOPEN failure | Generic open error → returns `null`, no wipe (`getDirectory` not called), no restore | PASS |
+
+Restore-on-boot guard (added 2026-07-04 for finding B-P8-3 — live QA showed OPFS loss via
+VFS self-repair never throws CANTOPEN, so the heal path alone left the surviving snapshot to
+be clobbered by the first post-boot write):
+
+| # | Scenario | Assertion | Result |
+|---|---|---|---|
+| 6 | Boot, live empty of user records, snapshot has one | Normal open → snapshot restored (user record `user-rec-1` present, htn dot at sentinel 42.5%) | PASS |
+| 7 | Boot, live already has a user record | `restoreBackup` never called; live record intact | PASS |
+| 8 | Boot, snapshot is demo-only | `restoreBackup` never called; live keeps seeded positions | PASS |
+| 9 | Boot, no snapshot | Normal seeded boot (22 conditions), no restore | PASS |
+| 10 | Boot, guard restore throws | Provider still returns usable seeded DB; warns `restore-on-boot failed` | PASS |
+
+**Result:** PASS (5/5) — `npx jest __tests__/db/provider-recovery.test.ts` all green. Assertions check actual DB state (condition count, sentinel `cx_percent` value, exact warn text), not just return-value shape — good test quality. Coverage of `openDatabaseWithRecovery` (the new/changed function, `provider.tsx` lines 64-99) is 100% via this file alone. Whole-file `provider.tsx` coverage reads lower (63.26% lines) only because `DatabaseProvider`'s React-effect body (lines 102-126) and the unrelated `useOptionalDatabase`/`openInitSeed`-catch lines (20, 33-34) are pre-existing code untouched by Phase 8 — confirmed via `git diff` against the pre-Phase-8 commit.
+
+#### 8C. End-to-end manual QA scenarios (browser / web dev server)
+
+| # | Scenario | Steps | Expectation | Result |
+|---|---|---|---|---|
+| M1 | Debounced snapshot after write | Real UI write (settings gender toggle) → wait past the 3 s debounce | IDB `maigenki-meta` / `snapshots` / `latest` contains a valid full envelope (10 tables, 22 conditions) including the just-written value | [x] PASS (Playwright live, 2026-07-04) — snapshot observed with `gender=male` and correct envelope; the relocation-specific trigger line (`bodymap.tsx` `handleRelocationPlace`) remains inspection-verified only (B-P8-2) |
+| M2 | Restore survives OPFS loss | Prime snapshot with a non-demo health record + htn sentinel cx=55.5 → destroy the OPFS store (corrupt all 6 pool-file headers) → reload | User data survives: post-boot live DB contains the user record and htn at 55.5 | [x] PASS (Playwright live, 2026-07-04) — via the restore-on-boot guard (B-P8-3 fix): VFS self-repaired silently (no CANTOPEN thrown), boot guard restored the snapshot, and the post-boot re-snapshot from the live DB contained `user-test-1` + htn cx=55.5. Note: a genuine CANTOPEN wedge is not reproducible on demand (the VFS auto-repairs corrupted headers; forging validly-digested leaked associations is infeasible) — the heal path remains covered by jest 8B#1–5 |
+| M3 | Persistent-storage grant | On Chrome, after boot, check `navigator.storage.persisted()` | Returns `true` (a `false` is logged, not a failure) | [x] PASS (Playwright live, 2026-07-04) — `persisted()` returned `false` on the localhost automation profile (expected: no site engagement) and the denial WAS logged: `[DEBUG] [storage] persistent storage denied` (B-P8-1 fix confirmed live) |
+| M4 | Immediate snapshot on import | Settings → Import a backup file | A snapshot is written to IDB *before* `window.location.reload()` fires (no pre-import data resurrectable by a later heal) | PASS (static) — code review of `src/app/bodymap.tsx` `handleImport` (~line 1313-1330) confirms the exact order: `restoreBackup(db, backup)` → `await saveSnapshotNow(db)` → `window.location.reload()`. `saveSnapshotNow` never throws (internal try/catch), so a snapshot failure cannot block the reload. No automated test exercises this path directly (see B-P8-2) — live-browser confirmation still recommended |
+| M5 | No-op off web | Inspect a native build (or static review) | All snapshot entry points no-op; no IndexedDB access off web | PASS (static) — every exported entry point in `snapshot.ts` starts with `if (!snapshotAvailable()) return`, gated on `Platform.OS === 'web' && typeof indexedDB !== 'undefined'`; `provider.tsx`'s `persist()` call is separately gated on `Platform.OS === 'web'`. Grepped the touched files for `fetch`/`XMLHttpRequest`/network calls — none found, and no `indexedDB`/`navigator.storage` access exists outside these gates. Also directly verified by 8A test #10 |
+
+**Result:** 2/5 PASS (static), 3/5 NOT RUN pending live-browser verification (M1-M3)
+
+#### Phase 8 overall QA status (2026-07-04, final)
+
+**ALL GREEN** — all subtasks done, all automated and manual scenarios pass, all three QA
+findings fixed and re-verified.
+
+- `npm run typecheck` — 0 errors
+- `npx expo lint` — 5 warnings, all pre-existing, 0 new in touched files
+- `npx jest` — **293/293 passing** (271 baseline → +10 snapshot, +10 provider-recovery
+  incl. 5 restore-on-boot guard tests, +2 settings-hook trigger tests)
+- `snapshot.ts` coverage 96.29% lines; `openDatabaseWithRecovery` + boot guard fully
+  covered (remaining uncovered `provider.tsx` lines are pre-existing component glue)
+- 8A (10/10), 8B (10/10 incl. boot guard), settings-hook (2/2): PASS
+- 8C manual: M1–M5 all PASS — M1/M2/M3 verified live via Playwright (see rows above),
+  M4/M5 verified statically
+- Findings: B-P8-1 FIXED (denial logged, confirmed live), B-P8-2 FIXED (settings-hook
+  regression tests; bodymap call sites consciously inspection-only), B-P8-3 FIXED
+  (restore-on-boot guard, verified live end-to-end: OPFS destroyed via VFS self-repair →
+  boot guard restored user record + relocated dot from the IndexedDB snapshot)
+- Hard constraints upheld: no snapshot/backup contents ever logged, no network calls in
+  any touched file, all entry points no-op off web

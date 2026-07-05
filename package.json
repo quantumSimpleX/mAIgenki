@@ -49,6 +49,7 @@
     "cross-env": "^10.1.0",
     "eslint": "^9.0.0",
     "eslint-config-expo": "~56.0.4",
+    "fake-indexeddb": "^6.2.5",
     "jest-expo": "^56.0.5",
     "typescript": "~6.0.3"
   },

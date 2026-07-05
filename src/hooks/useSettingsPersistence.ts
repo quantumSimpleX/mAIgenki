@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useOptionalDatabase } from '@/lib/db/provider'
 import { getSetting, upsertSetting } from '@/lib/db/queries'
+import { scheduleSnapshot } from '@/lib/db/snapshot'
 import { useAppStore, Gender } from '@/store/useAppStore'
 import { useConditions } from '@/hooks/useConditions'
 import { DesignCondition, SupportedLang } from '@/model/conditions'
@@ -72,19 +73,31 @@ export function useSettingsPersistence(): void {
   }, [hydrated, conditions, setGender])
 
   useEffect(() => {
-    if (db && hydrated) upsertSetting(db, 'preferred_language', preferredLanguage).catch(() => {})
+    if (db && hydrated) {
+      upsertSetting(db, 'preferred_language', preferredLanguage).catch(() => {})
+      scheduleSnapshot(db)
+    }
   }, [db, hydrated, preferredLanguage])
 
   useEffect(() => {
-    if (db && hydrated) upsertSetting(db, 'birth_year', String(birthYear)).catch(() => {})
+    if (db && hydrated) {
+      upsertSetting(db, 'birth_year', String(birthYear)).catch(() => {})
+      scheduleSnapshot(db)
+    }
   }, [db, hydrated, birthYear])
 
   useEffect(() => {
-    if (db && hydrated) upsertSetting(db, 'birth_month', birthMonth).catch(() => {})
+    if (db && hydrated) {
+      upsertSetting(db, 'birth_month', birthMonth).catch(() => {})
+      scheduleSnapshot(db)
+    }
   }, [db, hydrated, birthMonth])
 
   useEffect(() => {
-    if (db && hydrated) upsertSetting(db, 'gender', gender).catch(() => {})
+    if (db && hydrated) {
+      upsertSetting(db, 'gender', gender).catch(() => {})
+      scheduleSnapshot(db)
+    }
   }, [db, hydrated, gender])
 }
 

@@ -5,6 +5,7 @@ import { enrichFromText } from './llm/enrich'
 import { applyInferenceRules } from './inference/rules'
 import { getModelChain } from './llm/client'
 import { insertHealthRecord, insertCondition, insertMeasurement } from './db/queries'
+import { scheduleSnapshot } from './db/snapshot'
 import { redactPII } from './privacy/redact'
 
 // ── Error ─────────────────────────────────────────────────────────────────────
@@ -116,6 +117,8 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
       date: m.date ?? today(),
     })
   }
+
+  scheduleSnapshot(db)
 
   return {
     recordId,
