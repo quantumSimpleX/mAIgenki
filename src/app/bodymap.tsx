@@ -1293,7 +1293,7 @@ function LanguageDropdown({
   const selected = SUPPORTED_LANGS.find((lang) => lang.code === value) ?? SUPPORTED_LANGS[0]
 
   return (
-    <View style={styles.langDdWrap}>
+    <View style={[styles.langDdWrap, open && styles.langDdWrapOpen]}>
       <TouchableOpacity style={styles.langDdField} onPress={() => setOpen((o) => !o)} activeOpacity={0.75}>
         <LangFlag code={selected.code} />
         <Text style={styles.langNative}>{selected.native}</Text>
@@ -2153,7 +2153,8 @@ const styles = StyleSheet.create({
   settingsTitle: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: C.ink, textTransform: 'uppercase', letterSpacing: sc(0.5) },
   settingsSectionLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.aqua, textTransform: 'uppercase', letterSpacing: sc(1), marginBottom: sc(10) },
 
-  langDdWrap: { position: 'relative', zIndex: 20, marginBottom: sc(18) },
+  langDdWrap: { position: 'relative', zIndex: 60, marginBottom: sc(18) },
+  langDdWrapOpen: { marginBottom: sc(212) },
   langDdField: {
     flexDirection: 'row', alignItems: 'center', gap: sc(10), height: sc(44),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8),
@@ -2179,7 +2180,7 @@ const styles = StyleSheet.create({
   langEnglish: { fontFamily: 'SourceCodePro', fontSize: fs(9.5), color: 'rgba(250,250,247,0.5)', flex: 1 },
   langCheck: { fontSize: fs(14), color: C.aqua },
 
-  birthGenderRow: { flexDirection: 'row', gap: sc(24), alignItems: 'flex-start', zIndex: 30 },
+  birthGenderRow: { flexDirection: 'row', gap: sc(24), alignItems: 'flex-start', zIndex: 10 },
   birthCol: { flex: 1, minWidth: 0, zIndex: 30 },
   genderCol: { flex: 1, minWidth: 0 },
   dobRow: { flexDirection: 'row', gap: sc(8), marginBottom: sc(6), alignItems: 'flex-start', zIndex: 30 },
