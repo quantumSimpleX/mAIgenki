@@ -628,11 +628,11 @@ be clobbered by the first post-boot write):
 
 | # | Scenario | Steps | Expectation | Result |
 |---|---|---|---|---|
-| M1 | Debounced snapshot after write | Real UI write (settings gender toggle) → wait past the 3 s debounce | IDB `maigenki-meta` / `snapshots` / `latest` contains a valid full envelope (10 tables, 22 conditions) including the just-written value | [x] PASS (Playwright live, 2026-07-04) — snapshot observed with `gender=male` and correct envelope; the relocation-specific trigger line (`bodymap.tsx` `handleRelocationPlace`) remains inspection-verified only (B-P8-2) |
-| M2 | Restore survives OPFS loss | Prime snapshot with a non-demo health record + htn sentinel cx=55.5 → destroy the OPFS store (corrupt all 6 pool-file headers) → reload | User data survives: post-boot live DB contains the user record and htn at 55.5 | [x] PASS (Playwright live, 2026-07-04) — via the restore-on-boot guard (B-P8-3 fix): VFS self-repaired silently (no CANTOPEN thrown), boot guard restored the snapshot, and the post-boot re-snapshot from the live DB contained `user-test-1` + htn cx=55.5. Note: a genuine CANTOPEN wedge is not reproducible on demand (the VFS auto-repairs corrupted headers; forging validly-digested leaked associations is infeasible) — the heal path remains covered by jest 8B#1–5 |
-| M3 | Persistent-storage grant | On Chrome, after boot, check `navigator.storage.persisted()` | Returns `true` (a `false` is logged, not a failure) | [x] PASS (Playwright live, 2026-07-04) — `persisted()` returned `false` on the localhost automation profile (expected: no site engagement) and the denial WAS logged: `[DEBUG] [storage] persistent storage denied` (B-P8-1 fix confirmed live) |
-| M4 | Immediate snapshot on import | Settings → Import a backup file | A snapshot is written to IDB *before* `window.location.reload()` fires (no pre-import data resurrectable by a later heal) | PASS (static) — code review of `src/app/bodymap.tsx` `handleImport` (~line 1313-1330) confirms the exact order: `restoreBackup(db, backup)` → `await saveSnapshotNow(db)` → `window.location.reload()`. `saveSnapshotNow` never throws (internal try/catch), so a snapshot failure cannot block the reload. No automated test exercises this path directly (see B-P8-2) — live-browser confirmation still recommended |
-| M5 | No-op off web | Inspect a native build (or static review) | All snapshot entry points no-op; no IndexedDB access off web | PASS (static) — every exported entry point in `snapshot.ts` starts with `if (!snapshotAvailable()) return`, gated on `Platform.OS === 'web' && typeof indexedDB !== 'undefined'`; `provider.tsx`'s `persist()` call is separately gated on `Platform.OS === 'web'`. Grepped the touched files for `fetch`/`XMLHttpRequest`/network calls — none found, and no `indexedDB`/`navigator.storage` access exists outside these gates. Also directly verified by 8A test #10 |
+| M1 | Key prompt on first upload | Upload with no stored key → inline masked key prompt; Save persists and proceeds | [x] PASS (Playwright live, 2026-07-05) — after pick, inline prompt "Add your OpenRouter API key…" with masked field + "Stored on-device. Sent only to openrouter.ai."; pipeline did not proceed until a key was saved |
+| M2 | Multi-condition fixture | Upload `maigenki-fixture-multi.pdf` → phases advance → bodymap "N conditions added" banner (or graceful-empty notice with a dummy key) | [x] PASS (Playwright live, 2026-07-05) — with a dummy key: pdfjs extracted (5× OpenRouter 401 fallback proves extract→redact→enrich ran), record persisted, reached bodymap showing "No conditions extracted — check the document or your API key in Settings" (graceful-empty path) |
+| M3 | Scanned fixture | Upload `maigenki-fixture-scanned.pdf` → OcrRequiredError message, no bodymap nav | [x] PASS (Playwright live, 2026-07-05) — inline "Couldn’t analyze / This PDF appears to be image-based…" + Back button; Back returns to upload; no navigation to bodymap |
+| M4 | Demo remove prompt | After a real upload, "Remove sample demo data?" → Remove clears the 22 demo conditions, uploaded rows remain | [x] PASS (Playwright live, 2026-07-05) — Remove → snapshot conditions 22→0 and health_records ["demo",null]→[null] (demo record + its conditions gone, uploaded record retained) |
+| M5 | Image column on web | "Choose image" disabled with a "not available on web" note | [x] PASS (Playwright live, 2026-07-05) — "Choose image" shows "Not available on web"; camera column hidden on web |
 
 **Result:** 2/5 PASS (static), 3/5 NOT RUN pending live-browser verification (M1-M3)
 
@@ -656,3 +656,163 @@ findings fixed and re-verified.
   boot guard restored user record + relocated dot from the IndexedDB snapshot)
 - Hard constraints upheld: no snapshot/backup contents ever logged, no network calls in
   any touched file, all entry points no-op off web
+
+---
+
+## Phase 9 — Upload → Pipeline → Bodymap wiring: Test Plan
+
+Wires the upload screen to the real `processHealthRecord` pipeline (PLAN Task 2.6) plus
+Phase 3 body-type inference (3.2). Web PDF extraction via `pdfjs-dist`; images gated off on
+web; OpenRouter API key required before upload and persisted in settings. Automated suites
+run under jest (a test-env-only babel plugin rewrites dynamic `import()` → `require()` so the
+platform-branched extractors are testable — `babel-plugin-dynamic-import-to-require.js`).
+
+### 9A. Pipeline processing (`__tests__/lib/pipeline-process.test.ts`)
+
+Real `processHealthRecord` against the shared fake SQLite harness; extract modules + LLM
+client mocked.
+
+| # | Scenario | Assertion | Result |
+|---|---|---|---|
+| 1 | Happy path persists + counts | Health record, conditions, measurements written; returns counts | PASS |
+| 2 | onProgress sequence | Phase/progress reported monotonically across extract→enrich→infer→persist | PASS |
+| 3 | Empty enrichment | Keyless/failed LLM → 0-condition record still persisted (no throw) | PASS |
+| 4 | OcrRequiredError | Image-based PDF (density→ocr) throws OcrRequiredError; no rows persisted | PASS |
+| 5 | Image path | Non-PDF input routes through OCR extraction | PASS |
+| 6 | kind override | Suffixless web blob URI + `kind:'pdf'` forced down the PDF path | PASS |
+
+### 9B. Extraction platform branch (`__tests__/lib/pdf-extract-web.test.ts`)
+
+`Platform.OS='web'`, `pdfjs-dist` + worker + fetch mocked.
+
+| # | Scenario | Assertion | Result |
+|---|---|---|---|
+| 1 | Dense PDF | Per-page text items joined; `method:'text'` | PASS |
+| 2 | Sparse PDF | chars/page < 50 → `method:'ocr'` | PASS |
+| 3 | Threshold | `MIN_CHARS_PER_PAGE > 0` | PASS |
+
+### 9C. Body-type inference (`__tests__/lib/bodyType.test.ts`)
+
+| # | Scenario | Assertion | Result |
+|---|---|---|---|
+| 1 | Male signal | Male-specific diagnosis → `'male'` | PASS |
+| 2 | Female signal | Female-specific diagnosis → `'female'` | PASS |
+| 3 | No signal | No gendered condition → `'unknown'` (no silent female default) | PASS |
+| 4 | Empty list | `[]` → `'unknown'` | PASS |
+| 5 | Mixed signal | First-matched (male regex first) wins deterministically | PASS |
+
+### 9D. Store slices + API key (`__tests__/store/uploadSlices.test.ts`, `__tests__/db/apiKeySetting.test.ts`)
+
+| # | Scenario | Assertion | Result |
+|---|---|---|---|
+| 1 | Slice defaults | pendingUpload/lastUploadResult/pipelineError null, genderPromptNeeded false | PASS |
+| 2 | setPendingUpload | Stores and clears the pick | PASS |
+| 3 | setLastUploadResult | Stores the result summary | PASS |
+| 4 | setPipelineError | Stores and clears the message | PASS |
+| 5 | setGenderPromptNeeded | Toggles the flag | PASS |
+| 6 | API key round-trip | `openrouter_api_key` stored/read via settings | PASS |
+| 7 | API key overwrite/clear | Overwrites and clears | PASS |
+
+### Coverage (new/changed modules)
+
+- `src/lib/pipeline.ts` 97.05% lines · `src/lib/inference/bodyType.ts` 100% ·
+  `src/lib/pdf/extract.ts` 100% lines · `src/store/useAppStore.ts` 88.67% (large pre-existing
+  file; new slices covered). Full suite 314/314; typecheck clean; lint no new warnings.
+
+### 9E. Fixtures (Phase 9.10.1)
+
+Hand-rolled minimal PDFs (no npm deps), validated through the real `pdfjs-dist` legacy build:
+- `maigenki-fixture-multi.pdf` — 586 chars/page → `method:'text'` (hypertension 150/95,
+  HbA1c 7.1%, LDL 165, eczema, vitamin D — several extractable conditions)
+- `maigenki-fixture-scanned.pdf` — 1 char/page → `method:'ocr'` (triggers OcrRequiredError)
+
+### End-to-end manual QA scenarios (live web / device)
+
+| # | Scenario | Expectation | Status |
+|---|---|---|---|
+| M1 | Key prompt on first upload | Upload with no stored key → inline masked key prompt; Save persists and proceeds | [x] PASS (Playwright live, 2026-07-05) — after pick, inline prompt "Add your OpenRouter API key…" with masked field + "Stored on-device. Sent only to openrouter.ai."; pipeline did not proceed until a key was saved |
+| M2 | Multi-condition fixture | Upload `maigenki-fixture-multi.pdf` → phases advance → bodymap "N conditions added" banner (or graceful-empty notice with a dummy key) | [x] PASS (Playwright live, 2026-07-05) — with a dummy key: pdfjs extracted (5× OpenRouter 401 fallback proves extract→redact→enrich ran), record persisted, reached bodymap showing "No conditions extracted — check the document or your API key in Settings" (graceful-empty path) |
+| M3 | Scanned fixture | Upload `maigenki-fixture-scanned.pdf` → OcrRequiredError message, no bodymap nav | [x] PASS (Playwright live, 2026-07-05) — inline "Couldn’t analyze / This PDF appears to be image-based…" + Back button; Back returns to upload; no navigation to bodymap |
+| M4 | Demo remove prompt | After a real upload, "Remove sample demo data?" → Remove clears the 22 demo conditions, uploaded rows remain | [x] PASS (Playwright live, 2026-07-05) — Remove → snapshot conditions 22→0 and health_records ["demo",null]→[null] (demo record + its conditions gone, uploaded record retained) |
+| M5 | Image column on web | "Choose image" disabled with a "not available on web" note | [x] PASS (Playwright live, 2026-07-05) — "Choose image" shows "Not available on web"; camera column hidden on web |
+| M6 | Layer-toggle perf (3.3) | Rapid-toggle 11 layers + zoom/pan: no console errors, no gross jank | [x] PASS (Playwright live, 2026-07-05) — 33 legend toggles in ~1.55s, 0 long-tasks (>50ms), 0 console errors |
+| M7 | Real-key LLM extraction | With the user's own OpenRouter key, a real fixture yields real conditions | USER-RUN residue (agent must not handle the user's real key) |
+| M8 | Physical-device upload (3.4) | iOS/Android dev build: PDF + image (native OCR) ingest end-to-end | USER-RUN residue (no device access) |
+
+### Independent QA re-verification (2026-07-05)
+
+Re-ran all automated checks from a clean working tree (not trusting the dev report):
+
+- `npm run typecheck` — 0 errors.
+- `npx expo lint` — 4 warnings, all pre-existing/reduced vs. a `git stash` baseline (baseline had 5
+  warnings incl. two in `analyzing.tsx`; current has one, at a shifted line, same root cause — no
+  new warnings in any touched file).
+- `npx jest` — **314/314 passed**, 29 suites.
+- `npx jest --coverage` scoped to `src/lib/pipeline.ts`, `src/lib/inference/bodyType.ts`,
+  `src/lib/pdf/extract.ts`, `src/lib/ocr/extract.ts`, `src/store/useAppStore.ts`:
+  pipeline.ts 97.05% lines, bodyType.ts 100%, pdf/extract.ts 100% lines (70.58% branch — the
+  `pageCount<=0` guard and one `??` fallback arm are the only unhit branches), ocr/extract.ts
+  **80% lines / 50% branch** (the `Platform.OS==='web'` guard-throw is never exercised by any
+  test — see B-P9-1), useAppStore.ts 88.67% (all uncovered lines are pre-existing store code
+  unrelated to Phase 9; the four new slices are 100% covered).
+- Fixtures independently re-validated against the repo's own `pdfjs-dist` (not trusting the
+  dev-authored `validate.mjs` output): `maigenki-fixture-multi.pdf` → 586 chars/page →
+  `method:'text'`; `maigenki-fixture-scanned.pdf` → 1 char/page → `method:'ocr'`. Confirmed.
+- Hard-constraint audit (grep + manual trace): `redactPII(text)` runs before `enrichFromText(...)`
+  in `src/lib/pipeline.ts` (lines 84/88) — confirmed by reading, not just trusting the comment.
+  `callLLMWithFallback` (`src/lib/llm/client.ts`) only sends the API key in the `Authorization`
+  header to `https://openrouter.ai/api/v1/chat/completions`; the only `console.warn` in that
+  file logs `failures` strings built from `data.error?.message` / HTTP status / `String(err)` —
+  never the key or raw request. No other `console.*` call in any touched file references
+  `apiKey`. Raw PDF/image bytes are only read locally (`fetch(uri).arrayBuffer()` for pdfjs,
+  native module call for `expo-pdf-text-extract`/`expo-text-extractor`) and never appear in any
+  network call — only extracted (then redacted) text reaches `enrichFromText`. **No hard-constraint
+  violations found.**
+- Babel plugin gating confirmed: `babel.config.js` only adds `babel-plugin-dynamic-import-to-require.js`
+  when `process.env.NODE_ENV === 'test'`, and `api.cache.using(() => process.env.NODE_ENV)` keys
+  the babel cache off it — cannot leak into a Metro/production build.
+
+### Phase 9 QA findings — see task.md "Phase 9 QA findings (2026-07-05)" for full detail
+
+None are blocking. Summary: B-P9-1 (Low) untested OCR web-guard throw; B-P9-2 (Low) untested
+PII-redaction-ordering regression guard; B-P9-3 (Medium) analyzing.tsx pipeline continues running
+after unmount (no cancellation) and can force-navigate to `/bodymap` after the user has navigated
+away; B-P9-4 (Low) `pendingUpload` not cleared on the db-null/timeout error path; B-P9-5 (Low)
+demo-seeded gender inference permanently forecloses future automatic re-inference from a real
+upload (mitigated by the manual Settings toggle); B-P9-6 (Low) key-prompt Save silently discards
+the typed key and proceeds anyway when `db` is null.
+
+### Phase 9 overall QA status — ALL GREEN (2026-07-05, final)
+
+**ALL GREEN.** Automated 316/316 (after the B-P9-1/2 tests), coverage targets met,
+typecheck/lint clean, hard constraints upheld. Live-web scenarios **M1–M6 all PASS**
+(Playwright, 2026-07-05 — see rows above), including re-verification of the B-P9-7 hang fix
+(a dummy-key upload now eases past 0% and lands on bodymap with the graceful-empty banner).
+All seven QA findings resolved: B-P9-1/2/3/4/6/7 FIXED, B-P9-5 WON'T FIX (documented).
+Remaining residue is user-run only: M7 (real-key LLM extraction — agent must not handle the
+user's real key) and M8 (physical iOS/Android device upload — no device access).
+
+### Phase 9 QA-finding fixes (2026-07-05)
+
+Dev addressed five of the six findings (B-P9-5 → WON'T FIX; see task.md for per-finding
+**Status** notes and rationale):
+
+- **B-P9-3** (Medium) — `analyzing.tsx` real-upload effect guards every post-await
+  setState/navigation against unmount. (Corrected under B-P9-7 below — the first attempt used a
+  cleanup-set `cancelled` flag that regressed the happy path.)
+- **B-P9-7** (High regression, caught by live Playwright) — the B-P9-3 `cancelled` flag conflated
+  a `setPendingUpload(null)` dependency-change re-run with a true unmount, so a successful upload
+  hung at 0% and never navigated. Fixed by switching to a `mountedRef` set false only in a
+  dedicated empty-deps unmount effect; the smooth interval self-stops on unmount. Happy path and
+  the Back-mid-analysis guard both hold. Live re-verification pending the orchestrator.
+- **B-P9-4** (Low) — db-null timeout branch now clears `pendingUpload`.
+- **B-P9-6** (Low) — `index.tsx` key-prompt Save short-circuits with an inline
+  "storage unavailable" message when `db` is null and does not proceed to `/analyzing`.
+- **B-P9-1** (Low) — new `__tests__/lib/ocr-extract-web.test.ts` covers the OCR web-guard throw
+  (`src/lib/ocr/extract.ts` now 100% lines).
+- **B-P9-2** (Low) — new redact-before-enrich assertion in `__tests__/lib/pipeline-process.test.ts`
+  (fake SSN never reaches `enrichFromText`; sent text equals `redactPII(raw)`).
+
+Re-ran after the fixes: `npm run typecheck` 0 errors; `npx expo lint` 4 warnings (same
+pre-existing set, no new); `npx jest` — **316/316 passed**, 30 suites (314 + 2 new tests).
+Coverage of changed modules unchanged except `src/lib/ocr/extract.ts` now **100% lines**.

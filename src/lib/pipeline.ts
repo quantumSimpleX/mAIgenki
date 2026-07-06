@@ -19,12 +19,20 @@ export class OcrRequiredError extends Error {
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
+// Progress phases, reported at boundaries with monotonic fractions:
+//   0 extract · 1 redact+enrich · 2 infer · 3 persist
+export type ProgressPhase = 0 | 1 | 2 | 3
+
 export type PipelineOptions = {
   uri: string
   db: SQLiteDatabase
   apiKey: string
   models?: string[]
   sex?: 'male' | 'female'
+  // Explicit input kind from the picker; overrides the URI-suffix heuristic
+  // (web blob/data URIs often lack a .pdf extension).
+  kind?: 'pdf' | 'image'
+  onProgress?: (phase: ProgressPhase, progress: number) => void
 }
 
 export type PipelineResult = {
@@ -50,14 +58,17 @@ function today(): string {
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
 export async function processHealthRecord(opts: PipelineOptions): Promise<PipelineResult> {
-  const { uri, db, apiKey, sex } = opts
+  const { uri, db, apiKey, sex, kind, onProgress } = opts
+  const report = (phase: ProgressPhase, progress: number): void => onProgress?.(phase, progress)
 
   // Step 1 — extract text
   let text: string
   let extractionMethod: string
   let pageCount: number | null = null
 
-  if (isPdf(uri)) {
+  report(0, 0.05)
+  const isPdfInput = kind ? kind === 'pdf' : isPdf(uri)
+  if (isPdfInput) {
     const extracted = await extractTextFromPDF(uri)
     if (extracted.method === 'ocr') throw new OcrRequiredError()
     text = extracted.text
@@ -69,6 +80,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   }
 
   // Step 2 — redact PII before any text leaves the device
+  report(1, 0.4)
   const safeText = redactPII(text)
 
   // Step 3 — get model chain, enrich with LLM
@@ -76,10 +88,12 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   const { conditions: llmConditions, measurements } = await enrichFromText(safeText, apiKey, models)
 
   // Step 4 — apply threshold inference rules
+  report(2, 0.75)
   const inferredConditions = applyInferenceRules(measurements, llmConditions, sex)
   const allConditions = [...llmConditions, ...inferredConditions]
 
   // Step 5 — persist health record
+  report(3, 0.9)
   const recordId = await insertHealthRecord(db, {
     filename: filenameFromUri(uri),
     pageCount,
@@ -119,6 +133,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   }
 
   scheduleSnapshot(db)
+  report(3, 1)
 
   return {
     recordId,

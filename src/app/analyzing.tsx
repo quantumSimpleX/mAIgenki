@@ -1,13 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { router } from 'expo-router'
 import {
-  Animated, Dimensions, Easing, Platform, StyleSheet, Text, View,
+  Animated, Dimensions, Easing, Platform, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Svg, {
   Circle, Defs, Ellipse, LinearGradient, Path, Rect, Stop,
 } from 'react-native-svg'
 import { useAppStore } from '@/store/useAppStore'
+import { useOptionalDatabase } from '@/lib/db/provider'
+import { getSetting } from '@/lib/db/queries'
+import { processHealthRecord } from '@/lib/pipeline'
 
 const { width: SW } = Dimensions.get('window')
 const TRACK_W = SW - 64
@@ -110,32 +113,143 @@ function PhaseDots({ phase }: { phase: number }) {
 }
 
 export default function AnalyzingScreen() {
-  const { analyzeProgress, analyzePhase, setAnalyzeProgress, setAnalyzePhase, setScreen } = useAppStore()
+  const analyzeProgress = useAppStore((s) => s.analyzeProgress)
+  const analyzePhase = useAppStore((s) => s.analyzePhase)
+  const setAnalyzeProgress = useAppStore((s) => s.setAnalyzeProgress)
+  const setAnalyzePhase = useAppStore((s) => s.setAnalyzePhase)
+  const setScreen = useAppStore((s) => s.setScreen)
+  const pendingUpload = useAppStore((s) => s.pendingUpload)
+  const setPendingUpload = useAppStore((s) => s.setPendingUpload)
+  const setLastUploadResult = useAppStore((s) => s.setLastUploadResult)
+  const setPipelineError = useAppStore((s) => s.setPipelineError)
+  const gender = useAppStore((s) => s.gender)
+  const db = useOptionalDatabase()
 
   const [reveal] = useState(() => new Animated.Value(0))
   const [fadeIn] = useState(() => new Animated.Value(0))
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+  // Ensures the pipeline / demo animation runs exactly once, guarding against
+  // React strict/dev double-mounts and effect re-runs as `db` resolves.
+  const startedRef = useRef(false)
+  // True only until the screen actually unmounts. Distinguishes a real unmount
+  // (browser Back) from a dependency-change effect re-run — the latter fires the
+  // effect cleanup too, but must NOT cancel an in-flight, still-mounted pipeline.
+  const mountedRef = useRef(true)
+  useEffect(() => () => { mountedRef.current = false }, [])
 
+  // Intro animations (run once on mount).
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: !IS_WEB, easing: Easing.out(Easing.ease) }).start()
     Animated.timing(reveal, { toValue: 1, duration: 1600, useNativeDriver: !IS_WEB, easing: Easing.inOut(Easing.ease) }).start()
+  }, [fadeIn, reveal])
 
+  // Demo / direct-nav path: no pending upload → the original timed animation.
+  useEffect(() => {
+    if (pendingUpload || startedRef.current) return
+    startedRef.current = true
     let progress = 0
     const tick = setInterval(() => {
       progress = Math.min(1, progress + 0.012)
-      const phase = Math.min(3, Math.floor(progress * 4))
       setAnalyzeProgress(progress)
-      setAnalyzePhase(phase)
+      setAnalyzePhase(Math.min(3, Math.floor(progress * 4)))
       if (progress >= 1) {
         clearInterval(tick)
         setScreen('bodymap')
         setTimeout(() => router.replace('/bodymap'), 400)
       }
     }, 80)
-
     return () => clearInterval(tick)
-  }, [])
+  }, [pendingUpload, setAnalyzeProgress, setAnalyzePhase, setScreen])
+
+  // Real-upload path: drive phase/progress from the pipeline's onProgress. The
+  // bar eases smoothly toward each reported target. Waits for `db` to resolve.
+  useEffect(() => {
+    if (!pendingUpload || startedRef.current) return
+    // Post-await work is guarded by mountedRef (true unmount), NOT by this
+    // effect's cleanup — setPendingUpload(null) below re-runs the effect and
+    // fires cleanup, but the pipeline is still running on a mounted screen.
+    if (!db) {
+      // Give the async DB provider a moment to resolve before declaring failure.
+      const timer = setTimeout(() => {
+        if (startedRef.current || !mountedRef.current) return
+        startedRef.current = true
+        setPendingUpload(null)
+        const msg = 'Storage unavailable — uploads cannot be processed on this device.'
+        setPipelineError(msg)
+        setErrorMsg(msg)
+      }, 5000)
+      return () => clearTimeout(timer)
+    }
+
+    startedRef.current = true
+    const upload = pendingUpload
+    setPendingUpload(null)
+
+    let target = 0.05
+    const smooth = setInterval(() => {
+      // Self-stop on true unmount so a dep-change re-run doesn't need to clear it.
+      if (!mountedRef.current) { clearInterval(smooth); return }
+      const cur = useAppStore.getState().analyzeProgress
+      if (cur < target) setAnalyzeProgress(Math.min(target, cur + 0.02))
+    }, 60)
+
+    void (async () => {
+      try {
+        const apiKey = (await getSetting(db, 'openrouter_api_key')) ?? ''
+        const result = await processHealthRecord({
+          uri: upload.uri,
+          db,
+          apiKey,
+          kind: upload.kind,
+          sex: gender,
+          onProgress: (phase, progress) => {
+            if (!mountedRef.current) return
+            setAnalyzePhase(phase)
+            target = progress
+          },
+        })
+        clearInterval(smooth)
+        if (!mountedRef.current) return
+        setAnalyzeProgress(1)
+        setAnalyzePhase(3)
+        setLastUploadResult(result)
+        setPipelineError(null)
+        setScreen('bodymap')
+        setTimeout(() => router.replace('/bodymap'), 400)
+      } catch (e) {
+        clearInterval(smooth)
+        if (!mountedRef.current) return
+        const msg = e instanceof Error ? e.message : 'Something went wrong while analyzing this file.'
+        setPipelineError(msg)
+        setErrorMsg(msg)
+      }
+    })()
+
+    return () => clearInterval(smooth)
+  }, [
+    pendingUpload, db, gender,
+    setAnalyzeProgress, setAnalyzePhase, setScreen,
+    setPendingUpload, setLastUploadResult, setPipelineError,
+  ])
 
   const pct = Math.round(analyzeProgress * 100)
+
+  if (errorMsg) {
+    return (
+      <View style={styles.root}>
+        <SafeAreaView style={styles.safe}>
+          <View style={styles.content}>
+            <Logo />
+            <Text style={styles.headline}>Couldn’t{'\n'}analyze</Text>
+            <Text style={styles.errorText}>{errorMsg}</Text>
+            <TouchableOpacity style={styles.backBtn} onPress={() => router.replace('/')}>
+              <Text style={styles.backBtnText}>Back</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
+    )
+  }
 
   return (
     <View style={styles.root}>
@@ -200,4 +314,14 @@ const styles = StyleSheet.create({
 
   barTrack: { width: TRACK_W, height: 4, backgroundColor: C.pending, borderRadius: 2, overflow: 'hidden' },
   barClip: { height: 4, overflow: 'hidden' },
+
+  errorText: {
+    fontFamily: 'BarlowCondensed-Regular', fontSize: 15, color: C.ink,
+    textAlign: 'center', lineHeight: 21, opacity: 0.85, paddingHorizontal: 8,
+  },
+  backBtn: {
+    borderWidth: 1, borderColor: C.purpleLight, borderRadius: 10,
+    paddingVertical: 12, paddingHorizontal: 32,
+  },
+  backBtnText: { fontFamily: 'BarlowCondensed-Bold', fontSize: 16, color: C.purpleLight, letterSpacing: 0.5 },
 })

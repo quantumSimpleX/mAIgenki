@@ -8,6 +8,9 @@ type Screen = 'upload' | 'analyzing' | 'bodymap'
 type TimeDisplayMode = 'date' | 'age'
 export type Gender = 'male' | 'female'
 
+export type PendingUpload = { uri: string; kind: 'pdf' | 'image' }
+export type UploadResult = { recordId: string; conditionCount: number; measurementCount: number }
+
 type AppState = {
   screen: Screen
   dragOver: boolean
@@ -40,6 +43,13 @@ type AppState = {
   uploadBtnsHovered: boolean
   relocatingCondition: DesignCondition | null
   preRelocationSystems: SystemId[]
+  // Upload → pipeline → bodymap plumbing (URI flows via the store, not route params).
+  pendingUpload: PendingUpload | null
+  lastUploadResult: UploadResult | null
+  pipelineError: string | null
+  // Set when body-type inference finds no gendered signal and none was stored,
+  // so the bodymap can prompt the user once instead of silently defaulting.
+  genderPromptNeeded: boolean
 }
 
 type AppActions = {
@@ -81,6 +91,10 @@ type AppActions = {
   startAnalyze: () => void
   startRelocation: (c: DesignCondition) => void
   cancelRelocation: () => void
+  setPendingUpload: (upload: PendingUpload | null) => void
+  setLastUploadResult: (result: UploadResult | null) => void
+  setPipelineError: (error: string | null) => void
+  setGenderPromptNeeded: (needed: boolean) => void
 }
 
 export const useAppStore = create<AppState & AppActions>((set, get) => ({
@@ -115,6 +129,10 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   uploadBtnsHovered: false,
   relocatingCondition: null,
   preRelocationSystems: [],
+  pendingUpload: null,
+  lastUploadResult: null,
+  pipelineError: null,
+  genderPromptNeeded: false,
 
   setScreen: (screen) => set({ screen }),
   setDragOver: (dragOver) => set({ dragOver }),
@@ -220,4 +238,8 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     relocatingCondition: null,
     preRelocationSystems: [],
   })),
+  setPendingUpload: (pendingUpload) => set({ pendingUpload }),
+  setLastUploadResult: (lastUploadResult) => set({ lastUploadResult }),
+  setPipelineError: (pipelineError) => set({ pipelineError }),
+  setGenderPromptNeeded: (genderPromptNeeded) => set({ genderPromptNeeded }),
 }))

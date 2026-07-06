@@ -2,21 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useOptionalDatabase } from '@/lib/db/provider'
 import { getSetting, upsertSetting } from '@/lib/db/queries'
 import { scheduleSnapshot } from '@/lib/db/snapshot'
-import { useAppStore, Gender } from '@/store/useAppStore'
+import { useAppStore } from '@/store/useAppStore'
 import { useConditions } from '@/hooks/useConditions'
-import { DesignCondition, SupportedLang } from '@/model/conditions'
+import { SupportedLang } from '@/model/conditions'
+import { inferBodyType } from '@/lib/inference/bodyType'
 
 const LANGS: SupportedLang[] = ['en', 'zh-TW', 'ja', 'es']
-
-// Best-effort gender inference from the documented conditions, used as the
-// default until the user explicitly sets it. Sex-specific diagnoses are the
-// signal; defaults to 'female' when there's no clear indicator.
-export function inferGenderFromConditions(conds: DesignCondition[]): Gender {
-  const text = conds.map((c) => `${c.id} ${c.label} ${c.medName}`.toLowerCase()).join(' ')
-  if (/prostat|testicular|\bbph\b/.test(text)) return 'male'
-  if (/ovar|uter|cervi|pcos|fibroid|menstr|pregnan|endometr/.test(text)) return 'female'
-  return 'female'
-}
 
 // Loads user settings (preferred language + date of birth) from the SQLite
 // settings table on startup and writes them back whenever they change, so they
@@ -33,6 +24,7 @@ export function useSettingsPersistence(): void {
   const setBirthYear = useAppStore((s) => s.setBirthYear)
   const setBirthMonth = useAppStore((s) => s.setBirthMonth)
   const setGender = useAppStore((s) => s.setGender)
+  const setGenderPromptNeeded = useAppStore((s) => s.setGenderPromptNeeded)
 
   // Gate writes until the initial load has applied, so defaults don't overwrite
   // stored values before they're read.
@@ -65,12 +57,16 @@ export function useSettingsPersistence(): void {
     return () => { cancelled = true }
   }, [db, setPreferredLanguage, setBirthYear, setBirthMonth, setGender])
 
-  // Infer gender from the records when nothing was stored.
+  // Infer body type from the records when nothing was stored. A gendered signal
+  // sets the gender directly; no signal raises a one-time prompt on the bodymap
+  // rather than silently defaulting.
   useEffect(() => {
     if (!hydrated || genderResolved.current || conditions.length === 0) return
     genderResolved.current = true
-    setGender(inferGenderFromConditions(conditions))
-  }, [hydrated, conditions, setGender])
+    const inferred = inferBodyType(conditions)
+    if (inferred === 'unknown') setGenderPromptNeeded(true)
+    else setGender(inferred)
+  }, [hydrated, conditions, setGender, setGenderPromptNeeded])
 
   useEffect(() => {
     if (db && hydrated) {

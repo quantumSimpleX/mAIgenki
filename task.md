@@ -886,3 +886,284 @@ results in test.md "Phase 8 overall QA status". Two non-blocking Low-severity fi
     snapshot ignored; no snapshot ignored; guard restore failure leaves usable seeded DB.
     SPEC.md §3 retitled "Restore-on-heal and restore-on-boot"; PLAN.md Task 6.2 updated.
     typecheck clean, lint no new warnings, full suite 293/293.
+
+---
+
+## Phase 9 — Upload → Pipeline → Bodymap wiring (PLAN Task 2.6) + Phase 3 integration
+
+Plan: PLAN.md Task 2.6 + Phase 3 (3.2 body type inference, 3.3 performance, 3.4 e2e).
+User decisions: pdfjs-dist for web PDF extraction; images gated off on web; API key
+required before upload, persisted in settings (endpoint stays OpenRouter — hard
+constraint; key + model chain user-editable). Out of scope: C.3 female PNG (art asset),
+on-device Android profiling, physical-device uploads (user-run residue, see test.md).
+
+### Task 9.1 — Platform-safe extraction
+
+- [x] 9.1.1 `src/lib/pdf/extract.ts`: make the `expo-pdf-text-extract` import dynamic
+  (`await import(...)` inside the native branch) so importing the module no longer
+  crashes web bundles. Keep return shape `{ text, pageCount, method }` and the
+  `MIN_CHARS_PER_PAGE = 50` density check → `method: 'ocr'`
+- [x] 9.1.2 Web branch: dynamic `await import('pdfjs-dist')` (legacy build; worker
+  disabled or inlined so Metro web bundles it), per-page `getTextContent()` items joined,
+  same density check. New runtime dependency `pdfjs-dist`
+- [x] 9.1.3 `src/lib/ocr/extract.ts`: dynamic native import; on web throw a clear
+  `Error` ("Image OCR is not available on web") — defense in depth behind the UI gate
+
+### Task 9.2 — API key setting (SQLite + two entry points)
+
+- [x] 9.2.1 Settings key `openrouter_api_key` via existing `getSetting`/`upsertSetting`.
+  NEVER logged, never sent anywhere except openrouter.ai (existing client fetch)
+- [x] 9.2.2 SettingsSheet (bodymap.tsx): "AI model access" section — masked TextInput
+  (secureTextEntry), persisted on change/blur, clearable, short hint. Matches existing
+  settings section styling
+- [x] 9.2.3 `index.tsx`: upload press with no stored key → inline masked key prompt
+  (input + Save) in the upload area; Save persists the key then proceeds with the
+  pending pick (key required before upload)
+
+### Task 9.3 — Pipeline progress callback + store plumbing
+
+- [x] 9.3.1 `PipelineOptions` += `onProgress?: (phase: 0|1|2|3, progress: number) => void`
+  invoked at phase boundaries (extract / redact+enrich / infer / persist) with monotonic
+  progress fractions
+- [x] 9.3.2 `useAppStore` += `pendingUpload: { uri: string; kind: 'pdf' | 'image' } | null`,
+  `lastUploadResult: { recordId: string; conditionCount: number; measurementCount: number } | null`,
+  `pipelineError: string | null` + setters (URI flows via store, not route params)
+
+### Task 9.4 — index.tsx wiring
+
+- [x] 9.4.1 PDF/image handlers: on successful pick → key check (9.2.3) →
+  `setPendingUpload({ uri, kind })` → `startAnalyze()` → `router.push('/analyzing')`
+- [x] 9.4.2 Image column on web: disabled with a "not available on web" note (camera
+  column already hidden on web); native keeps full OCR path
+
+### Task 9.5 — analyzing.tsx real progress
+
+- [x] 9.5.1 When `pendingUpload && db`: run `processHealthRecord({ uri, db, apiKey,
+  onProgress })`; `onProgress` drives `setAnalyzePhase`/`setAnalyzeProgress` (bar animates
+  smoothly toward callback targets). Success → `setLastUploadResult`, clear pendingUpload,
+  `router.replace('/bodymap')`
+- [x] 9.5.2 `OcrRequiredError` / other pipeline errors → inline error state (message +
+  Back button), `setPipelineError`, no bodymap navigation
+- [x] 9.5.3 No `pendingUpload` (demo/direct nav) → existing timed animation unchanged;
+  `db === null` → "storage unavailable" error state
+
+### Task 9.6 — Bodymap arrival: refresh + result notice + demo prompt
+
+- [x] 9.6.1 Effect keyed on `lastUploadResult`: call `useConditions` `refresh()`
+- [x] 9.6.2 Result banner: `conditionCount > 0` → "N conditions added" (dismissible);
+  `=== 0` → "No conditions extracted — check the document or your API key in Settings"
+- [x] 9.6.3 If `lastUploadResult && isDemoDataPresent(db)`: inline prompt "Remove the
+  sample demo data?" [Keep] [Remove]; Remove → `clearDemoData(db)` + `refresh()` +
+  `scheduleSnapshot(db)`. Clear `lastUploadResult` once handled
+
+### Task 9.7 — Body type inference module (PLAN Task 3.2)
+
+- [x] 9.7.1 NEW `src/lib/inference/bodyType.ts`: `inferBodyType(conds): 'male' | 'female'
+  | 'unknown'` — regex logic moved from `useSettingsPersistence.ts`, `'unknown'` when no
+  gendered signal (no silent female default)
+- [x] 9.7.2 `useSettingsPersistence` uses it; `'unknown'` + no stored gender → store flag
+  `genderPromptNeeded` (no silent default)
+- [x] 9.7.3 Bodymap one-time inline gender prompt (♀/♂, settings styling); choice →
+  `setGender` + persisted setting, prompt never returns. Reproductive layer stays `-m`
+  (C.3 outstanding)
+
+### Task 9.8 — Tests (>90% line coverage of new/changed code)
+
+- [x] 9.8.1 NEW `__tests__/lib/pipeline-process.test.ts`: mock extract modules + LLM
+  client; happy path (rows persisted via fake DB harness, counts, onProgress sequence),
+  OcrRequiredError path, image path, keyless/empty enrichment → 0-condition record
+- [x] 9.8.2 NEW `__tests__/lib/bodyType.test.ts`: male / female / unknown / mixed signals
+- [x] 9.8.3 Extraction web branch: mock `pdfjs-dist`; text join + density → 'ocr'
+- [x] 9.8.4 Store slice tests: pendingUpload / lastUploadResult / pipelineError setters
+- [x] 9.8.5 Settings key persistence test (useSettingsPersistence pattern)
+- [x] 9.8.6 Full suite green (`npx jest`, baseline 293) + `npm run typecheck` +
+  `npx expo lint` (no new warnings in changed files)
+
+### Task 9.9 — Performance validation (PLAN Task 3.3, automatable scope)
+
+- [x] 9.9.1 Live Playwright web pass: rapid-toggle all 11 layers + zoom/pan; no console — PASS (Playwright live, 2026-07-05)
+  errors, no gross jank (long-task check); findings recorded in test.md
+- [ ] 9.9.2 On-device Android 60fps profiling: recorded in test.md as user-run residue
+
+### Task 9.10 — E2E flow test (PLAN Task 3.4, automatable scope)
+
+- [x] 9.10.1 Script-generate PDF fixtures (scratchpad): multi-condition text PDF +
+  near-empty scanned-style PDF
+- [x] 9.10.2 Live Playwright: key prompt on first upload → text PDF → phases advance → — PASS (Playwright live, 2026-07-05)
+  bodymap banner; scanned PDF → OcrRequiredError message; demo Remove prompt clears 22
+  demo conditions, uploaded rows remain
+- [ ] 9.10.3 Real-key LLM extraction + physical-device uploads: user-run residue in
+  test.md
+
+### Phase 9 Verification checklist (run after all tasks done)
+
+- [x] `npm run typecheck` — zero errors
+- [x] `npx expo lint` — no new warnings in changed files
+- [x] `npx jest` — full suite green including new suites
+- [x] Coverage of new/changed modules > 90% lines
+- [x] Live web: full upload flow works per 9.10.2 — PASS (Playwright live, 2026-07-05)
+- [x] Native unaffected: dynamic imports, platform branches (static verification)
+- [x] Hard constraints upheld: API key never logged, only sent to openrouter.ai; raw PDFs
+  never leave the device (only extracted, redacted text goes to the LLM)
+
+Note (QA, 2026-07-05): coverage is not uniformly >90% — `src/lib/ocr/extract.ts` is 80% lines
+(the web-guard throw branch, see B-P9-1) and `src/store/useAppStore.ts` is 88.67% (pre-existing
+code, unrelated to Phase 9; new slices are 100%). Independently re-run and confirmed: typecheck
+0 errors, lint 4 warnings all pre-existing (no new warnings in touched files, confirmed via
+`git stash` baseline diff), jest 314/314 passing.
+
+### Phase 9 QA findings (2026-07-05)
+
+Independent QA pass (code review + re-run automated suites; live browser out of scope for this
+pass — that's the orchestrator's Playwright job). No blocking defects; all findings below are
+Low or Medium severity and do not gate GREEN status per the review brief, but should be tracked.
+
+**B-P9-1 (Low) — OCR web-guard throw path has zero test coverage**
+File: `src/lib/ocr/extract.ts:6-8`. The `Platform.OS === 'web'` defense-in-depth guard
+(`throw new Error('Image OCR is not available on web')`) is correct by inspection, but no test
+sets `Platform.OS` to `'web'` for this module (contrast with `__tests__/lib/pdf-extract-web.test.ts`,
+which does this for the PDF extractor). Coverage report confirms line 7 is never executed
+(80% lines / 50% branch on this file). Recommendation: add a 3-line test mirroring the
+`pdf-extract-web` pattern — `Object.defineProperty(Platform, 'OS', ...)` then assert the
+rejection message.
+
+**Status: FIXED (2026-07-05)** — Added `__tests__/lib/ocr-extract-web.test.ts`: forces
+`Platform.OS='web'` and asserts `extractTextFromImage` rejects with
+`'Image OCR is not available on web'`. `src/lib/ocr/extract.ts` now reports 100% line coverage.
+
+**B-P9-2 (Low) — No regression test enforces redact-before-enrich ordering**
+File: `src/lib/pipeline.ts:82-88`. Code is correct today (`redactPII(text)` runs and its output
+`safeText` is what's passed to `enrichFromText`), verified by reading. But
+`__tests__/lib/pipeline-process.test.ts` mocks `enrichFromText` unconditionally and never asserts
+on what text argument it was called with — so a future refactor that reordered these two lines
+(a real risk: this is the exact code path the hard constraints call out) would not be caught by
+any automated test. Recommendation: add one assertion — e.g. feed extract-mock text containing a
+recognizable PII pattern (a fake SSN or name) and assert `mockEnrich.mock.calls[0][0]` does not
+contain it, or assert equality against `redactPII(rawText)`.
+
+**Status: FIXED (2026-07-05)** — Added a case to `__tests__/lib/pipeline-process.test.ts`
+("hard constraint: redact before enrich"): the extractor mock returns text containing a fake
+`SSN 123-45-6789`; the test asserts `mockEnrich.mock.calls[0][0]` equals `redactPII(raw)` AND does
+not contain the raw SSN. Guards against a future reorder of the redact/enrich lines.
+
+**B-P9-3 (Medium) — Pipeline keeps running after analyzing.tsx unmounts; can force-navigate later**
+File: `src/app/analyzing.tsx` (the `void (async () => {...})()` IIFE inside the main effect,
+~line 185-212). The effect's cleanup only does `clearInterval(smooth)` — it does not cancel or
+ignore the in-flight `processHealthRecord` promise. If the component unmounts mid-analysis (e.g.
+the user hits the browser Back button, or on web navigates away by URL) while the async work is
+still running, the `.then`/`.catch` continuation still fires: on success it calls
+`setLastUploadResult`, `setScreen('bodymap')`, and `router.replace('/bodymap')`, silently
+overriding wherever the user navigated to. On failure it calls `setPipelineError`/`setErrorMsg`
+(the latter is local React state and is simply dropped since the component is gone, but the
+Zustand `pipelineError` persists). Likelihood is low (no in-app affordance leaves this screen
+mid-run other than the error-state Back button, which only appears after failure), but browser
+back-navigation on web is trivially reachable by any user and by definition not gated by the
+app's own UI. Recommendation: guard the continuation with an `isMounted`/cancelled flag set in
+the effect's cleanup, mirroring the pattern already used elsewhere in this same file (`let
+cancelled = false`) and in `bodymap.tsx`'s `isDemoDataPresent` effect.
+
+**Status: FIXED (2026-07-05)** — `src/app/analyzing.tsx`: the async continuation is guarded so it
+does not setState/navigate after the screen unmounts (e.g. browser Back). **Correction:** the
+initial fix used a `let cancelled` flag set in the effect cleanup, which regressed the happy path
+(see B-P9-7 — a `setPendingUpload(null)` dependency-change re-run also fires cleanup, false-
+cancelling the in-flight pipeline and hanging at 0%). The corrected implementation uses a
+`mountedRef` set false only in a dedicated empty-deps unmount effect, so it distinguishes a true
+unmount from a dependency-change re-run. See B-P9-7 for the final approach.
+
+**B-P9-4 (Low) — `pendingUpload` not cleared on the db-null timeout error path**
+File: `src/app/analyzing.tsx`, the `db === null` branch (~line 160-173). On timeout it sets
+`pipelineError`/`errorMsg` but never calls `setPendingUpload(null)`. The stale pick sits in the
+store until overwritten by the next upload attempt. Not currently exploitable (a later successful
+upload just overwrites it, and `startedRef` prevents re-processing the stale value on this same
+screen instance), but it's inconsistent with the real-pipeline path, which clears it eagerly and
+atomically before starting work. Recommendation: clear it in the timeout branch too, for
+consistency and to avoid confusing state if inspected via devtools mid-session.
+
+**Status: FIXED (2026-07-05)** — `src/app/analyzing.tsx`: the db-null 5s-timeout branch now calls
+`setPendingUpload(null)` before setting the error state, matching the real-pipeline path.
+
+**B-P9-5 (Low) — Demo-seeded gender inference forecloses future automatic inference from real data**
+Files: `src/hooks/useSettingsPersistence.ts:63-69`, `src/lib/inference/bodyType.ts`. The
+inference effect runs at most once per app session (`genderResolved.current` latches true) and
+the demo dataset's `bph` condition deterministically resolves to `'male'` before any real upload
+happens. Once `gender` is persisted (even from demo-only inference), a subsequent real upload
+with its own gendered signal (e.g. a female-specific diagnosis) is silently ignored — inference
+never re-runs and no prompt fires. This is arguably intentional per the "don't clobber a
+resolved choice" comment, but the demo dataset is not a user choice — it's bundled sample data
+inferring a real setting on the user's behalf without asking. Mitigated: the SettingsSheet has a
+manual ♀/♂ toggle so the user can correct it, but users are not prompted to check unless they
+already suspect an error. Recommendation (no code change required immediately): consider not
+treating demo-derived inference as "resolved" for the purposes of a later real upload — or note
+this explicitly as a WONTFIX given the manual override exists.
+
+**Status: WON'T FIX (2026-07-05)** — Demo-seeded inference latching to `'male'` (via `bph`) and
+not re-inferring on a later real upload is acceptable. The SettingsSheet ♀/♂ toggle lets the user
+correct it, and auto-overriding a possibly-manual choice on every upload is worse than a stable
+default the user can adjust. No code change.
+
+**B-P9-6 (Low) — Index key-prompt "Save" silently discards the key and proceeds when `db` is null**
+File: `src/app/index.tsx`, `handleSaveKey` (~line 147-158). `if (db) { await upsertSetting(...) }`
+— if `db` is null (storage unavailable), the typed key is never persisted, yet `proceed(upload)`
+still runs unconditionally, pushing to `/analyzing` where the `db === null` branch will show
+"Storage unavailable" after a 5s timeout regardless of the key the user just typed. The user
+experience is: type a key, tap Save, wait 5 seconds, get an unrelated storage error, with no
+indication their key wasn't saved. Low severity/likelihood (requires DB init failure, an
+already-abnormal state), but worth a short-circuit: if `!db`, show a storage-unavailable message
+immediately instead of accepting a key that will be silently dropped.
+
+**Status: FIXED (2026-07-05)** — `src/app/index.tsx` `handleSaveKey`: when `db` is null it now sets
+an inline `keySaveError` ("Storage unavailable — can't save your key on this device.") shown in the
+key prompt and returns early WITHOUT proceeding to `/analyzing`. New `keyPromptError` style; the
+error is cleared when a fresh key prompt opens and on a successful save.
+
+**Test-quality note (non-blocking):** `__tests__/lib/pipeline-process.test.ts`,
+`__tests__/lib/bodyType.test.ts`, `__tests__/lib/pdf-extract-web.test.ts`, and
+`__tests__/store/uploadSlices.test.ts` all assert concrete outcomes (row counts, exact phase
+sequences, exact classification, stored/cleared values) rather than "doesn't throw" — good test
+quality. The OCR-required-error path (`__tests__/lib/pipeline-process.test.ts`, scenario 4) does
+assert no rows persisted, not just that it throws — confirmed by reading the test body. As noted
+in the review brief, `analyzing.tsx`'s double-run guard, the demo-remove handler, the gender
+prompt, and `index.tsx`'s key prompt have no unit tests of their own (screens are covered only by
+existing module-shape smoke tests) — this is a real coverage gap for logic that a reviewer would
+otherwise want direct tests for (see B-P9-3's recommendation, which doubles as a test-coverage
+fix for the cancellation gap).
+
+- **B-P9-7** (High, REGRESSION from the B-P9-3 fix) — a successful upload hangs forever on
+  the analyzing screen at "Reading records / 0%"; the pipeline completes and persists but the
+  UI never advances or navigates to bodymap.
+  - File: `src/app/analyzing.tsx:161-226` (real-upload effect)
+  - Found via live Playwright QA (2026-07-05): uploaded `maigenki-fixture-multi.pdf` with a
+    dummy key. Console showed 5× OpenRouter 401 (fallback chain) → extraction+redact+enrich
+    all ran; the IndexedDB snapshot's `health_records` became `["demo", null]` — proving the
+    uploaded record WAS persisted. Yet the screen stayed frozen at phase 0 / 0% and never
+    reached bodymap.
+  - Root cause: the effect calls `setPendingUpload(null)` (line 181), and `pendingUpload` is
+    in the effect's dependency array (line 223). That state change makes React run the
+    effect's cleanup (`cancelled = true`, line 221) immediately, before the re-run. The
+    in-flight pipeline continuation then resolves and hits `if (cancelled) return` (line 205),
+    so `setAnalyzeProgress(1)` / `setScreen` / `router.replace('/bodymap')` are all skipped.
+    The smooth-progress interval was also cleared by the same cleanup, so the bar never eased
+    past 0%. The B-P9-3 `cancelled` flag conflates a dependency-change re-run with a real
+    unmount.
+  - Recommended fix: detect *true unmount* rather than any effect cleanup. Add a dedicated
+    `const mountedRef = useRef(true)` with its own `useEffect(() => () => { mountedRef.current
+    = false }, [])` (empty deps → cleanup runs only on unmount). Replace the per-effect
+    `cancelled` checks in the async continuation and `onProgress` with `!mountedRef.current`.
+    Remove the `cancelled = true` side effect from the pipeline effect's cleanup (keep
+    `clearInterval(smooth)`), and make the smooth interval self-stop on `!mountedRef.current`
+    so a dep-change re-run doesn't kill an in-flight, still-mounted run. This preserves the
+    B-P9-3 goal (Back mid-analysis must not setState/navigate) without breaking the happy
+    path. Re-verify live: a dummy-key upload must reach bodymap with the "No conditions
+    extracted" banner; a real/mocked success must show the "N conditions added" banner.
+
+  **Status: FIXED (2026-07-05)** — Implemented the recommended true-unmount detection in
+  `src/app/analyzing.tsx`. Added `const mountedRef = useRef(true)` with a dedicated
+  `useEffect(() => () => { mountedRef.current = false }, [])` (empty deps ⇒ cleanup only on real
+  unmount). Removed the `let cancelled` flag and the `cancelled = true` side effects from both
+  the real-upload effect cleanup and the db-null timeout cleanup (they now only `clearInterval` /
+  `clearTimeout`). All post-await guards — inside `onProgress`, after `processHealthRecord`
+  resolves, in the `catch`, and in the db-null 5s timeout — now check `!mountedRef.current`. The
+  smooth-progress interval self-stops on `!mountedRef.current`, so a `setPendingUpload(null)`
+  dependency-change re-run no longer cancels an in-flight, still-mounted pipeline. B-P9-4's
+  `setPendingUpload(null)` on the timeout path is retained. typecheck 0 errors; lint no new
+  warnings; jest 316/316.

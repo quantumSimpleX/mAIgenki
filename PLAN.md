@@ -104,36 +104,47 @@ It does not block Phases 0–2, but must be completed before Phase 3 polish.
   - DOB picker (for future age-contextualized display)
   - OpenRouter API key input
 
-- [ ] **Task 2.6** — Wire upload → pipeline → bodymap data flow *(next)*
-  - `index.tsx`: connect upload handlers to `processHealthRecord(uri)` — currently only calls `startAnalyze()` animation; URI never reaches pipeline
-  - `analyzing.tsx`: drive progress bar from actual pipeline phase callbacks instead of timers
-  - [x] `bodymap.tsx`: reads conditions from SQLite via `useConditions()` hook (with hardcoded fallback) — done
-  - On first real upload: prompt user to keep or delete demo data (`clearDemoData`)
-  - Zustand store updated with real conditions after pipeline completes
-  - Files: `src/app/index.tsx`, `src/app/analyzing.tsx`, `src/store/useAppStore.ts`
+- [x] **Task 2.6** — Wire upload → pipeline → bodymap data flow ✓
+  - Done 2026-07-05 (task.md Phase 9): pickers pass the real URI + `kind` to
+    `processHealthRecord`; web PDF extraction via `pdfjs-dist`, images gated off on web;
+    OpenRouter API key required before upload and persisted in settings (Settings sheet +
+    inline upload prompt); `analyzing.tsx` drives progress from the pipeline's `onProgress`
+    (with true-unmount cancellation); bodymap shows a result banner + refreshes conditions;
+    first-real-upload "Remove sample demo data?" prompt calls `clearDemoData`. Verified live
+    on web (M1–M6) and 316/316 jest.
+  - [x] `bodymap.tsx`: reads conditions from SQLite via `useConditions()` hook — done
+  - Files: `src/app/index.tsx`, `src/app/analyzing.tsx`, `src/store/useAppStore.ts`,
+    `src/lib/pipeline.ts`, `src/lib/pdf/extract.ts`, `src/lib/ocr/extract.ts`, `src/app/bodymap.tsx`
 
 ---
 
 ## Phase 3 — Integration & Polish
 > Goal: real anatomy SVG paths, body type inference, end-to-end device test.
 > Depends on: Task 2.6 fully wired + Track C C.3 (female reproductive variant).
+> **Status 2026-07-05: code/wiring tasks (3.2–3.4) done on web scope — see below.**
+> **Phase not fully closed: Track C C.3 (female reproductive PNG, art asset) remains
+> outstanding, and on-device Android profiling / physical-device uploads remain user-run
+> residue (task.md 9.9.2, 9.10.3; test.md M7–M8).**
 
 - [x] **Task 3.1** — Replace placeholder SVG ellipses with accurate organ paths
   - Implemented via 11 colorized transparent PNGs in `assets/maigenki-systems-2colorized/` (PNG approach chosen over SVG paths); wired into `BodyLayers` component
   - Male variant complete (all 11 systems); female reproductive variant not yet done (see C.3)
 
-- [ ] **Task 3.2** — Body type inference (`src/lib/inference/bodyType.ts`)
-  - Scan conditions + evidence text for gender indicators
-  - Returns `'male' | 'female' | 'unknown'`; `'unknown'` triggers a one-time user prompt
-  - Files: `src/lib/inference/bodyType.ts`
+- [x] **Task 3.2** — Body type inference (`src/lib/inference/bodyType.ts`) ✓
+  - Done 2026-07-05: `inferBodyType(conds): 'male' | 'female' | 'unknown'`; `'unknown'`
+    sets `genderPromptNeeded` → one-time inline ♀/♂ prompt on bodymap; choice persisted.
+    (Demo data infers male via `bph`, so the prompt only appears for genuinely sparse data.)
 
-- [ ] **Task 3.3** — Performance validation
-  - Profile SVG layer toggling on a mid-range Android device; target 60fps
-  - Optimize if needed (fewer paths, memoized SVG, reduced complexity)
+- [x] **Task 3.3** — Performance validation ✓ (web scope)
+  - Done 2026-07-05: live web pass — 33 rapid legend-layer toggles, 0 long-tasks (>50ms),
+    0 console errors (test.md M6). On-device mid-range Android 60fps profiling remains
+    **user-run** (no device access) — tracked in task.md 9.9.2 / test.md M8.
 
-- [ ] **Task 3.4** — End-to-end flow test
-  - Upload 3 real PDFs: text-based, scanned (expect error), multi-condition history
-  - Verify all SPEC.md success criteria met on device
+- [x] **Task 3.4** — End-to-end flow test ✓ (web scope)
+  - Done 2026-07-05: live web upload flow verified with generated fixtures — text-based
+    multi-condition PDF → phases → bodymap banner; scanned PDF → OcrRequiredError; demo
+    keep/remove (test.md M1–M6). Real-key LLM extraction + physical iOS/Android device
+    uploads remain **user-run** (agent must not handle the user's real key; no device).
 
 ---
 

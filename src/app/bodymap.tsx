@@ -20,8 +20,9 @@ import {
 } from '@/model/conditions'
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
 import { useOptionalDatabase } from '@/lib/db/provider'
-import { updateConditionPosition } from '@/lib/db/queries'
+import { updateConditionPosition, getSetting, upsertSetting } from '@/lib/db/queries'
 import { exportBackupToFile, pickAndReadBackup, restoreBackup } from '@/lib/db/backup'
+import { clearDemoData, isDemoDataPresent } from '@/lib/db/seed'
 import { scheduleSnapshot, saveSnapshotNow } from '@/lib/db/snapshot'
 
 const { height: SH } = Dimensions.get('window')
@@ -1296,6 +1297,23 @@ function SettingsSheet() {
   const [importConfirm, setImportConfirm] = useState(false)
   const [backupError, setBackupError] = useState<string | null>(null)
 
+  // OpenRouter API key — masked, persisted on change/blur. Never logged; only
+  // ever transmitted to openrouter.ai by the LLM client.
+  const [apiKeyDraft, setApiKeyDraft] = useState('')
+  useEffect(() => {
+    if (!db) return
+    let cancelled = false
+    void getSetting(db, 'openrouter_api_key').then((v) => {
+      if (!cancelled) setApiKeyDraft(v ?? '')
+    })
+    return () => { cancelled = true }
+  }, [db])
+
+  function persistApiKey(value: string) {
+    if (!db) return
+    void upsertSetting(db, 'openrouter_api_key', value.trim()).then(() => scheduleSnapshot(db))
+  }
+
   // Backup file I/O is web-only for now (native has no post-restore refresh path,
   // so a native import would leave the Zustand store / UI stale until restart).
   const backupAvailable = !!db && IS_WEB
@@ -1432,6 +1450,32 @@ function SettingsSheet() {
         </View>
       </View>
 
+      <Text style={styles.settingsSectionLabel}>AI model access</Text>
+      <View style={styles.apiKeyRow}>
+        <TextInput
+          style={styles.apiKeyInput}
+          value={apiKeyDraft}
+          onChangeText={setApiKeyDraft}
+          onBlur={() => persistApiKey(apiKeyDraft)}
+          placeholder="OpenRouter API key (sk-or-...)"
+          placeholderTextColor={C.inkMuted}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!!db}
+        />
+        {apiKeyDraft.length > 0 && (
+          <TouchableOpacity
+            style={styles.apiKeyClear}
+            onPress={() => { setApiKeyDraft(''); persistApiKey('') }}
+            hitSlop={8}
+          >
+            <Text style={styles.apiKeyClearText}>✕</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+      <Text style={styles.settingsHint}>Stored on-device. Sent only to openrouter.ai.</Text>
+
       <Text style={styles.settingsSectionLabel}>Backup</Text>
       <View style={{ flexDirection: 'row', gap: sc(8) }}>
         <TouchableOpacity
@@ -1552,10 +1596,55 @@ export default function BodyMapScreen() {
     currentYear, sheetOpen, settingsOpen,
     condDateOverrides, selectedCondition,
     relocatingCondition, cancelRelocation,
+    lastUploadResult, setLastUploadResult,
+    genderPromptNeeded, setGenderPromptNeeded, setGender,
   } = useAppStore()
 
   const [conditions, refreshConditions] = useConditions()
   const db = useOptionalDatabase()
+
+  // ── Upload arrival (Phase 9.6) ──
+  // Reload conditions from the DB when a new upload landed.
+  useEffect(() => {
+    if (lastUploadResult) refreshConditions()
+  }, [lastUploadResult, refreshConditions])
+
+  // Whether the sample demo data is still present — only checked after an upload,
+  // so the "remove demo?" prompt appears once real records exist alongside it.
+  const [demoPresent, setDemoPresent] = useState(false)
+  useEffect(() => {
+    // Only queried after an upload; the async result is the sole setter (the
+    // prompt is otherwise gated behind `lastUploadResult` in the JSX, and the
+    // Keep/Remove handlers reset `demoPresent` explicitly).
+    if (!lastUploadResult || !db) return
+    let cancelled = false
+    void isDemoDataPresent(db).then((p) => { if (!cancelled) setDemoPresent(p) })
+    return () => { cancelled = true }
+  }, [lastUploadResult, db])
+
+  async function handleRemoveDemo() {
+    if (db) {
+      await clearDemoData(db)
+      refreshConditions()
+      scheduleSnapshot(db)
+    }
+    setDemoPresent(false)
+    setLastUploadResult(null)
+  }
+
+  function dismissArrival() {
+    setDemoPresent(false)
+    setLastUploadResult(null)
+  }
+
+  // ── One-time gender prompt (Phase 9.7.3) ──
+  function chooseGender(g: Gender) {
+    setGender(g)
+    if (db) {
+      void upsertSetting(db, 'gender', g).then(() => scheduleSnapshot(db))
+    }
+    setGenderPromptNeeded(false)
+  }
 
   const handleConditionPress = useCallback((c: DesignCondition) => {
     selectCondition(c)
@@ -1751,6 +1840,49 @@ export default function BodyMapScreen() {
     <View style={styles.root}>
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <NavBar />
+
+        {/* One-time gender prompt when body type couldn't be inferred */}
+        {genderPromptNeeded && (
+          <View style={styles.arrivalCard}>
+            <Text style={styles.arrivalTitle}>Which body map should we show?</Text>
+            <View style={styles.arrivalBtnRow}>
+              {(['female', 'male'] as Gender[]).map((g) => (
+                <TouchableOpacity key={g} style={styles.arrivalBtn} onPress={() => chooseGender(g)}>
+                  <Text style={styles.arrivalBtnText}>{g === 'female' ? '♀  Female' : '♂  Male'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Upload result banner + optional demo-data removal prompt */}
+        {lastUploadResult && (
+          <View style={styles.arrivalCard}>
+            <View style={styles.arrivalHeaderRow}>
+              <Text style={styles.arrivalTitle}>
+                {lastUploadResult.conditionCount > 0
+                  ? `${lastUploadResult.conditionCount} condition${lastUploadResult.conditionCount === 1 ? '' : 's'} added`
+                  : 'No conditions extracted — check the document or your API key in Settings'}
+              </Text>
+              <TouchableOpacity onPress={dismissArrival} hitSlop={10}>
+                <Text style={styles.arrivalClose}>✕</Text>
+              </TouchableOpacity>
+            </View>
+            {demoPresent && (
+              <>
+                <Text style={styles.arrivalSub}>Remove the sample demo data?</Text>
+                <View style={styles.arrivalBtnRow}>
+                  <TouchableOpacity style={styles.arrivalBtn} onPress={dismissArrival}>
+                    <Text style={styles.arrivalBtnText}>Keep</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.arrivalBtn, styles.arrivalBtnDanger]} onPress={handleRemoveDemo}>
+                    <Text style={[styles.arrivalBtnText, { color: C.aqua }]}>Remove</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
+          </View>
+        )}
 
         <View style={styles.canvas}>
           <View ref={bodyWrapRef} style={styles.bodyWrap} {...panResponderProps}>
@@ -2048,6 +2180,35 @@ const styles = StyleSheet.create({
   genderOptLetter: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(14), color: C.inkMuted },
   genderOptTextActive: { color: '#fff' },
   settingsHint: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.inkMuted, marginBottom: sc(12) },
+
+  // AI model access (API key)
+  apiKeyRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8), marginBottom: sc(6) },
+  apiKeyInput: {
+    flex: 1, height: sc(40), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8),
+    paddingHorizontal: sc(10), fontFamily: 'SourceCodePro', fontSize: fs(13), color: C.ink, backgroundColor: C.surfaceHigh,
+  },
+  apiKeyClear: {
+    width: sc(36), height: sc(40), borderRadius: sc(8), alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: C.surfaceHigh,
+  },
+  apiKeyClearText: { fontSize: fs(14), color: C.inkMuted },
+
+  // Upload-arrival + gender prompt cards
+  arrivalCard: {
+    marginHorizontal: sc(12), marginTop: sc(8), padding: sc(12), borderRadius: sc(10),
+    backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: C.border, gap: sc(8),
+  },
+  arrivalHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: sc(8) },
+  arrivalTitle: { flex: 1, fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(14), color: C.ink, lineHeight: fs(18) },
+  arrivalSub: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(13), color: C.inkMuted },
+  arrivalClose: { fontSize: fs(15), color: C.inkMuted, paddingLeft: sc(4) },
+  arrivalBtnRow: { flexDirection: 'row', gap: sc(8) },
+  arrivalBtn: {
+    flex: 1, alignItems: 'center', paddingVertical: sc(9), borderRadius: sc(8),
+    borderWidth: 1, borderColor: C.border, backgroundColor: C.surface,
+  },
+  arrivalBtnDanger: { borderColor: C.aqua },
+  arrivalBtnText: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(13), color: C.ink },
 
   // Backup
   backupBtn: {

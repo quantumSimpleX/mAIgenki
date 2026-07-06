@@ -1,13 +1,16 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { router } from 'expo-router'
 import {
-  StyleSheet, Text, TouchableOpacity, View, ScrollView, useWindowDimensions,
+  StyleSheet, Text, TextInput, TouchableOpacity, View, ScrollView, useWindowDimensions,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
-import { useAppStore } from '@/store/useAppStore'
+import { useAppStore, PendingUpload } from '@/store/useAppStore'
 import { useConditions } from '@/hooks/useConditions'
+import { useOptionalDatabase } from '@/lib/db/provider'
+import { getSetting, upsertSetting } from '@/lib/db/queries'
+import { scheduleSnapshot } from '@/lib/db/snapshot'
 import { QSWordmark } from '@/components/QSWordmark'
 import { IS_DESKTOP, IS_WEB, S } from '@/lib/scale'
 
@@ -92,8 +95,16 @@ function QSBadge({ s, size }: { s: Styles; size: number }) {
 
 export default function UploadScreen() {
   const startAnalyze = useAppStore((s) => s.startAnalyze)
+  const setPendingUpload = useAppStore((s) => s.setPendingUpload)
   const [conditions] = useConditions()
+  const db = useOptionalDatabase()
   const { height: winH } = useWindowDimensions()
+
+  // When an upload is attempted without a stored OpenRouter key, hold the pick
+  // here and reveal an inline masked prompt; Save persists the key then proceeds.
+  const [keyPromptFor, setKeyPromptFor] = useState<PendingUpload | null>(null)
+  const [keyDraft, setKeyDraft] = useState('')
+  const [keySaveError, setKeySaveError] = useState<string | null>(null)
 
   // Live stats from the seeded conditions (falls back to bundled demo data when
   // the DB is unavailable): condition count, distinct organ systems, and the
@@ -116,31 +127,73 @@ export default function UploadScreen() {
   const styles = useMemo(() => createStyles((n) => Math.round(n * ls), (n) => Math.round(n * ls)), [ls])
   const wordmarkSize = Math.round(28 * ls)
 
+  // Proceed to the pipeline with a picked file. An OpenRouter key is required
+  // first — if none is stored, hold the pick and show the inline key prompt.
+  async function beginUpload(upload: PendingUpload) {
+    const storedKey = db ? await getSetting(db, 'openrouter_api_key') : null
+    if (!storedKey) {
+      setKeyDraft('')
+      setKeySaveError(null)
+      setKeyPromptFor(upload)
+      return
+    }
+    proceed(upload)
+  }
+
+  function proceed(upload: PendingUpload) {
+    setPendingUpload(upload)
+    startAnalyze()
+    router.push('/analyzing')
+  }
+
+  async function handleSaveKey() {
+    const key = keyDraft.trim()
+    if (!key || !keyPromptFor) return
+    if (!db) {
+      // Storage is unavailable — persisting the key would silently no-op and the
+      // upload would fail downstream. Surface it here and don't proceed.
+      setKeySaveError('Storage unavailable — can’t save your key on this device.')
+      return
+    }
+    await upsertSetting(db, 'openrouter_api_key', key)
+    scheduleSnapshot(db)
+    const upload = keyPromptFor
+    setKeyPromptFor(null)
+    setKeyDraft('')
+    setKeySaveError(null)
+    proceed(upload)
+  }
+
   async function handlePickPdf() {
     const result = await DocumentPicker.getDocumentAsync({
       type: 'application/pdf',
       copyToCacheDirectory: true,
     })
     if (result.canceled) return
-    startAnalyze()
-    router.push('/analyzing')
+    const uri = result.assets[0]?.uri
+    if (!uri) return
+    await beginUpload({ uri, kind: 'pdf' })
   }
 
   async function handleCamera() {
     const result = await ImagePicker.launchCameraAsync({ quality: 0.85 })
     if (result.canceled) return
-    startAnalyze()
-    router.push('/analyzing')
+    const uri = result.assets[0]?.uri
+    if (!uri) return
+    await beginUpload({ uri, kind: 'image' })
   }
 
   async function handlePickImage() {
+    // Image OCR is a native-only path (see src/lib/ocr/extract.ts).
+    if (IS_WEB) return
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       quality: 0.85,
     })
     if (result.canceled) return
-    startAnalyze()
-    router.push('/analyzing')
+    const uri = result.assets[0]?.uri
+    if (!uri) return
+    await beginUpload({ uri, kind: 'image' })
   }
 
   function handleDemo() {
@@ -194,12 +247,47 @@ export default function UploadScreen() {
                 </>
               )}
 
-              {/* Image */}
-              <TouchableOpacity style={styles.uploadCol} onPress={handlePickImage} activeOpacity={0.7}>
+              {/* Image — OCR is native-only; disabled in the browser */}
+              <TouchableOpacity
+                style={[styles.uploadCol, IS_WEB && styles.uploadColDisabled]}
+                onPress={handlePickImage}
+                activeOpacity={0.7}
+                disabled={IS_WEB}
+              >
                 <ImageIcon color={C.purpleLight} s={styles} />
                 <Text style={styles.uploadColLabel}>Choose image</Text>
+                {IS_WEB && <Text style={styles.uploadColNote}>Not available on web</Text>}
               </TouchableOpacity>
             </View>
+
+            {/* Inline API-key prompt — shown when an upload needs a key first */}
+            {keyPromptFor && (
+              <View style={styles.keyPrompt}>
+                <Text style={styles.keyPromptLabel}>Add your OpenRouter API key to analyze records</Text>
+                <View style={styles.keyPromptRow}>
+                  <TextInput
+                    style={styles.keyInput}
+                    value={keyDraft}
+                    onChangeText={setKeyDraft}
+                    placeholder="sk-or-..."
+                    placeholderTextColor={C.inkMuted}
+                    secureTextEntry
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                  />
+                  <TouchableOpacity
+                    style={[styles.keySaveBtn, !keyDraft.trim() && { opacity: 0.4 }]}
+                    onPress={handleSaveKey}
+                    disabled={!keyDraft.trim()}
+                  >
+                    <Text style={styles.keySaveBtnText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+                {keySaveError
+                  ? <Text style={styles.keyPromptError}>{keySaveError}</Text>
+                  : <Text style={styles.keyPromptHint}>Stored on-device. Sent only to openrouter.ai.</Text>}
+              </View>
+            )}
 
             {/* Bottom strip */}
             <View style={styles.uploadStrip}>
@@ -327,6 +415,63 @@ function createStyles(fs: (n: number) => number, sc: (n: number) => number) {
       fontFamily: 'BarlowCondensed-SemiBold',
       fontSize: fs(13),
       color: C.purple,
+      textAlign: 'center',
+    },
+    uploadColDisabled: { opacity: 0.4 },
+    uploadColNote: {
+      fontFamily: 'BarlowCondensed-Regular',
+      fontSize: fs(10),
+      color: C.inkMuted,
+      textAlign: 'center',
+    },
+
+    // Inline API-key prompt
+    keyPrompt: {
+      paddingHorizontal: sc(14),
+      paddingTop: sc(4),
+      paddingBottom: sc(12),
+      gap: sc(6),
+    },
+    keyPromptLabel: {
+      fontFamily: 'BarlowCondensed-SemiBold',
+      fontSize: fs(12),
+      color: C.purple,
+      textAlign: 'center',
+    },
+    keyPromptRow: { flexDirection: 'row', gap: sc(8), alignItems: 'center' },
+    keyInput: {
+      flex: 1,
+      borderWidth: 1,
+      borderColor: C.border,
+      borderRadius: sc(8),
+      paddingHorizontal: sc(10),
+      paddingVertical: sc(8),
+      fontFamily: 'SourceCodePro',
+      fontSize: fs(12),
+      color: C.ink,
+      backgroundColor: C.white,
+    },
+    keySaveBtn: {
+      backgroundColor: C.purple,
+      borderRadius: sc(8),
+      paddingHorizontal: sc(16),
+      paddingVertical: sc(9),
+    },
+    keySaveBtnText: {
+      fontFamily: 'BarlowCondensed-Bold',
+      fontSize: fs(13),
+      color: C.white,
+    },
+    keyPromptHint: {
+      fontFamily: 'SourceCodePro',
+      fontSize: fs(10),
+      color: C.inkMuted,
+      textAlign: 'center',
+    },
+    keyPromptError: {
+      fontFamily: 'BarlowCondensed-SemiBold',
+      fontSize: fs(11),
+      color: '#C4463B',
       textAlign: 'center',
     },
     uploadStrip: {

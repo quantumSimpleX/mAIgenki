@@ -1,0 +1,158 @@
+// Pipeline integration tests (Phase 9.8.1). The extract + LLM boundaries are
+// mocked, but persistence runs the REAL queries against the shared in-memory
+// fake DB, so this validates that rows actually land and that onProgress fires
+// the expected phase/progress sequence.
+
+jest.mock('@/lib/pdf/extract', () => ({ extractTextFromPDF: jest.fn() }))
+jest.mock('@/lib/ocr/extract', () => ({ extractTextFromImage: jest.fn() }))
+jest.mock('@/lib/llm/enrich', () => ({ enrichFromText: jest.fn() }))
+
+import type { SQLiteDatabase } from 'expo-sqlite'
+import { processHealthRecord, OcrRequiredError, type ProgressPhase } from '@/lib/pipeline'
+import { initDatabase } from '@/lib/db/queries'
+import { makeFakeDb } from '../db/fakeDb'
+import { extractTextFromPDF } from '@/lib/pdf/extract'
+import { extractTextFromImage } from '@/lib/ocr/extract'
+import { enrichFromText } from '@/lib/llm/enrich'
+import type { EnrichmentResult } from '@/lib/llm/enrich'
+import { redactPII } from '@/lib/privacy/redact'
+
+const mockPdf = extractTextFromPDF as jest.MockedFunction<typeof extractTextFromPDF>
+const mockImage = extractTextFromImage as jest.MockedFunction<typeof extractTextFromImage>
+const mockEnrich = enrichFromText as jest.MockedFunction<typeof enrichFromText>
+
+const EMPTY: EnrichmentResult = { conditions: [], measurements: [] }
+
+const CONDITION = {
+  name_medical: 'Essential hypertension',
+  name_common: 'High blood pressure',
+  system: 'cardiovascular',
+  organ: 'heart',
+  anatomical_location: null,
+  status: 'documented' as const,
+  severity: null,
+  certainty: 'confirmed',
+  date_onset: null,
+  date_diagnosed: '2022-06-01',
+  evidence: 'BP 150/95',
+}
+
+const MEASUREMENT = {
+  name: 'Blood Pressure Systolic',
+  value_numeric: 150,
+  unit: 'mmHg',
+  reference_low: null,
+  reference_high: 120,
+  flag: 'high' as const,
+  date: '2022-06-01',
+}
+
+async function freshDb(): Promise<SQLiteDatabase> {
+  const db = makeFakeDb()
+  await initDatabase(db)
+  return db
+}
+
+async function countRows(db: SQLiteDatabase, table: string): Promise<number> {
+  const rows = await db.getAllAsync(`SELECT * FROM ${table}`)
+  return rows.length
+}
+
+beforeEach(() => jest.clearAllMocks())
+
+describe('processHealthRecord — persistence (real fake DB)', () => {
+  it('persists health record, conditions and measurements; returns counts', async () => {
+    mockPdf.mockResolvedValue({ text: 'Hypertension. BP 150/95.', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue({ conditions: [CONDITION], measurements: [MEASUREMENT] })
+
+    const db = await freshDb()
+    const result = await processHealthRecord({ uri: 'file:///r.pdf', db, apiKey: 'sk-test' })
+
+    expect(await countRows(db, 'health_records')).toBe(1)
+    expect(await countRows(db, 'conditions')).toBe(result.conditionCount)
+    expect(await countRows(db, 'measurements')).toBe(1)
+    expect(result.conditionCount).toBeGreaterThanOrEqual(1)
+    expect(result.measurementCount).toBe(1)
+  })
+
+  it('fires onProgress with a monotonic phase/progress sequence', async () => {
+    mockPdf.mockResolvedValue({ text: 'Some records with text.', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue(EMPTY)
+
+    const db = await freshDb()
+    const calls: [ProgressPhase, number][] = []
+    await processHealthRecord({
+      uri: 'file:///r.pdf', db, apiKey: '',
+      onProgress: (phase, progress) => calls.push([phase, progress]),
+    })
+
+    const phases = calls.map((c) => c[0])
+    expect(phases).toEqual([0, 1, 2, 3, 3])
+    // Progress fractions are non-decreasing and end at 1.
+    const progresses = calls.map((c) => c[1])
+    for (let i = 1; i < progresses.length; i++) {
+      expect(progresses[i]).toBeGreaterThanOrEqual(progresses[i - 1])
+    }
+    expect(progresses[progresses.length - 1]).toBe(1)
+  })
+
+  it('empty enrichment yields a 0-condition record', async () => {
+    mockPdf.mockResolvedValue({ text: 'Nothing clinical here at all.', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue(EMPTY)
+
+    const db = await freshDb()
+    const result = await processHealthRecord({ uri: 'file:///r.pdf', db, apiKey: '' })
+
+    expect(result.conditionCount).toBe(0)
+    expect(await countRows(db, 'health_records')).toBe(1)
+    expect(await countRows(db, 'conditions')).toBe(0)
+  })
+})
+
+describe('processHealthRecord — hard constraint: redact before enrich', () => {
+  it('sends only redacted text to the LLM (never raw PII)', async () => {
+    const raw = 'Patient has hypertension. SSN 123-45-6789. BP 150/95.'
+    mockPdf.mockResolvedValue({ text: raw, pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue(EMPTY)
+
+    const db = await freshDb()
+    await processHealthRecord({ uri: 'file:///r.pdf', db, apiKey: '' })
+
+    const sentText = mockEnrich.mock.calls[0][0]
+    // The exact string handed to enrich must be the redacted form...
+    expect(sentText).toBe(redactPII(raw))
+    // ...and the raw SSN must never reach the network boundary.
+    expect(sentText).not.toContain('123-45-6789')
+  })
+})
+
+describe('processHealthRecord — input routing', () => {
+  it('throws OcrRequiredError for an image-based PDF (no rows persisted)', async () => {
+    mockPdf.mockResolvedValue({ text: 'x', pageCount: 3, method: 'ocr' })
+
+    const db = await freshDb()
+    await expect(processHealthRecord({ uri: 'file:///scan.pdf', db, apiKey: '' }))
+      .rejects.toThrow(OcrRequiredError)
+    expect(await countRows(db, 'health_records')).toBe(0)
+  })
+
+  it('routes image input through OCR extraction', async () => {
+    mockImage.mockResolvedValue('HbA1c 7.1%')
+    mockEnrich.mockResolvedValue(EMPTY)
+
+    const db = await freshDb()
+    await processHealthRecord({ uri: 'file:///lab.jpg', db, apiKey: '' })
+    expect(mockImage).toHaveBeenCalledWith('file:///lab.jpg')
+    expect(mockPdf).not.toHaveBeenCalled()
+  })
+
+  it('honours an explicit kind override for a suffixless web blob URI', async () => {
+    mockPdf.mockResolvedValue({ text: 'Text-based PDF content here.', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue(EMPTY)
+
+    const db = await freshDb()
+    await processHealthRecord({ uri: 'blob:https://app/abc-123', db, apiKey: '', kind: 'pdf' })
+    expect(mockPdf).toHaveBeenCalledWith('blob:https://app/abc-123')
+    expect(mockImage).not.toHaveBeenCalled()
+  })
+})
