@@ -1,0 +1,20 @@
+[     467ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://localhost:8081/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:71504
+[     545ms] [LOG] Running application "main" with appParams:
+ {rootTag: #root, hydrate: undefined} 
+Development-level warnings: ON.
+Performance optimizations: OFF. @ http://localhost:8081/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:71504
+[     776ms] [WARNING] props.pointerEvents is deprecated. Use style.pointerEvents @ http://localhost:8081/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:71504
+[   31551ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) %o @ http://localhost:8081/:0
+[   57993ms] [ERROR] Received `%s` for a non-boolean attribute `%s`.
+
+If you want to write it to the DOM, pass a string instead: %s="%s" or %s={value.toString()}.
+
+If you used to conditionally omit it with %s={condition && value}, pass %s={condition ? value : undefined} instead. false collapsable collapsable false collapsable collapsable collapsable @ http://localhost:8081/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:71504
+[   58425ms] [WARNING] Warning: Setting up fake worker. @ http://localhost:8081/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:71504
+[   58680ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://openrouter.ai/api/v1/chat/completions:0
+[   58713ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://openrouter.ai/api/v1/chat/completions:0
+[   58739ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://openrouter.ai/api/v1/chat/completions:0
+[   58763ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://openrouter.ai/api/v1/chat/completions:0
+[   58847ms] [ERROR] Failed to load resource: the server responded with a status of 401 () @ https://openrouter.ai/api/v1/chat/completions:0
+[   58848ms] [WARNING] [enrich] all models failed — nousresearch/hermes-3-llama-3.1-405b:free: Missing Authentication header; openai/gpt-oss-120b:free: Missing Authentication header; nvidia/nemotron-3-super-120b-a12b:free: Missing Authentication header; meta-llama/llama-3.3-70b-instruct:free: Missing Authentication header; meta-llama/llama-3.2-3b-instruct:free: Missing Authentication header @ http://localhost:8081/node_modules/expo-router/entry.bundle?platform=web&dev=true&hot=false&lazy=true&transform.engine=hermes&transform.routerRoot=src%2Fapp&transform.reactCompiler=true&unstable_transformProfile=hermes-stable:71504
+[   59417ms] [VERBOSE] [DOM] Password field is not contained in a form: (More info: https://goo.gl/9p2vKq) @ http://localhost:8081/bodymap:0

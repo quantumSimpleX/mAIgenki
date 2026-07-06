@@ -1,0 +1,25 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e59]:
+    - generic [ref=f3e60]:
+      - generic [ref=f3e61]: m
+      - generic [ref=f3e62]: AI
+      - generic [ref=f3e63]: Genki
+    - generic [ref=f3e64]: Analyzing records…
+    - generic [ref=f3e65]:
+      - img [ref=f3e66]
+      - generic:
+        - img
+    - generic [ref=f3e74]:
+      - generic [ref=f3e75]: Building story
+      - generic [ref=f3e76]: 100% — processing on-device
+    - generic [ref=f3e77]:
+      - generic [ref=f3e80]: Reading records
+      - generic [ref=f3e83]: Extracting diagnoses
+      - generic [ref=f3e86]: Mapping anatomy
+      - generic [ref=f3e89]: Building story
+    - img [ref=f3e92]
+  - 'button "! Received `false` for a non-boolean attri" [ref=f3e95] [cursor=pointer]':
+    - generic [ref=f3e97]: "!"
+    - generic [ref=f3e98]: "Received `false` for a non-boolean attri"
+    - button [ref=f3e99]:
+      - img [ref=f3e101]

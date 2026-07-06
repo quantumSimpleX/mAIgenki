@@ -1,0 +1,29 @@
+- generic [ref=f8e9]:
+  - generic [ref=f8e10]:
+    - generic [ref=f8e12]:
+      - generic [ref=f8e13]: m
+      - generic [ref=f8e14]: AI
+      - generic [ref=f8e15]: Genki
+    - generic [ref=f8e17]:
+      - generic [ref=f8e18]: YOUR BODY. YOUR RECORDS.
+      - generic [ref=f8e19]: YOUR WELLNESS STORY
+      - generic [ref=f8e20]: Upload health PDFs. Every condition mapped to anatomy — across time.
+      - generic [ref=f8e21]:
+        - generic [ref=f8e22]:
+          - generic [ref=f8e27] [cursor=pointer]: Drop PDFs
+          - generic [ref=f8e33] [cursor=pointer]: Choose image
+        - generic [ref=f8e35]: Health records, discharge forms, lab results, imaging reports, etc.
+      - generic [ref=f8e38]: YOUR DATA NEVER LEAVE YOUR DEVICE
+      - generic [ref=f8e41]: OR
+      - generic [ref=f8e44] [cursor=pointer]: Explore demo data
+      - generic [ref=f8e45]: No account. No cloud. Works offline.
+      - generic [ref=f8e46]: 22 conditions | 11 organ systems | 2013 — 2023
+  - generic:
+    - generic: BUILT BY
+    - generic:
+      - img
+      - generic:
+        - generic:
+          - generic: UANTUM
+        - generic:
+          - generic: SIMPLEX

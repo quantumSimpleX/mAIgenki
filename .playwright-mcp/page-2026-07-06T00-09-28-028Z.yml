@@ -1,0 +1,37 @@
+- generic [ref=f1e9]:
+  - generic [ref=f1e10]:
+    - generic [ref=f1e12]:
+      - generic [ref=f1e13]: m
+      - generic [ref=f1e14]: AI
+      - generic [ref=f1e15]: Genki
+    - generic [ref=f1e17]:
+      - generic [ref=f1e18]: YOUR BODY. YOUR RECORDS.
+      - generic [ref=f1e19]: YOUR WELLNESS STORY
+      - generic [ref=f1e20]: Upload health PDFs. Every condition mapped to anatomy — across time.
+      - generic [ref=f1e21]:
+        - generic [ref=f1e22]:
+          - generic [ref=f1e27] [cursor=pointer]: Drop PDFs
+          - generic:
+            - generic [ref=f1e32]: Choose image
+            - generic [ref=f1e33]: Not available on web
+        - generic [ref=f1e48]:
+          - generic [ref=f1e49]: Add your OpenRouter API key to analyze records
+          - generic [ref=f1e50]:
+            - textbox "sk-or-..." [ref=f1e51]
+            - generic [ref=f1e52]: Save
+          - generic [ref=f1e53]: Stored on-device. Sent only to openrouter.ai.
+        - generic [ref=f1e35]: Health records, discharge forms, lab results, imaging reports, etc.
+      - generic [ref=f1e38]: YOUR DATA NEVER LEAVE YOUR DEVICE
+      - generic [ref=f1e41]: OR
+      - generic [ref=f1e44] [cursor=pointer]: Explore demo data
+      - generic [ref=f1e45]: No account. No cloud. Works offline.
+      - generic [ref=f1e46]: 22 conditions | 11 organ systems | 2013 — 2023
+  - generic:
+    - generic: BUILT BY
+    - generic:
+      - img
+      - generic:
+        - generic:
+          - generic: UANTUM
+        - generic:
+          - generic: SIMPLEX

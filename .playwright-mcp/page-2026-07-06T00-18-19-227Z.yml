@@ -1,0 +1,175 @@
+- generic [active] [ref=f3e1]:
+  - generic [ref=f3e106]:
+    - generic [ref=f3e107]:
+      - generic [ref=f3e108]:
+        - generic [ref=f3e109] [cursor=pointer]:
+          - generic [ref=f3e110]: m
+          - generic [ref=f3e111]: AI
+          - generic [ref=f3e112]: Genki
+          - img [ref=f3e114]
+        - generic [ref=f3e116]:
+          - generic [ref=f3e118] [cursor=pointer]: 2024-JAN
+          - img [ref=f3e120] [cursor=pointer]
+      - generic [ref=f3e123]:
+        - generic [ref=f3e124]:
+          - generic [ref=f3e125]: No conditions extracted — check the document or your API key in Settings
+          - generic [ref=f3e127] [cursor=pointer]: ✕
+        - generic [ref=f3e128]: Remove the sample demo data?
+        - generic [ref=f3e129]:
+          - generic [ref=f3e131] [cursor=pointer]: Keep
+          - generic [ref=f3e133] [cursor=pointer]: Remove
+      - generic [ref=f3e134]:
+        - generic [ref=f3e136]:
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - generic:
+            - generic:
+              - img
+          - img
+          - img
+        - generic [ref=f3e139]:
+          - generic [ref=f3e140]:
+            - generic [ref=f3e143] [cursor=pointer]: Integumentary
+            - generic [ref=f3e145] [cursor=pointer]: only
+          - generic [ref=f3e146]:
+            - generic [ref=f3e149] [cursor=pointer]: Muscular
+            - generic [ref=f3e151] [cursor=pointer]: only
+          - generic [ref=f3e152]:
+            - generic [ref=f3e155] [cursor=pointer]: Skeletal
+            - generic [ref=f3e157] [cursor=pointer]: only
+          - generic [ref=f3e158]:
+            - generic [ref=f3e161] [cursor=pointer]: Cardiovascular
+            - generic [ref=f3e163] [cursor=pointer]: only
+          - generic [ref=f3e164]:
+            - generic [ref=f3e167] [cursor=pointer]: Nervous
+            - generic [ref=f3e169] [cursor=pointer]: only
+          - generic [ref=f3e170]:
+            - generic [ref=f3e173] [cursor=pointer]: Digestive
+            - generic [ref=f3e175] [cursor=pointer]: only
+          - generic [ref=f3e176]:
+            - generic [ref=f3e179] [cursor=pointer]: Respiratory
+            - generic [ref=f3e181] [cursor=pointer]: only
+          - generic [ref=f3e182]:
+            - generic [ref=f3e185] [cursor=pointer]: Renal
+            - generic [ref=f3e187] [cursor=pointer]: only
+          - generic [ref=f3e188]:
+            - generic [ref=f3e191] [cursor=pointer]: Lymphatic
+            - generic [ref=f3e193] [cursor=pointer]: only
+          - generic [ref=f3e194]:
+            - generic [ref=f3e197] [cursor=pointer]: Endocrine
+            - generic [ref=f3e199] [cursor=pointer]: only
+          - generic [ref=f3e200]:
+            - generic [ref=f3e203] [cursor=pointer]: Reproductive
+            - generic [ref=f3e205] [cursor=pointer]: only
+        - generic [ref=f3e231]:
+          - generic [ref=f3e232] [cursor=pointer]:
+            - img [ref=f3e234]
+            - img [ref=f3e239]
+            - img [ref=f3e244]
+            - img [ref=f3e249]
+          - generic [ref=f3e252] [cursor=pointer]:
+            - img [ref=f3e253]
+            - generic [ref=f3e256]:
+              - generic [ref=f3e258]: UANTUM
+              - generic [ref=f3e260]: SIMPLEX
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - generic: HEALTH ASSISTANT
+        - generic:
+          - generic: ↓
+    - generic:
+      - generic:
+        - generic: Settings
+        - generic:
+          - generic: ✕
+      - generic: Language
+      - generic:
+        - generic:
+          - generic:
+            - generic:
+              - img
+            - generic: English
+            - generic: English
+          - generic:
+            - generic:
+              - img
+            - generic: 中文（繁體）
+            - generic: Chinese (Traditional)
+          - generic:
+            - generic:
+              - img
+            - generic: 日本語
+            - generic: Japanese
+            - generic: ✓
+          - generic:
+            - generic:
+              - img
+            - generic: Español
+            - generic: Spanish
+      - generic:
+        - generic:
+          - generic: "Birth: Inferred"
+          - generic:
+            - textbox "YYYY": "1985"
+            - generic:
+              - generic:
+                - generic: JAN
+                - generic: ▼
+          - generic: "Privacy: date not stored."
+        - generic:
+          - generic: "Gender: Inferred"
+          - generic:
+            - generic "Female":
+              - generic: ♀
+              - generic: F
+            - generic "Male":
+              - generic: ♂
+              - generic: M
+          - generic: Tap to correct.
+      - generic: AI model access
+      - generic:
+        - textbox "OpenRouter API key (sk-or-...)": sk-or-dummy-qa-key-not-real
+        - generic:
+          - generic: ✕
+      - generic: Stored on-device. Sent only to openrouter.ai.
+      - generic: Backup
+      - generic:
+        - generic:
+          - generic: Export
+        - generic:
+          - generic: Import
+  - 'button "! Received `false` for a non-boolean attri" [ref=f3e95] [cursor=pointer]':
+    - generic [ref=f3e97]: "!"
+    - generic [ref=f3e98]: "Received `false` for a non-boolean attri"
+    - button [ref=f3e99]:
+      - img [ref=f3e101]

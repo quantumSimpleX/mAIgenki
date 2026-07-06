@@ -1,0 +1,37 @@
+- generic [active] [ref=f4e1]:
+  - generic [ref=f4e32]:
+    - generic [ref=f4e33]:
+      - generic [ref=f4e35]:
+        - generic [ref=f4e36]: m
+        - generic [ref=f4e37]: AI
+        - generic [ref=f4e38]: Genki
+      - generic [ref=f4e40]:
+        - generic [ref=f4e41]: YOUR BODY. YOUR RECORDS.
+        - generic [ref=f4e42]: YOUR WELLNESS STORY
+        - generic [ref=f4e43]: Upload health PDFs. Every condition mapped to anatomy — across time.
+        - generic [ref=f4e44]:
+          - generic [ref=f4e45]:
+            - generic [ref=f4e50] [cursor=pointer]: Drop PDFs
+            - generic:
+              - generic [ref=f4e55]: Choose image
+              - generic [ref=f4e56]: Not available on web
+          - generic [ref=f4e58]: Health records, discharge forms, lab results, imaging reports, etc.
+        - generic [ref=f4e61]: YOUR DATA NEVER LEAVE YOUR DEVICE
+        - generic [ref=f4e64]: OR
+        - generic [ref=f4e67] [cursor=pointer]: Explore demo data
+        - generic [ref=f4e68]: No account. No cloud. Works offline.
+        - generic [ref=f4e69]: 22 conditions | 11 organ systems | 2013 — 2023
+    - generic:
+      - generic: BUILT BY
+      - generic:
+        - img
+        - generic:
+          - generic:
+            - generic: UANTUM
+          - generic:
+            - generic: SIMPLEX
+  - 'button "! Received `false` for a non-boolean attri" [ref=f4e21] [cursor=pointer]':
+    - generic [ref=f4e23]: "!"
+    - generic [ref=f4e24]: "Received `false` for a non-boolean attri"
+    - button [ref=f4e25]:
+      - img [ref=f4e27]

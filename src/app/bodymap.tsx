@@ -1283,8 +1283,51 @@ function MonthDropdown({ value, onChange }: { value: string; onChange: (m: strin
   )
 }
 
+function LanguageDropdown({
+  value, onChange,
+}: {
+  value: SupportedLang
+  onChange: (lang: SupportedLang) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const selected = SUPPORTED_LANGS.find((lang) => lang.code === value) ?? SUPPORTED_LANGS[0]
+
+  return (
+    <View style={styles.langDdWrap}>
+      <TouchableOpacity style={styles.langDdField} onPress={() => setOpen((o) => !o)} activeOpacity={0.75}>
+        <LangFlag code={selected.code} />
+        <Text style={styles.langNative}>{selected.native}</Text>
+        <Text style={styles.langEnglish}>{selected.english}</Text>
+        <Text style={styles.langDdChevron}>{open ? '▲' : '▼'}</Text>
+      </TouchableOpacity>
+      {open && (
+        <View style={styles.langDdList}>
+          <ScrollView style={{ maxHeight: sc(188) }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+            {SUPPORTED_LANGS.map(({ code, native, english }) => {
+              const active = value === code
+              return (
+                <TouchableOpacity
+                  key={code}
+                  style={[styles.langRowItem, active && styles.langRowItemActive]}
+                  onPress={() => { onChange(code); setOpen(false) }}
+                >
+                  <LangFlag code={code} />
+                  <Text style={styles.langNative}>{native}</Text>
+                  <Text style={styles.langEnglish}>{english}</Text>
+                  {active && <Text style={styles.langCheck}>✓</Text>}
+                </TouchableOpacity>
+              )
+            })}
+          </ScrollView>
+        </View>
+      )}
+    </View>
+  )
+}
+
 function SettingsSheet() {
   const insets = useSafeAreaInsets()
+  const { height: winH } = useWindowDimensions()
   const {
     settingsOpen, toggleSettings,
     preferredLanguage, setPreferredLanguage,
@@ -1370,11 +1413,12 @@ function SettingsSheet() {
     }).start()
   }, [anim, settingsOpen])
 
-  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [sc(500), 0] })
+  const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [winH + insets.bottom + sc(40), 0] })
 
   return (
     <Animated.View
-      style={[styles.settingsSheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY }], pointerEvents: settingsOpen ? 'auto' : 'none' }]}
+      pointerEvents={settingsOpen ? 'auto' : 'none'}
+      style={[styles.settingsSheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY }] }]}
     >
       <View style={styles.sheetHandle} />
       <View style={styles.settingsHeader}>
@@ -1385,23 +1429,7 @@ function SettingsSheet() {
       </View>
 
       <Text style={styles.settingsSectionLabel}>Language</Text>
-      <ScrollView style={styles.langList} showsVerticalScrollIndicator={false}>
-        {SUPPORTED_LANGS.map(({ code, native, english }) => {
-          const active = preferredLanguage === code
-          return (
-            <TouchableOpacity
-              key={code}
-              style={[styles.langRowItem, active && styles.langRowItemActive]}
-              onPress={() => setPreferredLanguage(code)}
-            >
-              <LangFlag code={code} />
-              <Text style={styles.langNative}>{native}</Text>
-              <Text style={styles.langEnglish}>{english}</Text>
-              {active && <Text style={styles.langCheck}>✓</Text>}
-            </TouchableOpacity>
-          )
-        })}
-      </ScrollView>
+      <LanguageDropdown value={preferredLanguage} onChange={setPreferredLanguage} />
 
       <View style={styles.birthGenderRow}>
         <View style={styles.birthCol}>
@@ -1450,7 +1478,7 @@ function SettingsSheet() {
         </View>
       </View>
 
-      <Text style={styles.settingsSectionLabel}>AI model access</Text>
+      <Text style={styles.settingsSectionLabel}>LLM Access API Key</Text>
       <View style={styles.apiKeyRow}>
         <TextInput
           style={styles.apiKeyInput}
@@ -2123,21 +2151,33 @@ const styles = StyleSheet.create({
   },
   settingsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sc(20) },
   settingsTitle: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: C.ink, textTransform: 'uppercase', letterSpacing: sc(0.5) },
-  settingsSectionLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.inkMuted, textTransform: 'uppercase', letterSpacing: sc(1), marginBottom: sc(10) },
+  settingsSectionLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.aqua, textTransform: 'uppercase', letterSpacing: sc(1), marginBottom: sc(10) },
 
-  langList: { maxHeight: sc(224), marginBottom: sc(20) },
+  langDdWrap: { position: 'relative', zIndex: 20, marginBottom: sc(18) },
+  langDdField: {
+    flexDirection: 'row', alignItems: 'center', gap: sc(10), height: sc(44),
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8),
+    paddingHorizontal: sc(10), backgroundColor: C.surfaceHigh,
+  },
+  langDdChevron: { fontSize: fs(9), color: C.aqua },
+  langDdList: {
+    position: 'absolute', top: sc(50), left: 0, right: 0,
+    backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: sc(8), overflow: 'hidden', zIndex: 50,
+    ...(IS_WEB ? { boxShadow: `0 ${sc(6)}px ${sc(16)}px rgba(0,0,0,0.5)` } : { elevation: 10 }),
+  },
   langRowItem: {
     flexDirection: 'row', alignItems: 'center', gap: sc(10), paddingVertical: sc(10), paddingHorizontal: sc(10),
     borderLeftWidth: sc(3), borderLeftColor: 'transparent', borderRadius: sc(6),
   },
-  langRowItemActive: { borderLeftColor: C.purpleLight, backgroundColor: 'rgba(138,96,235,0.12)' },
+  langRowItemActive: { borderLeftColor: C.aqua, backgroundColor: 'rgba(31,195,164,0.12)' },
   langFlagBox: {
     width: sc(26), height: sc(18), borderRadius: sc(3), overflow: 'hidden',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)',
   },
   langNative: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(14), fontWeight: '500', color: C.ink },
-  langEnglish: { fontFamily: 'SourceCodePro', fontSize: fs(9.5), color: C.inkMuted, flex: 1 },
-  langCheck: { fontSize: fs(14), color: C.purpleLight },
+  langEnglish: { fontFamily: 'SourceCodePro', fontSize: fs(9.5), color: 'rgba(250,250,247,0.5)', flex: 1 },
+  langCheck: { fontSize: fs(14), color: C.aqua },
 
   birthGenderRow: { flexDirection: 'row', gap: sc(24), alignItems: 'flex-start', zIndex: 30 },
   birthCol: { flex: 1, minWidth: 0, zIndex: 30 },

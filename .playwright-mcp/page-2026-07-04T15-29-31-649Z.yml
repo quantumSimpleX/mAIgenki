@@ -1,0 +1,155 @@
+- generic [ref=f1e9]:
+  - generic [ref=f1e10]:
+    - generic [ref=f1e11]:
+      - generic [ref=f1e12] [cursor=pointer]:
+        - generic [ref=f1e13]: m
+        - generic [ref=f1e14]: AI
+        - generic [ref=f1e15]: Genki
+        - img [ref=f1e17]
+      - generic [ref=f1e19]:
+        - generic [ref=f1e21] [cursor=pointer]: 2024-JAN
+        - img [ref=f1e23] [cursor=pointer]
+    - generic [ref=f1e26]:
+      - generic [ref=f1e28]:
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - generic:
+          - generic:
+            - img
+        - img
+        - img
+      - generic [ref=f1e31]:
+        - generic [ref=f1e32]:
+          - generic [ref=f1e35] [cursor=pointer]: Integumentary
+          - generic [ref=f1e37] [cursor=pointer]: only
+        - generic [ref=f1e38]:
+          - generic [ref=f1e41] [cursor=pointer]: Muscular
+          - generic [ref=f1e43] [cursor=pointer]: only
+        - generic [ref=f1e44]:
+          - generic [ref=f1e47] [cursor=pointer]: Skeletal
+          - generic [ref=f1e49] [cursor=pointer]: only
+        - generic [ref=f1e50]:
+          - generic [ref=f1e53] [cursor=pointer]: Cardiovascular
+          - generic [ref=f1e55] [cursor=pointer]: only
+        - generic [ref=f1e56]:
+          - generic [ref=f1e59] [cursor=pointer]: Nervous
+          - generic [ref=f1e61] [cursor=pointer]: only
+        - generic [ref=f1e62]:
+          - generic [ref=f1e65] [cursor=pointer]: Digestive
+          - generic [ref=f1e67] [cursor=pointer]: only
+        - generic [ref=f1e68]:
+          - generic [ref=f1e71] [cursor=pointer]: Respiratory
+          - generic [ref=f1e73] [cursor=pointer]: only
+        - generic [ref=f1e74]:
+          - generic [ref=f1e77] [cursor=pointer]: Renal
+          - generic [ref=f1e79] [cursor=pointer]: only
+        - generic [ref=f1e80]:
+          - generic [ref=f1e83] [cursor=pointer]: Lymphatic
+          - generic [ref=f1e85] [cursor=pointer]: only
+        - generic [ref=f1e86]:
+          - generic [ref=f1e89] [cursor=pointer]: Endocrine
+          - generic [ref=f1e91] [cursor=pointer]: only
+        - generic [ref=f1e92]:
+          - generic [ref=f1e95] [cursor=pointer]: Reproductive
+          - generic [ref=f1e97] [cursor=pointer]: only
+      - generic [ref=f1e123]:
+        - generic [ref=f1e124] [cursor=pointer]:
+          - img [ref=f1e126]
+          - img [ref=f1e131]
+          - img [ref=f1e136]
+          - img [ref=f1e141]
+        - generic [ref=f1e144] [cursor=pointer]:
+          - img [ref=f1e145]
+          - generic [ref=f1e148]:
+            - generic [ref=f1e150]: UANTUM
+            - generic [ref=f1e152]: SIMPLEX
+  - generic:
+    - generic:
+      - generic:
+        - generic:
+          - generic: HEALTH ASSISTANT
+      - generic:
+        - generic: ↓
+  - generic:
+    - generic:
+      - generic: Settings
+      - generic:
+        - generic: ✕
+    - generic: Language
+    - generic:
+      - generic:
+        - generic:
+          - generic:
+            - img
+          - generic: English
+          - generic: English
+        - generic:
+          - generic:
+            - img
+          - generic: 中文（繁體）
+          - generic: Chinese (Traditional)
+        - generic:
+          - generic:
+            - img
+          - generic: 日本語
+          - generic: Japanese
+          - generic: ✓
+        - generic:
+          - generic:
+            - img
+          - generic: Español
+          - generic: Spanish
+    - generic:
+      - generic:
+        - generic: "Birth: Inferred"
+        - generic:
+          - textbox "YYYY": "1985"
+          - generic:
+            - generic:
+              - generic: JAN
+              - generic: ▼
+        - generic: "Privacy: date not stored."
+      - generic:
+        - generic: "Gender: Inferred"
+        - generic:
+          - generic "Female":
+            - generic: ♀
+            - generic: F
+          - generic "Male":
+            - generic: ♂
+            - generic: M
+        - generic: Tap to correct.
+    - generic: Backup
+    - generic:
+      - generic:
+        - generic: Export
+      - generic:
+        - generic: Import
