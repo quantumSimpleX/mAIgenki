@@ -44,6 +44,16 @@ const RAMP_HOLD_MS = 1000
 const RAMP_DOWN_MS = 1250
 const RAMP_STAGGER_MS = RAMP_UP_MS + RAMP_HOLD_MS
 const ROW_OFFSET_VIEWPORT_RATIO = 0.17
+const ASSET_BASE_SCALE = 0.92169
+
+function clamp(n: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, n))
+}
+
+function assetScaleForWidth(width: number): number {
+  const t = clamp((width - 360) / (980 - 360), 0, 1)
+  return 0.9 + t * 0.1
+}
 
 function Logo({ fontScale }: { fontScale: number }) {
   return (
@@ -144,12 +154,13 @@ function AnatomyLayerPreview({ onTopChange }: { onTopChange: (top: number) => vo
   const topReserve = IS_WEB ? scaled(128, fontScale) : 92
   const headlineBottom = IS_WEB ? scaled(136, fontScale) : 102
   const rowOffset = rowGroups.length === 1 ? 0 : height * ROW_OFFSET_VIEWPORT_RATIO
-  const baseImageH = Math.max(IS_WEB ? 400 : 288, Math.min((height - topReserve - bottomOffset) * 1.25, IS_WEB ? 775 : 538)) * 0.92169
+  const assetScale = ASSET_BASE_SCALE * assetScaleForWidth(width)
+  const baseImageH = Math.max(IS_WEB ? 400 : 288, Math.min((height - topReserve - bottomOffset) * 1.25, IS_WEB ? 775 : 538)) * assetScale
   const twoRowMaxH = Math.max(1, height - bottomOffset - headlineBottom - rowOffset)
   const imageH = rowGroups.length === 2 ? Math.min(baseImageH, twoRowMaxH) : baseImageH
   const previewH = imageH + (rowGroups.length - 1) * rowOffset
   const slotW = rowW / maxRowCount
-  const imageW = Math.max(slotW * 1.75 * 0.92169, imageH / 2.39)
+  const imageW = Math.max(slotW * 1.75 * assetScale, imageH / 2.39)
   const previewTop = height - bottomOffset - previewH
   const layerTop = (rowGroups.length === 1 ? previewTop : Math.max(headlineBottom, previewTop)) - 30
 
