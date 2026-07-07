@@ -11,9 +11,12 @@ import Svg, {
   Circle, Ellipse, G, Line, Path as SvgPath, Rect,
 } from 'react-native-svg'
 import { Image } from 'expo-image'
-import { useLocalSearchParams } from 'expo-router'
+import * as DocumentPicker from 'expo-document-picker'
+import * as ImagePicker from 'expo-image-picker'
+import { router, useLocalSearchParams } from 'expo-router'
 import { QSWordmark } from '@/components/QSWordmark'
-import { useAppStore, Gender } from '@/store/useAppStore'
+import { useAppStore } from '@/store/useAppStore'
+import type { Gender, PendingUpload } from '@/store/useAppStore'
 import { useConditions, useConditionRecords } from '@/hooks/useConditions'
 import {
   ALL_SYSTEMS, ConditionRecord, DesignCondition, SystemId,
@@ -58,22 +61,77 @@ const K = 2.5
 const FALLBACK_MIN = 2013
 const FALLBACK_MAX = 2025
 
+function clamp01(n: number): number {
+  return Math.max(0, Math.min(1, n))
+}
+
 function toLinear(yearFrac: number, rMin: number, rMax: number): number {
-  return Math.max(0, Math.min(1, (yearFrac - rMin) / (rMax - rMin)))
+  if (rMax <= rMin) return 1
+  return clamp01((yearFrac - rMin) / (rMax - rMin))
 }
 function toLogFrac(yearFrac: number, rMin: number, rMax: number): number {
   const t = toLinear(yearFrac, rMin, rMax)
-  return (Math.exp(K * t) - 1) / (Math.exp(K) - 1)
+  return Math.log1p(K * t) / Math.log1p(K)
 }
-function toVertPos(yearFrac: number, railH: number, rMin: number, rMax: number): number {
-  return (1 - toLogFrac(yearFrac, rMin, rMax)) * railH
+function railEdgeGap(railH: number): number {
+  return Math.min(sc(24), Math.max(sc(12), railH * 0.055))
 }
-function fromVertPos(posY: number, railH: number, rMin: number, rMax: number): number {
+
+function toVertPos(
+  yearFrac: number,
+  railH: number,
+  rMin: number,
+  rMax: number,
+  dataMin = rMin,
+  dataMax = rMax,
+): number {
+  if (dataMax <= dataMin || dataMin <= rMin || dataMax >= rMax) {
+    return (1 - toLogFrac(yearFrac, rMin, rMax)) * railH
+  }
+  const gap = Math.min(railEdgeGap(railH), railH / 4)
+  if (yearFrac <= dataMin) {
+    return railH - gap * toLinear(yearFrac, rMin, dataMin)
+  }
+  if (yearFrac >= dataMax) {
+    return gap * (1 - toLinear(yearFrac, dataMax, rMax))
+  }
+  return gap + (1 - toLogFrac(yearFrac, dataMin, dataMax)) * Math.max(1, railH - gap * 2)
+}
+
+function fromVertPos(
+  posY: number,
+  railH: number,
+  rMin: number,
+  rMax: number,
+  dataMin = rMin,
+  dataMax = rMax,
+): number {
   if (railH <= 0) return rMax
-  const frac = 1 - posY / railH
-  const clamped = Math.max(0, Math.min(1, frac))
-  const t = Math.log(clamped * (Math.exp(K) - 1) + 1) / K
+  const y = Math.max(0, Math.min(railH, posY))
+  if (dataMax > dataMin && dataMin > rMin && dataMax < rMax) {
+    const gap = Math.min(railEdgeGap(railH), railH / 4)
+    if (y >= railH - gap) {
+      return rMin + ((railH - y) / gap) * (dataMin - rMin)
+    }
+    if (y <= gap) {
+      return dataMax + ((gap - y) / gap) * (rMax - dataMax)
+    }
+    const frac = 1 - (y - gap) / Math.max(1, railH - gap * 2)
+    const t = Math.expm1(clamp01(frac) * Math.log1p(K)) / K
+    return dataMin + t * (dataMax - dataMin)
+  }
+  const frac = 1 - y / railH
+  const t = Math.expm1(clamp01(frac) * Math.log1p(K)) / K
   return rMin + t * (rMax - rMin)
+}
+
+function clampRailYear(yearFrac: number, rMin: number, rMax: number): number {
+  return Math.max(rMin, Math.min(rMax, yearFrac))
+}
+
+function conditionYear(c: DesignCondition, overrides: Record<string, string>): number {
+  const override = overrides[c.id] ? parseFloat(overrides[c.id]) : NaN
+  return Number.isFinite(override) ? override : c.yearFrac
 }
 
 const DISCLAIMER = 'Educational only. Not medical advice. Never a substitute for professional clinical judgment.'
@@ -632,6 +690,8 @@ function ConditionRipples({
 // the rail is always expanded so it's draggable without a prior tap.
 const RAIL_W_INACTIVE = IS_DESKTOP ? sc(14) : sc(18)
 const RAIL_W_ACTIVE   = IS_DESKTOP ? sc(18) : sc(18)
+const RAIL_RANGE_PAD_BEFORE = 2 / 12
+const RAIL_RANGE_PAD_AFTER = 1 / 12
 
 function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const {
@@ -650,14 +710,18 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const railRef = useRef<View>(null)
   const railTopRef = useRef(0)
 
-  // Dynamic range: 1 month after the latest (top, high-density end of log scale → ~17px gap).
-  // Bottom (low-density end) needs ~12× more time to produce the same pixel gap, so use 1 year.
-  const railMin = conditions.length > 0
-    ? Math.min(...conditions.map((c) => c.yearFrac)) - 1
+  const railYears = conditions
+    .map((c) => conditionYear(c, condDateOverrides))
+    .filter((year) => Number.isFinite(year))
+  // Dynamic range: leave 2 months before earliest and 1 month after latest.
+  const railMin = railYears.length > 0
+    ? Math.min(...railYears) - RAIL_RANGE_PAD_BEFORE
     : FALLBACK_MIN
-  const railMax = conditions.length > 0
-    ? Math.max(...conditions.map((c) => c.yearFrac)) + 1 / 12
+  const railMax = railYears.length > 0
+    ? Math.max(...railYears) + RAIL_RANGE_PAD_AFTER
     : FALLBACK_MAX
+  const dataMin = railYears.length > 0 ? Math.min(...railYears) : railMin
+  const dataMax = railYears.length > 0 ? Math.max(...railYears) : railMax
 
   // On web the rail is always expanded — never collapses.
   useEffect(() => {
@@ -680,21 +744,31 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   function snapToNearest(posY: number) {
     // Clamp the cursor to the rail so the thumb tracks the mouse exactly while dragging.
     const clampedY = Math.max(0, Math.min(railH, posY))
-    const rawYear = fromVertPos(clampedY, railH, railMin, railMax)
-    const visible = conditions.filter((c) => activeSystems.includes(c.system))
+    const rawYear = clampRailYear(
+      fromVertPos(clampedY, railH, railMin, railMax, dataMin, dataMax),
+      railMin,
+      railMax,
+    )
+    if (posY <= 0 || posY >= railH) {
+      setCurrentYear(rawYear)
+      return
+    }
+    const visible = conditions
+      .filter((c) => activeSystems.includes(c.system))
+      .map((c) => conditionYear(c, condDateOverrides))
+      .filter((year) => Number.isFinite(year))
     if (visible.length === 0) {
       setCurrentYear(rawYear)
       return
     }
-    let nearestFrac = visible[0].yearFrac
+    let nearestFrac = visible[0]
     let minPxDist = Infinity
-    for (const c of visible) {
-      const cFrac = condDateOverrides[c.id] ? parseFloat(condDateOverrides[c.id]) : c.yearFrac
-      const pxDist = Math.abs(toVertPos(cFrac, railH, railMin, railMax) - clampedY)
+    for (const cFrac of visible) {
+      const pxDist = Math.abs(toVertPos(cFrac, railH, railMin, railMax, dataMin, dataMax) - clampedY)
       if (pxDist < minPxDist) { minPxDist = pxDist; nearestFrac = cFrac }
     }
     const threshold = railH * 0.01
-    setCurrentYear(minPxDist <= threshold ? nearestFrac : rawYear)
+    setCurrentYear(clampRailYear(minPxDist <= threshold ? nearestFrac : rawYear, railMin, railMax))
   }
 
   // Window-level drag listeners (web). react-native-web's responder stops
@@ -775,7 +849,14 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
     }
   }, [])
 
-  const thumbTop = toVertPos(currentYear, railH, railMin, railMax)
+  const thumbTop = toVertPos(
+    clampRailYear(currentYear, railMin, railMax),
+    railH,
+    railMin,
+    railMax,
+    dataMin,
+    dataMax,
+  )
 
   return (
     <Animated.View
@@ -812,8 +893,8 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       {conditions
         .filter((c) => activeSystems.includes(c.system))
         .map((c) => {
-          const frac = condDateOverrides[c.id] ? parseFloat(condDateOverrides[c.id]) : c.yearFrac
-          const top = toVertPos(frac, railH, railMin, railMax)
+          const frac = conditionYear(c, condDateOverrides)
+          const top = toVertPos(frac, railH, railMin, railMax, dataMin, dataMax)
           const isSelected = selectedCondition?.id === c.id
           return (
             <View
@@ -1009,8 +1090,6 @@ function ConditionSheet() {
         },
       ]}
     >
-      <View style={styles.sheetHandle} />
-
       {/* Header. Chat mode keeps the condition name (compressed); the detail
           card shows only the organ-system label here, since the condition name
           appears once in the large title below — no repeating it. */}
@@ -1048,7 +1127,7 @@ function ConditionSheet() {
           )}
         </View>
         <TouchableOpacity onPress={closeSheet} hitSlop={12}>
-          <Text style={styles.sheetCloseBtn}>↓</Text>
+          <Text style={styles.sheetCloseBtn}>✕</Text>
         </TouchableOpacity>
       </View>
 
@@ -1418,7 +1497,6 @@ function SettingsSheet() {
       pointerEvents={settingsOpen ? 'auto' : 'none'}
       style={[styles.settingsSheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY }] }]}
     >
-      <View style={styles.sheetHandle} />
       <View style={styles.settingsHeader}>
         <Text style={styles.settingsTitle}>Settings</Text>
         <TouchableOpacity onPress={toggleSettings} hitSlop={12}>
@@ -1525,6 +1603,18 @@ function SettingsSheet() {
 
 // ─── Upload Shortcuts ─────────────────────────────────────────────────────────
 
+type PickedUploadAsset = {
+  uri: string
+  name?: string | null
+  mimeType?: string | null
+}
+
+function pickedUploadKind(asset: PickedUploadAsset): PendingUpload['kind'] {
+  const mimeType = asset.mimeType?.toLowerCase() ?? ''
+  const name = asset.name?.toLowerCase() ?? asset.uri.toLowerCase()
+  return mimeType.includes('pdf') || name.endsWith('.pdf') ? 'pdf' : 'image'
+}
+
 function UploadShortcuts({
   onResetView, viewTransformed,
 }: {
@@ -1533,10 +1623,47 @@ function UploadShortcuts({
 }) {
   const {
     uploadPanelOpen, setUploadPanelOpen,
-    startAnalyze, openHealthChat,
+    startAnalyze, openHealthChat, setPendingUpload, setPipelineError,
   } = useAppStore()
 
   const btnsOpacity = !uploadPanelOpen ? 0 : 1
+
+  function beginUpload(upload: PendingUpload) {
+    setPendingUpload(upload)
+    startAnalyze()
+    router.push('/analyzing')
+  }
+
+  async function handlePickFile() {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/pdf', 'image/*'],
+        copyToCacheDirectory: true,
+      })
+      if (result.canceled) return
+      const asset = result.assets[0]
+      if (!asset?.uri) return
+      beginUpload({ uri: asset.uri, kind: pickedUploadKind(asset) })
+    } catch {
+      setPipelineError('Could not open file picker.')
+    }
+  }
+
+  async function handleCamera() {
+    if (IS_WEB) {
+      await handlePickFile()
+      return
+    }
+    try {
+      const result = await ImagePicker.launchCameraAsync({ quality: 0.85 })
+      if (result.canceled) return
+      const uri = result.assets[0]?.uri
+      if (!uri) return
+      beginUpload({ uri, kind: 'image' })
+    } catch {
+      setPipelineError('Could not open camera.')
+    }
+  }
 
   return (
     <View style={styles.uploadWrap}>
@@ -1553,7 +1680,7 @@ function UploadShortcuts({
         <Pressable
           style={[styles.uploadBtns, { opacity: btnsOpacity }]}
         >
-          <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
+          <TouchableOpacity style={styles.uploadShortcut} onPress={handlePickFile}>
             <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
               <SvgPath d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
                 stroke={C.purpleLight} strokeWidth={1.6} fill="none" strokeLinejoin="round" />
@@ -1562,18 +1689,11 @@ function UploadShortcuts({
                 strokeLinecap="round" strokeLinejoin="round" fill="none" />
             </Svg>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
+          <TouchableOpacity style={styles.uploadShortcut} onPress={handleCamera}>
             <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
               <Rect x={3} y={7} width={18} height={13} rx={2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
               <Circle cx={12} cy={13} r={3.2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
               <SvgPath d="M8 7l1.5-2h5L16 7" stroke={C.aqua} strokeWidth={1.6} fill="none" />
-            </Svg>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.uploadShortcut} onPress={startAnalyze}>
-            <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
-              <Rect x={3} y={4} width={18} height={16} rx={2} stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
-              <Circle cx={8.5} cy={9} r={1.6} fill={C.purpleLight} />
-              <SvgPath d="M5 18l5-5 4 3 3-3 4 4" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
             </Svg>
           </TouchableOpacity>
           <TouchableOpacity style={styles.uploadShortcutChat} onPress={openHealthChat}>
@@ -1641,12 +1761,22 @@ export default function BodyMapScreen() {
 
   useEffect(() => {
     if (conditions.length === 0) return
-    const years = conditions.map((c) => c.yearFrac).filter((year) => Number.isFinite(year))
+    const years = conditions
+      .map((c) => conditionYear(c, condDateOverrides))
+      .filter((year) => Number.isFinite(year))
     if (years.length === 0) return
     const newest = Math.max(...years)
     const oldest = Math.min(...years)
-    if (lastUploadResult || currentYear < oldest) setCurrentYear(newest)
-  }, [lastUploadResult, conditions, currentYear, setCurrentYear])
+    const railMin = oldest - RAIL_RANGE_PAD_BEFORE
+    const railMax = newest + RAIL_RANGE_PAD_AFTER
+    if (lastUploadResult) {
+      setCurrentYear(newest)
+    } else if (currentYear < railMin) {
+      setCurrentYear(railMin)
+    } else if (currentYear > railMax) {
+      setCurrentYear(railMax)
+    }
+  }, [lastUploadResult, conditions, condDateOverrides, currentYear, setCurrentYear])
 
   // ── One-time gender prompt (Phase 9.7.3) ──
   function chooseGender(g: Gender) {
@@ -2043,7 +2173,6 @@ const styles = StyleSheet.create({
       : { shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 20 }),
     zIndex: 10,
   },
-  sheetHandle: { width: sc(34), height: sc(4), borderRadius: sc(2), backgroundColor: 'rgba(255,255,255,0.14)', alignSelf: 'center', marginBottom: sc(14) },
   sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: sc(10), marginBottom: sc(8) },
   sysDot: { width: sc(8), height: sc(8), borderRadius: sc(4) },
   sheetCondName: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(14), color: C.ink, flex: 1 },
