@@ -23,6 +23,7 @@ import {
   SYSTEM_META, SupportedLang, getLocalName, getSvgX, getSvgY,
 } from '@/model/conditions'
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
+import { openQSWebsite } from '@/lib/links'
 import { useOptionalDatabase } from '@/lib/db/provider'
 import { updateConditionPosition, upsertSetting } from '@/lib/db/queries'
 import { exportBackupToFile, pickAndReadBackup, restoreBackup } from '@/lib/db/backup'
@@ -1684,17 +1685,13 @@ function pickedUploadKind(asset: PickedUploadAsset): PendingUpload['kind'] {
 }
 
 function UploadShortcuts({
-  onResetView, viewTransformed,
+  onResetView,
 }: {
   onResetView: () => void
-  viewTransformed: boolean
 }) {
   const {
-    uploadPanelOpen, setUploadPanelOpen,
     startAnalyze, openHealthChat, setPendingUpload, setPipelineError,
   } = useAppStore()
-
-  const btnsOpacity = !uploadPanelOpen ? 0 : 1
 
   function beginUpload(upload: PendingUpload) {
     setPendingUpload(upload)
@@ -1735,41 +1732,34 @@ function UploadShortcuts({
 
   return (
     <View style={styles.uploadWrap}>
-      {/* Resets body-map zoom/pan; only shown once the view has been moved */}
-      {viewTransformed && (
-        <TouchableOpacity style={styles.resetViewBtn} onPress={onResetView}>
-          <Svg width={fs(14)} height={fs(14)} viewBox="0 0 24 24" fill="none">
-            <SvgPath d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8" stroke={C.inkMuted} strokeWidth={1.8} strokeLinecap="round" />
-            <SvgPath d="M3 3v5h5" stroke={C.inkMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+      <TouchableOpacity style={styles.resetViewBtn} onPress={onResetView}>
+        <Svg width={fs(14)} height={fs(14)} viewBox="0 0 24 24" fill="none">
+          <SvgPath d="M3 12a9 9 0 1 0 9-9 9 9 0 0 0-6.36 2.64L3 8" stroke={C.inkMuted} strokeWidth={1.8} strokeLinecap="round" />
+          <SvgPath d="M3 3v5h5" stroke={C.inkMuted} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+      </TouchableOpacity>
+      <Pressable style={styles.uploadBtns}>
+        <TouchableOpacity style={styles.uploadShortcut} onPress={handlePickFile}>
+          <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
+            <SvgPath d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
+              stroke={C.purpleLight} strokeWidth={1.6} fill="none" strokeLinejoin="round" />
+            <SvgPath d="M14 2v6h6" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
+            <SvgPath d="M12 18v-6M9 15l3-3 3 3" stroke={C.purpleLight} strokeWidth={1.6}
+              strokeLinecap="round" strokeLinejoin="round" fill="none" />
           </Svg>
         </TouchableOpacity>
-      )}
-      {uploadPanelOpen && (
-        <Pressable
-          style={[styles.uploadBtns, { opacity: btnsOpacity }]}
-        >
-          <TouchableOpacity style={styles.uploadShortcut} onPress={handlePickFile}>
-            <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
-              <SvgPath d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"
-                stroke={C.purpleLight} strokeWidth={1.6} fill="none" strokeLinejoin="round" />
-              <SvgPath d="M14 2v6h6" stroke={C.purpleLight} strokeWidth={1.6} fill="none" />
-              <SvgPath d="M12 18v-6M9 15l3-3 3 3" stroke={C.purpleLight} strokeWidth={1.6}
-                strokeLinecap="round" strokeLinejoin="round" fill="none" />
-            </Svg>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.uploadShortcut} onPress={handleCamera}>
-            <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
-              <Rect x={3} y={7} width={18} height={13} rx={2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
-              <Circle cx={12} cy={13} r={3.2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
-              <SvgPath d="M8 7l1.5-2h5L16 7" stroke={C.aqua} strokeWidth={1.6} fill="none" />
-            </Svg>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.uploadShortcutChat} onPress={openHealthChat}>
-            <ChatBubbleIcon color={C.purpleLight} size={fs(14)} />
-          </TouchableOpacity>
-        </Pressable>
-      )}
-      <TouchableOpacity style={styles.qsWordmark} onPress={() => setUploadPanelOpen(!uploadPanelOpen)}>
+        <TouchableOpacity style={styles.uploadShortcut} onPress={handleCamera}>
+          <Svg width={fs(16)} height={fs(16)} viewBox="0 0 24 24" fill="none">
+            <Rect x={3} y={7} width={18} height={13} rx={2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
+            <Circle cx={12} cy={13} r={3.2} stroke={C.aqua} strokeWidth={1.6} fill="none" />
+            <SvgPath d="M8 7l1.5-2h5L16 7" stroke={C.aqua} strokeWidth={1.6} fill="none" />
+          </Svg>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.uploadShortcutChat} onPress={openHealthChat}>
+          <ChatBubbleIcon color={C.purpleLight} size={fs(14)} />
+        </TouchableOpacity>
+      </Pressable>
+      <TouchableOpacity style={styles.qsWordmark} onPress={openQSWebsite}>
         <QSWordmark size={fs(28)} onDark={true} />
       </TouchableOpacity>
     </View>
@@ -2050,8 +2040,6 @@ export default function BodyMapScreen() {
     onResponderTerminate: () => { gesture.current.mode = 0 },
   }
 
-  const viewTransformed = view.scale !== 1 || view.tx !== 0 || view.ty !== 0
-
   return (
     <View
       style={styles.root}
@@ -2110,7 +2098,7 @@ export default function BodyMapScreen() {
 
           <LegendPanel />
           <VerticalTimeRail conditions={conditions} />
-          <UploadShortcuts onResetView={resetView} viewTransformed={viewTransformed} />
+          <UploadShortcuts onResetView={resetView} />
         </View>
       </SafeAreaView>
 

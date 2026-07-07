@@ -10,6 +10,7 @@ import { useAppStore, PendingUpload } from '@/store/useAppStore'
 import { useConditions } from '@/hooks/useConditions'
 import { QSWordmark } from '@/components/QSWordmark'
 import { IS_DESKTOP, IS_WEB, S } from '@/lib/scale'
+import { openQSWebsite } from '@/lib/links'
 
 const C = {
   bg: '#FAFAF7',
@@ -79,12 +80,12 @@ function QSBadge({ s, size }: { s: Styles; size: number }) {
   const textIndent = size + 1
   const builtByFs = Math.round(size * 0.4)
   return (
-    <View style={[s.qsWrap, { pointerEvents: 'none' }]}>
+    <TouchableOpacity style={s.qsWrap} onPress={openQSWebsite} activeOpacity={0.7}>
       <Text style={[s.qsBuiltBy, { marginLeft: textIndent, fontSize: builtByFs, letterSpacing: builtByFs * 0.34 }]}>
         BUILT BY
       </Text>
       <QSWordmark size={size} onDark={false} />
-    </View>
+    </TouchableOpacity>
   )
 }
 
