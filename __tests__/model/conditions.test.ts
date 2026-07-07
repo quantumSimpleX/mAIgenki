@@ -1,6 +1,6 @@
 import {
   ALL_SYSTEMS, CONDITIONS, CONDITION_RECORDS, SYSTEM_META,
-  parseDateFrac, getLocalName,
+  parseDateFrac, getLocalName, normalizeSystemId, defaultConditionPosition,
 } from '@/model/conditions'
 
 const htn = CONDITIONS.find((c) => c.id === 'htn')!
@@ -16,6 +16,24 @@ describe('parseDateFrac', () => {
   })
   it('maps a late-year date past .9', () => {
     expect(parseDateFrac('2023-DEC-31')).toBeGreaterThan(2023.9)
+  })
+  it('maps LLM numeric dates', () => {
+    expect(parseDateFrac('2026-07-07')).toBeGreaterThan(2026.5)
+    expect(parseDateFrac('2026-07-07')).toBeLessThan(2026.6)
+  })
+})
+
+describe('LLM condition mapping', () => {
+  it('normalizes shorthand system ids to bodymap ids', () => {
+    expect(normalizeSystemId('cardio')).toBe('cardiovascular')
+    expect(normalizeSystemId('gi')).toBe('digestive')
+    expect(normalizeSystemId('endo')).toBe('endocrine')
+    expect(normalizeSystemId('pulm')).toBe('respiratory')
+  })
+  it('returns visible default positions for non-demo rows', () => {
+    const pos = defaultConditionPosition('cardiovascular', 'Essential hypertension')
+    expect(pos.cx).toBeGreaterThan(0)
+    expect(pos.cy).toBeGreaterThan(0)
   })
 })
 

@@ -63,7 +63,7 @@ Always respond with a single JSON object — no markdown, no explanation. The JS
     {
       "name_medical": "standardized English medical name (e.g. Essential hypertension)",
       "name_common": "plain English name or null",
-      "system": "one of: integ, muscle, skeletal, cardio, lymph, neuro, pulm, gi, renal, endo, repro",
+      "system": "one of: integumentary, muscular, skeletal, cardiovascular, nervous, digestive, respiratory, renal, lymphatic, endocrine, reproductive",
       "organ": "specific organ or null",
       "anatomical_location": "specific location or null",
       "status": "documented | resolved | suspected",

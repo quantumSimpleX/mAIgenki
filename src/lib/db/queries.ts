@@ -7,7 +7,10 @@ import {
 } from './schema'
 import {
   CONDITIONS,
-  type ConditionRecord, type DesignCondition, type SupportedLang, type SystemId,
+  defaultConditionPosition,
+  normalizeSystemId,
+  parseDateFrac,
+  type ConditionRecord, type DesignCondition, type SupportedLang,
 } from '@/model/conditions'
 
 // ── UUID ──────────────────────────────────────────────────────────────────────
@@ -134,6 +137,9 @@ type ConditionInput = {
   laterality?: string | null
   renderX?: number | null
   renderY?: number | null
+  cxPercent?: number | null
+  cyPercent?: number | null
+  yearFrac?: number | null
   status?: string
   severity?: string | null
   chronicity?: string | null
@@ -150,12 +156,17 @@ export async function insertCondition(
   input: ConditionInput,
 ): Promise<string> {
   const id = uuid()
+  const system = normalizeSystemId(input.system)
+  const seed = `${input.nameMedical}:${input.organ ?? ''}:${input.anatomicalLocation ?? ''}`
+  const pos = defaultConditionPosition(system, seed)
+  const dateForTimeline = input.dateDiagnosed ?? input.dateOnset ?? new Date().toISOString().slice(0, 10)
+  const yearFrac = input.yearFrac ?? parseDateFrac(dateForTimeline)
   await db.runAsync(
     `INSERT INTO conditions (
        id, record_id, name_medical, name_common, icd_code,
        system, organ, tissue, cell_type,
        anatomical_location, anatomical_region, laterality,
-       render_x, render_y,
+       render_x, render_y, cx, cy, year_frac,
        status, severity, chronicity, certainty,
        date_onset, date_diagnosed, date_resolved,
        evidence, notes
@@ -163,16 +174,16 @@ export async function insertCondition(
        ?, ?, ?, ?, ?,
        ?, ?, ?, ?,
        ?, ?, ?,
-       ?, ?,
+       ?, ?, ?, ?, ?,
        ?, ?, ?, ?,
        ?, ?, ?,
        ?, ?
      )`,
     [
       id, input.recordId ?? null, input.nameMedical, input.nameCommon ?? null, input.icdCode ?? null,
-      input.system, input.organ ?? null, input.tissue ?? null, input.cellType ?? null,
+      system, input.organ ?? null, input.tissue ?? null, input.cellType ?? null,
       input.anatomicalLocation ?? null, input.anatomicalRegion ?? null, input.laterality ?? null,
-      input.renderX ?? null, input.renderY ?? null,
+      input.renderX ?? null, input.renderY ?? null, input.cxPercent ?? pos.cx, input.cyPercent ?? pos.cy, yearFrac,
       input.status ?? 'documented', input.severity ?? null, input.chronicity ?? null, input.certainty ?? 'confirmed',
       input.dateOnset ?? null, input.dateDiagnosed ?? null, input.dateResolved ?? null,
       input.evidence ?? null, input.notes ?? null,
@@ -416,29 +427,40 @@ export async function getLocalNamesForCondition(
 // Returns all seeded conditions mapped onto the DesignCondition shape the body
 // map renders. English label comes from name_common; medName from name_medical.
 export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition[]> {
+  const records = await db.getAllAsync<{ id: string; record_type: string | null }>(
+    'SELECT id, record_type FROM health_records',
+  )
+  const hasUserRecords = records.some((record) => record.record_type !== 'demo')
+  const demoRecordIds = new Set(records.filter((record) => record.record_type === 'demo').map((record) => record.id))
   const rows = await db.getAllAsync<ConditionRow & {
     cx: number | null
     cy: number | null
     year_frac: number | null
   }>('SELECT * FROM conditions ORDER BY year_frac ASC')
+  const visibleRows = hasUserRecords
+    ? rows.filter((row) => !row.record_id || !demoRecordIds.has(row.record_id))
+    : rows
 
   const result: DesignCondition[] = []
-  for (const row of rows) {
+  for (const row of visibleRows) {
     const localNames = await getLocalNamesForCondition(db, row.id)
     // Fall back to hardcoded positions when null — covers old DBs where cx/cy
     // columns were added via ALTER TABLE and migration hasn't populated them yet.
+    const system = normalizeSystemId(row.system)
     const hardcoded = CONDITIONS.find((c) => c.id === row.id)
+    const fallbackPos = defaultConditionPosition(system, `${row.name_medical}:${row.organ ?? ''}:${row.anatomical_location ?? ''}`)
+    const date = row.date_diagnosed ?? row.date_onset ?? ''
     result.push({
       id: row.id,
-      system: row.system as SystemId,
+      system,
       label: row.name_common ?? row.name_medical,
       medName: row.name_medical,
       localNames,
-      date: row.date_diagnosed ?? row.date_onset ?? '',
-      yearFrac: row.year_frac ?? 0,
+      date,
+      yearFrac: row.year_frac ?? (date ? parseDateFrac(date) : 0),
       // Use != null (not ??) so explicit 0 values from a broken migration also fall back.
-      cx_percent: row.cx != null && row.cx !== 0 ? row.cx : (hardcoded?.cx_percent ?? 0),
-      cy_percent: row.cy != null && row.cy !== 0 ? row.cy : (hardcoded?.cy_percent ?? 0),
+      cx_percent: row.cx != null && row.cx !== 0 ? row.cx : (hardcoded?.cx_percent ?? fallbackPos.cx),
+      cy_percent: row.cy != null && row.cy !== 0 ? row.cy : (hardcoded?.cy_percent ?? fallbackPos.cy),
       note: row.notes ?? '',
       evidence: row.evidence ?? '',
     })

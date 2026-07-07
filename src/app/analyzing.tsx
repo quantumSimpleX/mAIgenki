@@ -1,21 +1,20 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { router } from 'expo-router'
 import {
-  Animated, Dimensions, Easing, Platform, StyleSheet, Text, TouchableOpacity, View,
+  Animated, Easing, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import Svg, {
-  Circle, Defs, Ellipse, LinearGradient, Path, Rect, Stop,
+  Defs, LinearGradient, Rect, Stop,
 } from 'react-native-svg'
+import { Image } from 'expo-image'
 import { useAppStore } from '@/store/useAppStore'
-import { useOptionalDatabase } from '@/lib/db/provider'
-import { getSetting } from '@/lib/db/queries'
-import { processHealthRecord } from '@/lib/pipeline'
+import { ALL_SYSTEMS, type SystemId } from '@/model/conditions'
 
-const { width: SW } = Dimensions.get('window')
-const TRACK_W = SW - 64
 // The native animation driver is absent on web; using it there only warns.
 const IS_WEB = Platform.OS === 'web'
+const WEB_FONT_SCALE = IS_WEB ? 1.75 : 1
+const ff = (n: number): number => Math.round(n * WEB_FONT_SCALE)
 
 const C = {
   bg: '#0A0E14',
@@ -25,19 +24,17 @@ const C = {
   purpleLight: '#8A60EB',
   aqua: '#1FC3A4',
   pending: '#1E2535',
-  procText: '#3A434F',
+  procText: 'rgba(250,250,247,0.78)',
 }
 
 const PHASES = ['Reading records', 'Extracting diagnoses', 'Mapping anatomy', 'Building story']
-
-const DOT_POS: [number, number][] = [
-  [90, 55], [62, 92], [118, 92], [90, 115], [90, 155], [90, 230], [90, 270],
-]
-
-const AnimatedPath = Animated.createAnimatedComponent(Path)
-const AnimatedCircle = Animated.createAnimatedComponent(Circle)
-
-const TORSO_DASH = 1300
+const RAMP_LOW = 0.25
+const RAMP_HIGH = 0.85
+const RAMP_UP_MS = 1250
+const RAMP_HOLD_MS = 1000
+const RAMP_DOWN_MS = 1250
+const RAMP_STAGGER_MS = RAMP_UP_MS + RAMP_HOLD_MS
+const ROW_OFFSET_VIEWPORT_RATIO = 0.17
 
 function Logo() {
   return (
@@ -49,49 +46,137 @@ function Logo() {
   )
 }
 
-function BodySilhouette({ reveal }: { reveal: Animated.Value }) {
-  const dashOffset = reveal.interpolate({ inputRange: [0, 1], outputRange: [TORSO_DASH, 0] })
-  return (
-    <Svg width={180} height={340} viewBox="0 0 180 340" fill="none">
-      <Ellipse cx={90} cy={32} rx={26} ry={30} stroke="#2A3040" strokeWidth={1.5} />
-      <Path d="M79 60 L79 78 M101 60 L101 78" stroke="#2A3040" strokeWidth={1.5} />
-      <AnimatedPath
-        d="M55 78 Q42 90 40 130 L36 210 Q36 230 55 234 L55 280 Q55 295 68 295 L112 295 Q125 295 125 280 L125 234 Q144 230 144 210 L140 130 Q138 90 125 78 Z"
-        stroke={C.purpleLight} strokeWidth={1.5} fill="transparent"
-        strokeDasharray={TORSO_DASH} strokeDashoffset={dashOffset}
-      />
-      <Path d="M55 82 Q32 100 24 155 Q22 170 26 180 Q30 188 38 184 Q44 178 46 160 L52 118" stroke="#2A3040" strokeWidth={1.5} fill="transparent" />
-      <Path d="M125 82 Q148 100 156 155 Q158 170 154 180 Q150 188 142 184 Q136 178 134 160 L128 118" stroke="#2A3040" strokeWidth={1.5} fill="transparent" />
-      <Path d="M68 295 L62 380 Q60 400 70 400 Q80 400 82 380 L84 310" stroke="#2A3040" strokeWidth={1.5} fill="transparent" />
-      <Path d="M112 295 L118 380 Q120 400 110 400 Q100 400 98 380 L96 310" stroke="#2A3040" strokeWidth={1.5} fill="transparent" />
-    </Svg>
-  )
+const INGEST_LAYERS: Record<SystemId, number> = {
+  integumentary: require('../../assets/maigenki-systems-2colorized/00-integumentary.png'),
+  muscular: require('../../assets/maigenki-systems-2colorized/01-muscular.png'),
+  skeletal: require('../../assets/maigenki-systems-2colorized/02-skeletal.png'),
+  cardiovascular: require('../../assets/maigenki-systems-2colorized/03-cardiovascular.png'),
+  nervous: require('../../assets/maigenki-systems-2colorized/04-nervous.png'),
+  digestive: require('../../assets/maigenki-systems-2colorized/05-digestive.png'),
+  respiratory: require('../../assets/maigenki-systems-2colorized/06-respiratory.png'),
+  renal: require('../../assets/maigenki-systems-2colorized/07-renal.png'),
+  lymphatic: require('../../assets/maigenki-systems-2colorized/08-lymphatic.png'),
+  endocrine: require('../../assets/maigenki-systems-2colorized/09-endocrine.png'),
+  reproductive: require('../../assets/maigenki-systems-2colorized/10-reproductive-m.png'),
 }
 
-function BlinkingDots() {
-  const [anims] = useState(() => DOT_POS.map(() => new Animated.Value(0.2)))
+const PREVIEW_SYSTEMS = ALL_SYSTEMS.filter((system) => system !== 'reproductive')
+
+function randomNextLayerIndex(count: number, previousIndex: number): number {
+  if (count <= 1) return 0
+  if (previousIndex < 0) return Math.floor(Math.random() * count)
+
+  const next = Math.floor(Math.random() * (count - 1))
+  return next >= previousIndex ? next + 1 : next
+}
+
+function layerOpacityRamp(anim: Animated.Value): Animated.CompositeAnimation {
+  return Animated.sequence([
+    Animated.timing(anim, {
+      toValue: RAMP_HIGH,
+      duration: RAMP_UP_MS,
+      easing: Easing.inOut(Easing.ease),
+      useNativeDriver: !IS_WEB,
+    }),
+    Animated.delay(RAMP_HOLD_MS),
+    Animated.timing(anim, {
+      toValue: RAMP_LOW,
+      duration: RAMP_DOWN_MS,
+      easing: Easing.inOut(Easing.ease),
+      useNativeDriver: !IS_WEB,
+    }),
+  ])
+}
+
+function runRandomOpacityRamps(opacityAnims: Animated.Value[]): () => void {
+  let stopped = false
+  let previousIndex = -1
+  let nextTimer: ReturnType<typeof setTimeout> | null = null
+  const activeAnimations: Animated.CompositeAnimation[] = []
+
+  const queueNext = () => {
+    if (stopped) return
+
+    const index = randomNextLayerIndex(opacityAnims.length, previousIndex)
+    previousIndex = index
+
+    const animation = layerOpacityRamp(opacityAnims[index])
+    activeAnimations.push(animation)
+    animation.start(() => {
+      const animationIndex = activeAnimations.indexOf(animation)
+      if (animationIndex >= 0) activeAnimations.splice(animationIndex, 1)
+    })
+    nextTimer = setTimeout(queueNext, RAMP_STAGGER_MS)
+  }
+
+  queueNext()
+
+  return () => {
+    stopped = true
+    if (nextTimer) clearTimeout(nextTimer)
+    activeAnimations.forEach((animation) => animation.stop())
+  }
+}
+
+function AnatomyLayerPreview({ onTopChange }: { onTopChange: (top: number) => void }) {
+  const { width, height } = useWindowDimensions()
+  const [opacityAnims] = useState(() => PREVIEW_SYSTEMS.map(() => new Animated.Value(RAMP_LOW)))
+  const previewW = width
+  const sidePad = width >= 680 ? Math.min(width * 0.08, IS_WEB ? 96 : 30) : 0
+  const rowW = previewW - sidePad * 2
+  const rowGroups = width >= 980
+    ? [PREVIEW_SYSTEMS]
+    : width >= 680
+      ? [PREVIEW_SYSTEMS.slice(0, 5), PREVIEW_SYSTEMS.slice(5)]
+      : [PREVIEW_SYSTEMS.slice(0, 3), PREVIEW_SYSTEMS.slice(3, 6), PREVIEW_SYSTEMS.slice(6)]
+  const maxRowCount = Math.max(...rowGroups.map((row) => row.length))
+  const bottomOffset = IS_WEB ? 18 : 10
+  const topReserve = IS_WEB ? ff(128) : 92
+  const headlineBottom = IS_WEB ? ff(136) : 102
+  const rowOffset = rowGroups.length === 1 ? 0 : height * ROW_OFFSET_VIEWPORT_RATIO
+  const baseImageH = Math.max(IS_WEB ? 400 : 288, Math.min((height - topReserve - bottomOffset) * 1.25, IS_WEB ? 775 : 538)) * 0.92169
+  const twoRowMaxH = Math.max(1, height - bottomOffset - headlineBottom - rowOffset)
+  const imageH = rowGroups.length === 2 ? Math.min(baseImageH, twoRowMaxH) : baseImageH
+  const previewH = imageH + (rowGroups.length - 1) * rowOffset
+  const slotW = rowW / maxRowCount
+  const imageW = Math.max(slotW * 1.75 * 0.92169, imageH / 2.39)
+  const previewTop = height - bottomOffset - previewH
+  const layerTop = (rowGroups.length === 1 ? previewTop : Math.max(headlineBottom, previewTop)) - 30
 
   useEffect(() => {
-    const loops = anims.map((v, i) =>
-      Animated.loop(
-        Animated.sequence([
-          Animated.delay(i * 180),
-          Animated.timing(v, { toValue: 1, duration: 600, useNativeDriver: !IS_WEB }),
-          Animated.timing(v, { toValue: 0.2, duration: 600, useNativeDriver: !IS_WEB }),
-        ]),
-      ),
-    )
-    loops.forEach((l) => l.start())
-    return () => loops.forEach((l) => l.stop())
-  }, [])
+    opacityAnims.forEach((anim) => anim.setValue(RAMP_LOW))
+    return runRandomOpacityRamps(opacityAnims)
+  }, [opacityAnims])
+
+  useEffect(() => {
+    onTopChange(layerTop)
+  }, [layerTop, onTopChange])
 
   return (
-    <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
-      <Svg width={180} height={340} viewBox="0 0 180 340">
-        {DOT_POS.map(([cx, cy], i) => (
-          <AnimatedCircle key={i} cx={cx} cy={cy} r={4.5} fill={C.purpleLight} opacity={anims[i]} />
-        ))}
-      </Svg>
+    <View pointerEvents="none" style={[styles.layerRows, { width: previewW, height: previewH, top: layerTop, paddingHorizontal: sidePad }]}>
+      {rowGroups.map((row, rowIndex) => (
+        <View key={rowIndex} style={[styles.layerRow, { top: rowIndex * rowOffset, height: imageH }]}>
+          {row.map((system) => {
+            const i = PREVIEW_SYSTEMS.indexOf(system)
+            return (
+              <Animated.View
+                key={system}
+                style={[
+                  styles.layerTile,
+                  {
+                    width: slotW,
+                    height: imageH,
+                    opacity: opacityAnims[i],
+                    zIndex: i,
+                  },
+                ]}
+              >
+                <Image source={INGEST_LAYERS[system]} style={[styles.layerImage, { width: imageW, height: imageH }]} contentFit="contain" />
+              </Animated.View>
+            )
+          })}
+        </View>
+      ))}
     </View>
   )
 }
@@ -117,120 +202,31 @@ export default function AnalyzingScreen() {
   const analyzePhase = useAppStore((s) => s.analyzePhase)
   const setAnalyzeProgress = useAppStore((s) => s.setAnalyzeProgress)
   const setAnalyzePhase = useAppStore((s) => s.setAnalyzePhase)
-  const setScreen = useAppStore((s) => s.setScreen)
-  const pendingUpload = useAppStore((s) => s.pendingUpload)
   const setPendingUpload = useAppStore((s) => s.setPendingUpload)
-  const setLastUploadResult = useAppStore((s) => s.setLastUploadResult)
-  const setPipelineError = useAppStore((s) => s.setPipelineError)
-  const gender = useAppStore((s) => s.gender)
-  const db = useOptionalDatabase()
+  const { width: viewportW } = useWindowDimensions()
+  const trackW = Math.max(180, viewportW - (IS_WEB ? 96 : 64))
 
-  const [reveal] = useState(() => new Animated.Value(0))
   const [fadeIn] = useState(() => new Animated.Value(0))
-  const [errorMsg, setErrorMsg] = useState<string | null>(null)
-  // Ensures the pipeline / demo animation runs exactly once, guarding against
-  // React strict/dev double-mounts and effect re-runs as `db` resolves.
-  const startedRef = useRef(false)
-  // True only until the screen actually unmounts. Distinguishes a real unmount
-  // (browser Back) from a dependency-change effect re-run — the latter fires the
-  // effect cleanup too, but must NOT cancel an in-flight, still-mounted pipeline.
-  const mountedRef = useRef(true)
-  useEffect(() => () => { mountedRef.current = false }, [])
+  const [errorMsg] = useState<string | null>(null)
+  const [assetTop, setAssetTop] = useState(IS_WEB ? 180 : 120)
 
   // Intro animations (run once on mount).
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: !IS_WEB, easing: Easing.out(Easing.ease) }).start()
-    Animated.timing(reveal, { toValue: 1, duration: 1600, useNativeDriver: !IS_WEB, easing: Easing.inOut(Easing.ease) }).start()
-  }, [fadeIn, reveal])
+  }, [fadeIn])
 
-  // Demo / direct-nav path: no pending upload → the original timed animation.
+  // Temporary extraction-page focus mode: visual-only progress loop. No pipeline,
+  // no SQLite writes, and no navigation to bodymap.
   useEffect(() => {
-    if (pendingUpload || startedRef.current) return
-    startedRef.current = true
+    setPendingUpload(null)
     let progress = 0
     const tick = setInterval(() => {
-      progress = Math.min(1, progress + 0.012)
+      progress = (progress + 0.006) % 1
       setAnalyzeProgress(progress)
       setAnalyzePhase(Math.min(3, Math.floor(progress * 4)))
-      if (progress >= 1) {
-        clearInterval(tick)
-        setScreen('bodymap')
-        setTimeout(() => router.replace('/bodymap'), 400)
-      }
     }, 80)
     return () => clearInterval(tick)
-  }, [pendingUpload, setAnalyzeProgress, setAnalyzePhase, setScreen])
-
-  // Real-upload path: drive phase/progress from the pipeline's onProgress. The
-  // bar eases smoothly toward each reported target. Waits for `db` to resolve.
-  useEffect(() => {
-    if (!pendingUpload || startedRef.current) return
-    // Post-await work is guarded by mountedRef (true unmount), NOT by this
-    // effect's cleanup — setPendingUpload(null) below re-runs the effect and
-    // fires cleanup, but the pipeline is still running on a mounted screen.
-    if (!db) {
-      // Give the async DB provider a moment to resolve before declaring failure.
-      const timer = setTimeout(() => {
-        if (startedRef.current || !mountedRef.current) return
-        startedRef.current = true
-        setPendingUpload(null)
-        const msg = 'Storage unavailable — uploads cannot be processed on this device.'
-        setPipelineError(msg)
-        setErrorMsg(msg)
-      }, 5000)
-      return () => clearTimeout(timer)
-    }
-
-    startedRef.current = true
-    const upload = pendingUpload
-    setPendingUpload(null)
-
-    let target = 0.05
-    const smooth = setInterval(() => {
-      // Self-stop on true unmount so a dep-change re-run doesn't need to clear it.
-      if (!mountedRef.current) { clearInterval(smooth); return }
-      const cur = useAppStore.getState().analyzeProgress
-      if (cur < target) setAnalyzeProgress(Math.min(target, cur + 0.02))
-    }, 60)
-
-    void (async () => {
-      try {
-        const apiKey = (await getSetting(db, 'openrouter_api_key')) ?? ''
-        const result = await processHealthRecord({
-          uri: upload.uri,
-          db,
-          apiKey,
-          kind: upload.kind,
-          sex: gender,
-          onProgress: (phase, progress) => {
-            if (!mountedRef.current) return
-            setAnalyzePhase(phase)
-            target = progress
-          },
-        })
-        clearInterval(smooth)
-        if (!mountedRef.current) return
-        setAnalyzeProgress(1)
-        setAnalyzePhase(3)
-        setLastUploadResult(result)
-        setPipelineError(null)
-        setScreen('bodymap')
-        setTimeout(() => router.replace('/bodymap'), 400)
-      } catch (e) {
-        clearInterval(smooth)
-        if (!mountedRef.current) return
-        const msg = e instanceof Error ? e.message : 'Something went wrong while analyzing this file.'
-        setPipelineError(msg)
-        setErrorMsg(msg)
-      }
-    })()
-
-    return () => clearInterval(smooth)
-  }, [
-    pendingUpload, db, gender,
-    setAnalyzeProgress, setAnalyzePhase, setScreen,
-    setPendingUpload, setLastUploadResult, setPipelineError,
-  ])
+  }, [setAnalyzeProgress, setAnalyzePhase, setPendingUpload])
 
   const pct = Math.round(analyzeProgress * 100)
 
@@ -255,33 +251,34 @@ export default function AnalyzingScreen() {
     <View style={styles.root}>
       <SafeAreaView style={styles.safe}>
         <Animated.View style={[styles.content, { opacity: fadeIn }]}>
-          <Logo />
-          <Text style={styles.headline}>Analyzing{'\n'}records…</Text>
-
-          <View style={styles.bodyWrap}>
-            <BodySilhouette reveal={reveal} />
-            <BlinkingDots />
+          <View style={[styles.topBlock, { top: Math.max(IS_WEB ? 10 : 6, assetTop - (IS_WEB ? ff(112) : 78)) }]}>
+            <Logo />
+            <Text style={styles.headline}>Analyzing{'\n'}records…</Text>
           </View>
 
-          <View style={styles.phaseBlock}>
-            <Text style={styles.phaseName}>{PHASES[analyzePhase]}</Text>
-            <Text style={styles.phaseSub}>{pct}% — processing on-device</Text>
-          </View>
+          <AnatomyLayerPreview onTopChange={setAssetTop} />
 
-          <PhaseDots phase={analyzePhase} />
+          <View style={styles.bottomBlock}>
+            <View style={styles.phaseBlock}>
+              <Text style={styles.phaseName}>{PHASES[analyzePhase]}</Text>
+              <Text style={styles.phaseSub}>{pct}% — processing on-device</Text>
+            </View>
 
-          {/* Gradient progress bar */}
-          <View style={styles.barTrack}>
-            <View style={[styles.barClip, { width: analyzeProgress * TRACK_W }]}>
-              <Svg width={TRACK_W} height={4}>
-                <Defs>
-                  <LinearGradient id="barGrad" x1="0" y1="0" x2="1" y2="0">
-                    <Stop offset="0" stopColor={C.purpleLight} />
-                    <Stop offset="1" stopColor={C.aqua} />
-                  </LinearGradient>
-                </Defs>
-                <Rect x={0} y={0} width={TRACK_W} height={4} rx={2} fill="url(#barGrad)" />
-              </Svg>
+            <PhaseDots phase={analyzePhase} />
+
+            {/* Gradient progress bar */}
+            <View style={[styles.barTrack, { width: trackW }]}>
+              <View style={[styles.barClip, { width: analyzeProgress * trackW }]}>
+                <Svg width={trackW} height={4}>
+                  <Defs>
+                    <LinearGradient id="barGrad" x1="0" y1="0" x2="1" y2="0">
+                      <Stop offset="0" stopColor={C.purpleLight} />
+                      <Stop offset="1" stopColor={C.aqua} />
+                    </LinearGradient>
+                  </Defs>
+                  <Rect x={0} y={0} width={trackW} height={4} rx={2} fill="url(#barGrad)" />
+                </Svg>
+              </View>
             </View>
           </View>
         </Animated.View>
@@ -293,35 +290,46 @@ export default function AnalyzingScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: C.bg },
   safe: { flex: 1 },
-  content: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32, gap: 22 },
+  content: {
+    flex: 1, alignItems: 'center',
+    paddingHorizontal: 32, paddingTop: IS_WEB ? 18 : 10, paddingBottom: IS_WEB ? 18 : 10,
+    position: 'relative', overflow: 'hidden',
+  },
+  topBlock: { position: 'absolute', alignItems: 'center', gap: IS_WEB ? 24 : 14, zIndex: 2 },
+  bottomBlock: { position: 'absolute', bottom: IS_WEB ? 18 : 10, alignItems: 'center', gap: IS_WEB ? 18 : 12, zIndex: 2 },
 
   logoRow: { flexDirection: 'row', alignItems: 'baseline' },
-  logoM: { fontFamily: 'BarlowCondensed-Bold', fontSize: 18, color: 'rgba(255,255,255,0.9)' },
-  logoAI: { fontFamily: 'MOMCAKE-Bold', fontSize: 20, color: C.purpleLight, lineHeight: 20 },
-  logoGenki: { fontFamily: 'BarlowCondensed-Bold', fontSize: 18, color: 'rgba(255,255,255,0.9)' },
+  logoM: { fontFamily: 'BarlowCondensed-Bold', fontSize: ff(18), color: 'rgba(255,255,255,0.9)' },
+  logoAI: { fontFamily: 'MOMCAKE-Bold', fontSize: ff(20), color: C.purpleLight, lineHeight: ff(20) },
+  logoGenki: { fontFamily: 'BarlowCondensed-Bold', fontSize: ff(18), color: 'rgba(255,255,255,0.9)' },
 
-  headline: { fontFamily: 'MOMCAKE-Bold', fontSize: 34, color: C.ink, textAlign: 'center', lineHeight: 32, letterSpacing: -1 },
-  bodyWrap: { width: 180, height: 340, position: 'relative', overflow: 'hidden' },
+  headline: { fontFamily: 'MOMCAKE-Bold', fontSize: ff(34), color: C.ink, textAlign: 'center', lineHeight: ff(32), letterSpacing: 0 },
+  layerRows: { position: 'absolute', zIndex: 0 },
+  layerRow: { position: 'absolute', left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
+  layerTile: {
+    alignItems: 'center', justifyContent: 'center',
+  },
+  layerImage: {},
 
   phaseBlock: { alignItems: 'center', gap: 3 },
-  phaseName: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: 15, color: C.ink, letterSpacing: 0.3 },
-  phaseSub: { fontFamily: 'SourceCodePro', fontSize: 12, color: C.procText },
+  phaseName: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: ff(15), color: C.ink, letterSpacing: 0.3 },
+  phaseSub: { fontFamily: 'SourceCodePro', fontSize: ff(12), color: C.procText },
 
   dotsRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', paddingHorizontal: 8 },
   dotCol: { alignItems: 'center', gap: 6, flex: 1 },
-  dot: { width: 8, height: 8, borderRadius: 4 },
-  dotLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: 9, textAlign: 'center' },
+  dot: { width: ff(8), height: ff(8), borderRadius: ff(4) },
+  dotLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: ff(9), textAlign: 'center' },
 
-  barTrack: { width: TRACK_W, height: 4, backgroundColor: C.pending, borderRadius: 2, overflow: 'hidden' },
+  barTrack: { height: 4, backgroundColor: C.pending, borderRadius: 2, overflow: 'hidden' },
   barClip: { height: 4, overflow: 'hidden' },
 
   errorText: {
-    fontFamily: 'BarlowCondensed-Regular', fontSize: 15, color: C.ink,
-    textAlign: 'center', lineHeight: 21, opacity: 0.85, paddingHorizontal: 8,
+    fontFamily: 'BarlowCondensed-Regular', fontSize: ff(15), color: C.ink,
+    textAlign: 'center', lineHeight: ff(21), opacity: 0.85, paddingHorizontal: 8,
   },
   backBtn: {
     borderWidth: 1, borderColor: C.purpleLight, borderRadius: 10,
     paddingVertical: 12, paddingHorizontal: 32,
   },
-  backBtnText: { fontFamily: 'BarlowCondensed-Bold', fontSize: 16, color: C.purpleLight, letterSpacing: 0.5 },
+  backBtnText: { fontFamily: 'BarlowCondensed-Bold', fontSize: ff(16), color: C.purpleLight, letterSpacing: 0.5 },
 })

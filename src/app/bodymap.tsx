@@ -22,7 +22,6 @@ import { parseEvidence, formatDateDisplay } from '@/lib/support'
 import { useOptionalDatabase } from '@/lib/db/provider'
 import { updateConditionPosition, upsertSetting } from '@/lib/db/queries'
 import { exportBackupToFile, pickAndReadBackup, restoreBackup } from '@/lib/db/backup'
-import { clearDemoData, isDemoDataPresent } from '@/lib/db/seed'
 import { scheduleSnapshot, saveSnapshotNow } from '@/lib/db/snapshot'
 
 const { height: SH } = Dimensions.get('window')
@@ -416,7 +415,7 @@ function BodyLayers({ activeSystems }: { activeSystems: SystemId[] }) {
         <Image
           key={id}
           source={COLORIZED_LAYERS[id]}
-          style={StyleSheet.absoluteFill}
+          style={[StyleSheet.absoluteFill, { opacity: 0.3 }]}
           contentFit="contain"
           pointerEvents="none"
         />
@@ -1582,6 +1581,7 @@ export default function BodyMapScreen() {
     condDateOverrides, selectedCondition,
     relocatingCondition, cancelRelocation,
     lastUploadResult, setLastUploadResult,
+    setCurrentYear,
     genderPromptNeeded, setGenderPromptNeeded, setGender,
   } = useAppStore()
 
@@ -1594,31 +1594,16 @@ export default function BodyMapScreen() {
     if (lastUploadResult) refreshConditions()
   }, [lastUploadResult, refreshConditions])
 
-  // Whether the sample demo data is still present — only checked after an upload,
-  // so the "remove demo?" prompt appears once real records exist alongside it.
-  const [demoPresent, setDemoPresent] = useState(false)
   useEffect(() => {
-    // Only queried after an upload; the async result is the sole setter (the
-    // prompt is otherwise gated behind `lastUploadResult` in the JSX, and the
-    // Keep/Remove handlers reset `demoPresent` explicitly).
-    if (!lastUploadResult || !db) return
-    let cancelled = false
-    void isDemoDataPresent(db).then((p) => { if (!cancelled) setDemoPresent(p) })
-    return () => { cancelled = true }
-  }, [lastUploadResult, db])
-
-  async function handleRemoveDemo() {
-    if (db) {
-      await clearDemoData(db)
-      refreshConditions()
-      scheduleSnapshot(db)
-    }
-    setDemoPresent(false)
-    setLastUploadResult(null)
-  }
+    if (conditions.length === 0) return
+    const years = conditions.map((c) => c.yearFrac).filter((year) => Number.isFinite(year))
+    if (years.length === 0) return
+    const newest = Math.max(...years)
+    const oldest = Math.min(...years)
+    if (lastUploadResult || currentYear < oldest) setCurrentYear(newest)
+  }, [lastUploadResult, conditions, currentYear, setCurrentYear])
 
   function dismissArrival() {
-    setDemoPresent(false)
     setLastUploadResult(null)
   }
 
@@ -1840,7 +1825,7 @@ export default function BodyMapScreen() {
           </View>
         )}
 
-        {/* Upload result banner + optional demo-data removal prompt */}
+        {/* Upload result banner */}
         {lastUploadResult && (
           <View style={styles.arrivalCard}>
             <View style={styles.arrivalHeaderRow}>
@@ -1853,19 +1838,6 @@ export default function BodyMapScreen() {
                 <Text style={styles.arrivalClose}>✕</Text>
               </TouchableOpacity>
             </View>
-            {demoPresent && (
-              <>
-                <Text style={styles.arrivalSub}>Remove the sample demo data?</Text>
-                <View style={styles.arrivalBtnRow}>
-                  <TouchableOpacity style={styles.arrivalBtn} onPress={dismissArrival}>
-                    <Text style={styles.arrivalBtnText}>Keep</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={[styles.arrivalBtn, styles.arrivalBtnDanger]} onPress={handleRemoveDemo}>
-                    <Text style={[styles.arrivalBtnText, { color: C.aqua }]}>Remove</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
           </View>
         )}
 
@@ -2186,14 +2158,12 @@ const styles = StyleSheet.create({
   },
   arrivalHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: sc(8) },
   arrivalTitle: { flex: 1, fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(14), color: C.ink, lineHeight: fs(18) },
-  arrivalSub: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(13), color: C.inkMuted },
   arrivalClose: { fontSize: fs(15), color: C.inkMuted, paddingLeft: sc(4) },
   arrivalBtnRow: { flexDirection: 'row', gap: sc(8) },
   arrivalBtn: {
     flex: 1, alignItems: 'center', paddingVertical: sc(9), borderRadius: sc(8),
     borderWidth: 1, borderColor: C.border, backgroundColor: C.surface,
   },
-  arrivalBtnDanger: { borderColor: C.aqua },
   arrivalBtnText: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(13), color: C.ink },
 
   // Backup

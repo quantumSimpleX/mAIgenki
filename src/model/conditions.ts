@@ -63,6 +63,62 @@ export const SYSTEM_META: Record<SystemId, { label: string; color: string }> = {
   reproductive:   { label: 'Reproductive',   color: '#C0526A' },
 }
 
+const SYSTEM_ALIASES: Record<string, SystemId> = {
+  integ: 'integumentary',
+  skin: 'integumentary',
+  muscle: 'muscular',
+  musculoskeletal: 'muscular',
+  bone: 'skeletal',
+  cardio: 'cardiovascular',
+  circulatory: 'cardiovascular',
+  heart: 'cardiovascular',
+  neuro: 'nervous',
+  gi: 'digestive',
+  gastrointestinal: 'digestive',
+  pulm: 'respiratory',
+  pulmonary: 'respiratory',
+  kidney: 'renal',
+  urinary: 'renal',
+  lymph: 'lymphatic',
+  endo: 'endocrine',
+  repro: 'reproductive',
+  reproductive: 'reproductive',
+}
+
+const SYSTEM_DEFAULT_POSITIONS: Record<SystemId, { cx: number; cy: number }> = {
+  integumentary: { cx: 50, cy: 14 },
+  muscular: { cx: 56, cy: 31 },
+  skeletal: { cx: 48, cy: 38 },
+  cardiovascular: { cx: 50, cy: 31 },
+  nervous: { cx: 50, cy: 17 },
+  digestive: { cx: 50, cy: 48 },
+  respiratory: { cx: 50, cy: 30 },
+  renal: { cx: 50, cy: 52 },
+  lymphatic: { cx: 58, cy: 39 },
+  endocrine: { cx: 50, cy: 24 },
+  reproductive: { cx: 50, cy: 68 },
+}
+
+export function normalizeSystemId(system: string | null | undefined): SystemId {
+  const key = (system ?? '').trim().toLowerCase()
+  if ((ALL_SYSTEMS as string[]).includes(key)) return key as SystemId
+  return SYSTEM_ALIASES[key] ?? 'integumentary'
+}
+
+function seededOffset(seed: string, salt: number): number {
+  let hash = salt
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+  return (hash % 900) / 100 - 4.5
+}
+
+export function defaultConditionPosition(system: SystemId, seed = ''): { cx: number; cy: number } {
+  const base = SYSTEM_DEFAULT_POSITIONS[system]
+  return {
+    cx: Math.max(12, Math.min(88, base.cx + seededOffset(seed, 17))),
+    cy: Math.max(8, Math.min(88, base.cy + seededOffset(seed, 53))),
+  }
+}
+
 const MONTH_IDX: Record<string, number> = {
   JAN:0, FEB:1, MAR:2, APR:3, MAY:4, JUN:5,
   JUL:6, AUG:7, SEP:8, OCT:9, NOV:10, DEC:11,
@@ -70,7 +126,13 @@ const MONTH_IDX: Record<string, number> = {
 
 export function parseDateFrac(d: string): number {
   const [yr, mo, day] = d.split('-')
-  return parseInt(yr) + (MONTH_IDX[mo] * 30.44 + parseInt(day)) / 365.25
+  const year = parseInt(yr, 10)
+  if (!Number.isFinite(year)) return 0
+  const monthNum = parseInt(mo, 10)
+  const monthIndex = Number.isFinite(monthNum) ? monthNum - 1 : MONTH_IDX[mo?.toUpperCase()]
+  const dayNum = parseInt(day, 10)
+  if (!Number.isFinite(monthIndex) || !Number.isFinite(dayNum)) return year
+  return year + (monthIndex * 30.44 + dayNum) / 365.25
 }
 
 export function getLocalName(c: DesignCondition, lang: SupportedLang): string {
