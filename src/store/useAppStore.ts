@@ -6,10 +6,24 @@ import {
 
 type Screen = 'upload' | 'analyzing' | 'bodymap'
 type TimeDisplayMode = 'date' | 'age'
+export type ConditionSource = 'auto' | 'demo'
 export type Gender = 'male' | 'female'
 
 export type PendingUpload = { uri: string; kind: 'pdf' | 'image' }
 export type UploadResult = { recordId: string; conditionCount: number; measurementCount: number }
+
+const CONDITION_SOURCE_STORAGE_KEY = 'maigenki_condition_source'
+
+function readInitialConditionSource(): ConditionSource {
+  if (typeof localStorage === 'undefined') return 'auto'
+  const value = localStorage.getItem(CONDITION_SOURCE_STORAGE_KEY)
+  return value === 'demo' ? 'demo' : 'auto'
+}
+
+function persistConditionSource(conditionSource: ConditionSource): void {
+  if (typeof localStorage === 'undefined') return
+  localStorage.setItem(CONDITION_SOURCE_STORAGE_KEY, conditionSource)
+}
 
 type AppState = {
   screen: Screen
@@ -45,6 +59,8 @@ type AppState = {
   preRelocationSystems: SystemId[]
   // Upload → pipeline → bodymap plumbing (URI flows via the store, not route params).
   pendingUpload: PendingUpload | null
+  pendingDemo: boolean
+  conditionSource: ConditionSource
   lastUploadResult: UploadResult | null
   pipelineError: string | null
   // Set when body-type inference finds no gendered signal and none was stored,
@@ -89,9 +105,12 @@ type AppActions = {
   setUploadBtnsHovered: (h: boolean) => void
   setDragging: (d: boolean) => void
   startAnalyze: () => void
+  startDemoAnalyze: () => void
   startRelocation: (c: DesignCondition) => void
   cancelRelocation: () => void
   setPendingUpload: (upload: PendingUpload | null) => void
+  setPendingDemo: (pending: boolean) => void
+  setConditionSource: (source: ConditionSource) => void
   setLastUploadResult: (result: UploadResult | null) => void
   setPipelineError: (error: string | null) => void
   setGenderPromptNeeded: (needed: boolean) => void
@@ -130,6 +149,8 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   relocatingCondition: null,
   preRelocationSystems: [],
   pendingUpload: null,
+  pendingDemo: false,
+  conditionSource: readInitialConditionSource(),
   lastUploadResult: null,
   pipelineError: null,
   genderPromptNeeded: false,
@@ -225,7 +246,29 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   }),
   setUploadBtnsHovered: (uploadBtnsHovered) => set({ uploadBtnsHovered }),
   setDragging: (dragging) => set({ dragging }),
-  startAnalyze: () => set({ screen: 'analyzing', analyzeProgress: 0, analyzePhase: 0 }),
+  startAnalyze: () => {
+    persistConditionSource('auto')
+    set({
+      screen: 'analyzing',
+      analyzeProgress: 0,
+      analyzePhase: 0,
+      conditionSource: 'auto',
+    })
+  },
+  startDemoAnalyze: () => {
+    persistConditionSource('demo')
+    set({
+      screen: 'analyzing',
+      analyzeProgress: 0,
+      analyzePhase: 0,
+      activeSystems: [...ALL_SYSTEMS],
+      currentYear: 2024,
+      pendingDemo: true,
+      conditionSource: 'demo',
+      lastUploadResult: null,
+      pipelineError: null,
+    })
+  },
   startRelocation: (c) => set((s) => ({
     preRelocationSystems: [...s.activeSystems],
     activeSystems: [c.system],
@@ -239,6 +282,11 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     preRelocationSystems: [],
   })),
   setPendingUpload: (pendingUpload) => set({ pendingUpload }),
+  setPendingDemo: (pendingDemo) => set({ pendingDemo }),
+  setConditionSource: (conditionSource) => {
+    persistConditionSource(conditionSource)
+    set({ conditionSource })
+  },
   setLastUploadResult: (lastUploadResult) => set({ lastUploadResult }),
   setPipelineError: (pipelineError) => set({ pipelineError }),
   setGenderPromptNeeded: (genderPromptNeeded) => set({ genderPromptNeeded }),

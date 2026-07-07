@@ -11,6 +11,7 @@ import Svg, {
   Circle, Ellipse, G, Line, Path as SvgPath, Rect,
 } from 'react-native-svg'
 import { Image } from 'expo-image'
+import { useLocalSearchParams } from 'expo-router'
 import { QSWordmark } from '@/components/QSWordmark'
 import { useAppStore, Gender } from '@/store/useAppStore'
 import { useConditions, useConditionRecords } from '@/hooks/useConditions'
@@ -259,7 +260,13 @@ function NavBar() {
     currentYear, timeDisplayMode, birthYear, birthMonth,
     toggleTimeDisplayMode, toggleSettings, toggleLegend, legendOpen,
     relocatingCondition, cancelRelocation, preferredLanguage,
+    lastUploadResult, setLastUploadResult,
   } = useAppStore()
+  const uploadMessage = lastUploadResult
+    ? lastUploadResult.conditionCount > 0
+      ? `${lastUploadResult.conditionCount} condition${lastUploadResult.conditionCount === 1 ? '' : 's'} added`
+      : 'No conditions extracted'
+    : null
 
   return (
     <View style={styles.nav}>
@@ -273,6 +280,16 @@ function NavBar() {
           </Svg>
         </View>
       </TouchableOpacity>
+      {uploadMessage && !relocatingCondition && (
+        <TouchableOpacity
+          style={styles.navCenterMessage}
+          onPress={() => setLastUploadResult(null)}
+          hitSlop={8}
+          activeOpacity={0.75}
+        >
+          <Text style={styles.navCenterMessageText} numberOfLines={1}>{uploadMessage}</Text>
+        </TouchableOpacity>
+      )}
       {relocatingCondition ? (
         <>
           <Text
@@ -1575,18 +1592,47 @@ function UploadShortcuts({
 // ─── Root Screen ──────────────────────────────────────────────────────────────
 
 export default function BodyMapScreen() {
+  const { source, added } = useLocalSearchParams<{ source?: string; added?: string }>()
+  const browserParams = IS_WEB && typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search)
+    : null
+  const sourceParam = source ?? browserParams?.get('source') ?? undefined
+  const addedParam = added ?? browserParams?.get('added') ?? undefined
+  const routeConditionSource = sourceParam === 'demo' || sourceParam === 'auto' ? sourceParam : undefined
+  const routeAddedCount = addedParam && /^\d+$/.test(addedParam) ? parseInt(addedParam, 10) : null
   const {
     activeSystems, selectCondition,
     currentYear, sheetOpen, settingsOpen,
     condDateOverrides, selectedCondition,
     relocatingCondition, cancelRelocation,
     lastUploadResult, setLastUploadResult,
-    setCurrentYear,
+    setCurrentYear, setConditionSource,
     genderPromptNeeded, setGenderPromptNeeded, setGender,
   } = useAppStore()
 
-  const [conditions, refreshConditions] = useConditions()
+  const [conditions, refreshConditions] = useConditions(routeConditionSource)
   const db = useOptionalDatabase()
+  const clearAddedParam = useCallback(() => {
+    if (!IS_WEB || typeof window === 'undefined') return
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has('added')) return
+    url.searchParams.delete('added')
+    window.history.replaceState(null, '', `${url.pathname}${url.search}`)
+  }, [])
+
+  useEffect(() => {
+    if (routeConditionSource) setConditionSource(routeConditionSource)
+  }, [routeConditionSource, setConditionSource])
+
+  useEffect(() => {
+    if (routeAddedCount === null) return
+    setLastUploadResult({
+      recordId: routeConditionSource ?? 'arrival',
+      conditionCount: routeAddedCount,
+      measurementCount: 0,
+    })
+    clearAddedParam()
+  }, [routeAddedCount, routeConditionSource, setLastUploadResult, clearAddedParam])
 
   // ── Upload arrival (Phase 9.6) ──
   // Reload conditions from the DB when a new upload landed.
@@ -1602,10 +1648,6 @@ export default function BodyMapScreen() {
     const oldest = Math.min(...years)
     if (lastUploadResult || currentYear < oldest) setCurrentYear(newest)
   }, [lastUploadResult, conditions, currentYear, setCurrentYear])
-
-  function dismissArrival() {
-    setLastUploadResult(null)
-  }
 
   // ── One-time gender prompt (Phase 9.7.3) ──
   function chooseGender(g: Gender) {
@@ -1632,6 +1674,12 @@ export default function BodyMapScreen() {
     refreshConditions()
     cancelRelocation()
   }, [relocatingCondition, db, refreshConditions, cancelRelocation])
+
+  const dismissUploadMessage = useCallback(() => {
+    if (useAppStore.getState().lastUploadResult) setLastUploadResult(null)
+    clearAddedParam()
+    return false
+  }, [setLastUploadResult, clearAddedParam])
 
   // ── Body-map zoom & pan ──
   // Mobile: two-finger pinch zooms, one-finger drag pans.
@@ -1807,7 +1855,11 @@ export default function BodyMapScreen() {
   const viewTransformed = view.scale !== 1 || view.tx !== 0 || view.ty !== 0
 
   return (
-    <View style={styles.root}>
+    <View
+      style={styles.root}
+      onStartShouldSetResponderCapture={dismissUploadMessage}
+      onMoveShouldSetResponderCapture={dismissUploadMessage}
+    >
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <NavBar />
 
@@ -1821,22 +1873,6 @@ export default function BodyMapScreen() {
                   <Text style={styles.arrivalBtnText}>{g === 'female' ? '♀  Female' : '♂  Male'}</Text>
                 </TouchableOpacity>
               ))}
-            </View>
-          </View>
-        )}
-
-        {/* Upload result banner */}
-        {lastUploadResult && (
-          <View style={styles.arrivalCard}>
-            <View style={styles.arrivalHeaderRow}>
-              <Text style={styles.arrivalTitle}>
-                {lastUploadResult.conditionCount > 0
-                  ? `${lastUploadResult.conditionCount} condition${lastUploadResult.conditionCount === 1 ? '' : 's'} added`
-                  : 'No conditions extracted — check the document or LLM access'}
-              </Text>
-              <TouchableOpacity onPress={dismissArrival} hitSlop={10}>
-                <Text style={styles.arrivalClose}>✕</Text>
-              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -1914,6 +1950,23 @@ const styles = StyleSheet.create({
   logoGenki: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: 'rgba(255,255,255,0.9)' },
   navChevronBox: { marginLeft: sc(8), width: fs(14), height: fs(14), alignItems: 'center', justifyContent: 'center', alignSelf: 'center', transform: [{ rotate: '0deg' }] },
   navChevronBoxOpen: { transform: [{ rotate: '180deg' }] },
+  navCenterMessage: {
+    position: 'absolute',
+    left: sc(132),
+    right: sc(132),
+    top: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    pointerEvents: 'auto',
+  },
+  navCenterMessageText: {
+    fontFamily: 'BarlowCondensed-SemiBold',
+    fontSize: fs(13),
+    color: C.aqua,
+    letterSpacing: sc(0.4),
+    textTransform: 'uppercase',
+  },
   navRight: { flexDirection: 'row', alignItems: 'center', gap: sc(10) },
   navRelocationText: {
     flex: 1, textAlign: 'center',
@@ -2082,8 +2135,8 @@ const styles = StyleSheet.create({
   settingsTitle: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: C.ink, textTransform: 'uppercase', letterSpacing: sc(0.5) },
   settingsSectionLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.aqua, textTransform: 'uppercase', letterSpacing: sc(1), marginBottom: sc(10) },
 
-  langDdWrap: { position: 'relative', zIndex: 60, marginBottom: sc(18) },
-  langDdWrapOpen: { marginBottom: sc(212) },
+  langDdWrap: { position: 'relative', zIndex: 20, marginBottom: sc(18) },
+  langDdWrapOpen: { zIndex: 80, marginBottom: sc(212) },
   langDdField: {
     flexDirection: 'row', alignItems: 'center', gap: sc(10), height: sc(44),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8),
@@ -2109,10 +2162,10 @@ const styles = StyleSheet.create({
   langEnglish: { fontFamily: 'SourceCodePro', fontSize: fs(9.5), color: 'rgba(250,250,247,0.5)', flex: 1 },
   langCheck: { fontSize: fs(14), color: C.aqua },
 
-  birthGenderRow: { flexDirection: 'row', gap: sc(24), alignItems: 'flex-start', zIndex: 10 },
-  birthCol: { flex: 1, minWidth: 0, zIndex: 30 },
+  birthGenderRow: { flexDirection: 'row', gap: sc(24), alignItems: 'flex-start', zIndex: 60 },
+  birthCol: { flex: 1, minWidth: 0, zIndex: 70 },
   genderCol: { flex: 1, minWidth: 0 },
-  dobRow: { flexDirection: 'row', gap: sc(8), marginBottom: sc(6), alignItems: 'flex-start', zIndex: 30 },
+  dobRow: { flexDirection: 'row', gap: sc(8), marginBottom: sc(6), alignItems: 'flex-start', zIndex: 70 },
   dobYearInput: {
     height: sc(40), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8), paddingHorizontal: sc(10),
     fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink, backgroundColor: C.surfaceHigh,
@@ -2120,7 +2173,7 @@ const styles = StyleSheet.create({
   },
 
   // Month dropdown
-  monthDdWrap: { position: 'relative', zIndex: 30, flexGrow: 0, flexShrink: 1, flexBasis: sc(60), minWidth: 0 },
+  monthDdWrap: { position: 'relative', zIndex: 90, flexGrow: 0, flexShrink: 1, flexBasis: sc(60), minWidth: 0 },
   monthDdField: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     height: sc(40), width: '100%', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
@@ -2131,7 +2184,7 @@ const styles = StyleSheet.create({
   monthDdList: {
     position: 'absolute', bottom: sc(44), left: 0, right: 0,
     backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: sc(8), overflow: 'hidden', zIndex: 40,
+    borderRadius: sc(8), overflow: 'hidden', zIndex: 100,
     ...(IS_WEB ? { boxShadow: `0 ${sc(6)}px ${sc(16)}px rgba(0,0,0,0.5)` } : { elevation: 8 }),
   },
   monthDdItem: { paddingVertical: sc(8), paddingHorizontal: sc(12) },

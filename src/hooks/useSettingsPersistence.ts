@@ -8,6 +8,7 @@ import { SupportedLang } from '@/model/conditions'
 import { inferBodyType } from '@/lib/inference/bodyType'
 
 const LANGS: SupportedLang[] = ['en', 'zh-TW', 'ja', 'es']
+const CONDITION_SOURCES = ['auto', 'demo'] as const
 
 // Loads user settings (preferred language + date of birth) from the SQLite
 // settings table on startup and writes them back whenever they change, so they
@@ -20,10 +21,12 @@ export function useSettingsPersistence(): void {
   const birthYear = useAppStore((s) => s.birthYear)
   const birthMonth = useAppStore((s) => s.birthMonth)
   const gender = useAppStore((s) => s.gender)
+  const conditionSource = useAppStore((s) => s.conditionSource)
   const setPreferredLanguage = useAppStore((s) => s.setPreferredLanguage)
   const setBirthYear = useAppStore((s) => s.setBirthYear)
   const setBirthMonth = useAppStore((s) => s.setBirthMonth)
   const setGender = useAppStore((s) => s.setGender)
+  const setConditionSource = useAppStore((s) => s.setConditionSource)
   const setGenderPromptNeeded = useAppStore((s) => s.setGenderPromptNeeded)
 
   // Gate writes until the initial load has applied, so defaults don't overwrite
@@ -38,11 +41,12 @@ export function useSettingsPersistence(): void {
     let cancelled = false
     void (async () => {
       try {
-        const [lang, by, bm, g] = await Promise.all([
+        const [lang, by, bm, g, source] = await Promise.all([
           getSetting(db, 'preferred_language'),
           getSetting(db, 'birth_year'),
           getSetting(db, 'birth_month'),
           getSetting(db, 'gender'),
+          getSetting(db, 'condition_source'),
         ])
         if (cancelled) return
         if (lang && LANGS.includes(lang as SupportedLang)) setPreferredLanguage(lang as SupportedLang)
@@ -50,12 +54,15 @@ export function useSettingsPersistence(): void {
         if (!Number.isNaN(yr)) setBirthYear(yr)
         if (bm) setBirthMonth(bm)
         if (g === 'male' || g === 'female') { setGender(g); genderResolved.current = true }
+        if (source && CONDITION_SOURCES.includes(source as (typeof CONDITION_SOURCES)[number])) {
+          setConditionSource(source as (typeof CONDITION_SOURCES)[number])
+        }
       } finally {
         if (!cancelled) setHydrated(true)
       }
     })()
     return () => { cancelled = true }
-  }, [db, setPreferredLanguage, setBirthYear, setBirthMonth, setGender])
+  }, [db, setPreferredLanguage, setBirthYear, setBirthMonth, setGender, setConditionSource])
 
   // Infer body type from the records when nothing was stored. A gendered signal
   // sets the gender directly; no signal raises a one-time prompt on the bodymap
@@ -95,6 +102,13 @@ export function useSettingsPersistence(): void {
       scheduleSnapshot(db)
     }
   }, [db, hydrated, gender])
+
+  useEffect(() => {
+    if (db && hydrated) {
+      upsertSetting(db, 'condition_source', conditionSource).catch(() => {})
+      scheduleSnapshot(db)
+    }
+  }, [db, hydrated, conditionSource])
 }
 
 // Mount this near the root (inside DatabaseProvider) to activate persistence.

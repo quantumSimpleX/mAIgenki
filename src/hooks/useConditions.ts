@@ -4,21 +4,24 @@ import {
 } from '@/model/conditions'
 import { useOptionalDatabase } from '@/lib/db/provider'
 import { getConditions, getConditionRecords } from '@/lib/db/queries'
+import { useAppStore, type ConditionSource } from '@/store/useAppStore'
 
 // Loads seeded conditions from SQLite, falling back to the hardcoded CONDITIONS
 // (used in tests, before the DB is seeded, or when the DB is unavailable on web).
-export function useConditions(): [DesignCondition[], () => void] {
+export function useConditions(sourceOverride?: ConditionSource): [DesignCondition[], () => void] {
   // Seed initial state with the hardcoded fallback so no state is ever empty —
   // this also avoids a synchronous setState when the DB is unavailable.
   const [conditions, setConditions] = useState<DesignCondition[]>(CONDITIONS)
   const db = useOptionalDatabase()
+  const conditionSource = useAppStore((s) => s.conditionSource)
+  const effectiveSource = sourceOverride ?? conditionSource
 
   const refresh = useCallback(() => {
     if (!db) return // initial/current state already holds the fallback
-    getConditions(db)
+    getConditions(db, effectiveSource)
       .then((rows) => setConditions(rows.length > 0 ? rows : CONDITIONS))
       .catch(() => setConditions(CONDITIONS))
-  }, [db])
+  }, [db, effectiveSource])
 
   useEffect(() => { refresh() }, [refresh])
 

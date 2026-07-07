@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { router } from 'expo-router'
+import { router, useLocalSearchParams } from 'expo-router'
 import {
   Animated, Easing, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View,
 } from 'react-native'
@@ -9,10 +9,12 @@ import Svg, {
 } from 'react-native-svg'
 import { Image } from 'expo-image'
 import { useAppStore } from '@/store/useAppStore'
-import { ALL_SYSTEMS, type SystemId } from '@/model/conditions'
+import { ALL_SYSTEMS, CONDITIONS, type SystemId } from '@/model/conditions'
 import { useOptionalDatabase } from '@/lib/db/provider'
-import { getSetting } from '@/lib/db/queries'
+import { getSetting, upsertSetting } from '@/lib/db/queries'
 import { processHealthRecord } from '@/lib/pipeline'
+import { clearDemoData, seedDemoData } from '@/lib/db/seed'
+import { scheduleSnapshot } from '@/lib/db/snapshot'
 
 // The native animation driver is absent on web; using it there only warns.
 const IS_WEB = Platform.OS === 'web'
@@ -50,6 +52,8 @@ const ROW_OFFSET_VIEWPORT_RATIO = 0.17
 const ASSET_BASE_SCALE = 0.92169
 const PROGRESS_BAR_HEIGHT = 4
 const ANCHOR_DOTS_GAP = 6
+const DEMO_ANALYSIS_MIN_MS = 2600
+const DEMO_DB_WAIT_MS = 15000
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n))
@@ -73,6 +77,29 @@ function progressGap(fontScale: number): number {
 
 function progressDotsHeight(fontScale: number): number {
   return scaled(8, fontScale) + ANCHOR_DOTS_GAP + scaled(11, fontScale)
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function replaceBodymap(source?: 'auto' | 'demo', added?: number): void {
+  const params = new URLSearchParams()
+  if (source) params.set('source', source)
+  if (added !== undefined) params.set('added', String(added))
+  const suffix = params.toString() ? `?${params.toString()}` : ''
+  if (IS_WEB && typeof window !== 'undefined') {
+    window.location.replace(`/bodymap${suffix}`)
+    return
+  }
+  if (source) {
+    router.replace({
+      pathname: '/bodymap',
+      params: added !== undefined ? { source, added: String(added) } : { source },
+    })
+  } else {
+    router.replace('/bodymap')
+  }
 }
 
 function Logo({ fontScale }: { fontScale: number }) {
@@ -248,13 +275,20 @@ function PhaseDots({ fontScale, phase }: { fontScale: number, phase: number }) {
 }
 
 export default function AnalyzingScreen() {
+  const { demo } = useLocalSearchParams<{ demo?: string }>()
+  const routeDemo = demo === '1'
   const analyzeProgress = useAppStore((s) => s.analyzeProgress)
   const analyzePhase = useAppStore((s) => s.analyzePhase)
   const setAnalyzeProgress = useAppStore((s) => s.setAnalyzeProgress)
   const setAnalyzePhase = useAppStore((s) => s.setAnalyzePhase)
   const setScreen = useAppStore((s) => s.setScreen)
   const pendingUpload = useAppStore((s) => s.pendingUpload)
+  const pendingDemo = useAppStore((s) => s.pendingDemo)
+  const setActiveSystems = useAppStore((s) => s.setActiveSystems)
+  const setCurrentYear = useAppStore((s) => s.setCurrentYear)
+  const setConditionSource = useAppStore((s) => s.setConditionSource)
   const setPendingUpload = useAppStore((s) => s.setPendingUpload)
+  const setPendingDemo = useAppStore((s) => s.setPendingDemo)
   const setLastUploadResult = useAppStore((s) => s.setLastUploadResult)
   const setPipelineError = useAppStore((s) => s.setPipelineError)
   const gender = useAppStore((s) => s.gender)
@@ -277,10 +311,10 @@ export default function AnalyzingScreen() {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: !IS_WEB, easing: Easing.out(Easing.ease) }).start()
   }, [fadeIn])
 
-  // Direct route / demo path: no pending upload, so show the analysis animation
+  // Direct route path: no pending upload/demo, so show the analysis animation
   // briefly, then continue to the bodymap.
   useEffect(() => {
-    if (pendingUpload || startedRef.current) return
+    if (pendingUpload || pendingDemo || routeDemo || startedRef.current) return
     startedRef.current = true
     let progress = 0
     const tick = setInterval(() => {
@@ -294,7 +328,94 @@ export default function AnalyzingScreen() {
       }
     }, 80)
     return () => clearInterval(tick)
-  }, [pendingUpload, setAnalyzeProgress, setAnalyzePhase, setScreen])
+  }, [pendingUpload, pendingDemo, routeDemo, setAnalyzeProgress, setAnalyzePhase, setScreen])
+
+  // Demo path: populate/repopulate sample rows through SQLite during analysis,
+  // then continue to bodymap with all anatomical systems visible.
+  useEffect(() => {
+    if ((!pendingDemo && !routeDemo) || startedRef.current) return
+
+    setPendingDemo(false)
+    setConditionSource('demo')
+    setActiveSystems([...ALL_SYSTEMS])
+    setCurrentYear(2024)
+
+    if (!db) {
+      let progress = 0
+      const tick = setInterval(() => {
+        progress = Math.min(0.88, progress + 0.01)
+        setAnalyzeProgress(progress)
+        setAnalyzePhase(Math.min(3, Math.floor(progress * 4)))
+      }, 120)
+      const timer = setTimeout(() => {
+        if (startedRef.current || !mountedRef.current) return
+        startedRef.current = true
+        clearInterval(tick)
+        setAnalyzeProgress(1)
+        setAnalyzePhase(3)
+        setLastUploadResult({
+          recordId: 'demo',
+          conditionCount: CONDITIONS.length,
+          measurementCount: 0,
+        })
+        setPipelineError(null)
+        setScreen('bodymap')
+        setTimeout(() => replaceBodymap('demo', CONDITIONS.length), 400)
+      }, DEMO_DB_WAIT_MS)
+      return () => {
+        clearInterval(tick)
+        clearTimeout(timer)
+      }
+    }
+
+    startedRef.current = true
+
+    let progress = 0
+    const tick = setInterval(() => {
+      progress = Math.min(0.92, progress + 0.02)
+      setAnalyzeProgress(progress)
+      setAnalyzePhase(Math.min(3, Math.floor(progress * 4)))
+    }, 80)
+
+    void (async () => {
+      try {
+        await Promise.all([
+          (async () => {
+            await clearDemoData(db)
+            await seedDemoData(db)
+            await upsertSetting(db, 'condition_source', 'demo')
+          })(),
+          delay(DEMO_ANALYSIS_MIN_MS),
+        ])
+        scheduleSnapshot(db)
+        clearInterval(tick)
+        if (!mountedRef.current) return
+        setAnalyzeProgress(1)
+        setAnalyzePhase(3)
+        setLastUploadResult({
+          recordId: 'demo',
+          conditionCount: CONDITIONS.length,
+          measurementCount: 0,
+        })
+        setPipelineError(null)
+        setScreen('bodymap')
+        setTimeout(() => replaceBodymap('demo', CONDITIONS.length), 400)
+      } catch (e) {
+        clearInterval(tick)
+        if (!mountedRef.current) return
+        const msg = e instanceof Error ? e.message : 'Something went wrong while preparing demo data.'
+        setPipelineError(msg)
+        setErrorMsg(msg)
+      }
+    })()
+
+    return () => clearInterval(tick)
+  }, [
+    pendingDemo, routeDemo, db,
+    setAnalyzeProgress, setAnalyzePhase, setScreen,
+    setActiveSystems, setCurrentYear, setConditionSource,
+    setPendingDemo, setLastUploadResult, setPipelineError,
+  ])
 
   // Upload path: run extraction/enrichment/inference/persistence, then route to
   // bodymap when SQLite has the uploaded conditions.
@@ -347,9 +468,12 @@ export default function AnalyzingScreen() {
         setAnalyzeProgress(1)
         setAnalyzePhase(3)
         setLastUploadResult(result)
+        setConditionSource('auto')
+        await upsertSetting(db, 'condition_source', 'auto')
+        scheduleSnapshot(db)
         setPipelineError(null)
         setScreen('bodymap')
-        setTimeout(() => router.replace('/bodymap'), 400)
+        setTimeout(() => replaceBodymap('auto', result.conditionCount), 400)
       } catch (e) {
         clearInterval(smooth)
         if (!mountedRef.current) return
@@ -363,7 +487,7 @@ export default function AnalyzingScreen() {
   }, [
     pendingUpload, db, gender,
     setAnalyzeProgress, setAnalyzePhase, setScreen,
-    setPendingUpload, setLastUploadResult, setPipelineError,
+    setPendingUpload, setLastUploadResult, setConditionSource, setPipelineError,
   ])
 
   const pct = Math.round(analyzeProgress * 100)

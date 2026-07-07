@@ -92,6 +92,7 @@ function QSBadge({ s, size }: { s: Styles; size: number }) {
 
 export default function UploadScreen() {
   const startAnalyze = useAppStore((s) => s.startAnalyze)
+  const startDemoAnalyze = useAppStore((s) => s.startDemoAnalyze)
   const setPendingUpload = useAppStore((s) => s.setPendingUpload)
   const [conditions] = useConditions()
   const { height: winH } = useWindowDimensions()
@@ -156,7 +157,12 @@ export default function UploadScreen() {
   }
 
   function handleDemo() {
-    router.push('/bodymap')
+    if (IS_WEB && typeof window !== 'undefined') {
+      window.location.assign('/analyzing?demo=1')
+      return
+    }
+    startDemoAnalyze()
+    router.push({ pathname: '/analyzing', params: { demo: '1' } })
   }
 
   return (

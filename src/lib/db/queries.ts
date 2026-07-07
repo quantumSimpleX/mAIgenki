@@ -424,9 +424,12 @@ export async function getLocalNamesForCondition(
   return out
 }
 
-// Returns all seeded conditions mapped onto the DesignCondition shape the body
-// map renders. English label comes from name_common; medName from name_medical.
-export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition[]> {
+type ConditionQueryMode = 'auto' | 'demo'
+
+// Returns stored conditions mapped onto the DesignCondition shape the body map
+// renders. In auto mode, user-upload rows hide demo rows. In demo mode, only
+// demo rows are shown, without deleting any user-upload data.
+export async function getConditions(db: SQLiteDatabase, mode: ConditionQueryMode = 'auto'): Promise<DesignCondition[]> {
   const records = await db.getAllAsync<{ id: string; record_type: string | null }>(
     'SELECT id, record_type FROM health_records',
   )
@@ -437,9 +440,11 @@ export async function getConditions(db: SQLiteDatabase): Promise<DesignCondition
     cy: number | null
     year_frac: number | null
   }>('SELECT * FROM conditions ORDER BY year_frac ASC')
-  const visibleRows = hasUserRecords
-    ? rows.filter((row) => !row.record_id || !demoRecordIds.has(row.record_id))
-    : rows
+  const visibleRows = mode === 'demo'
+    ? rows.filter((row) => row.record_id && demoRecordIds.has(row.record_id))
+    : hasUserRecords
+      ? rows.filter((row) => !row.record_id || !demoRecordIds.has(row.record_id))
+      : rows
 
   const result: DesignCondition[] = []
   for (const row of visibleRows) {

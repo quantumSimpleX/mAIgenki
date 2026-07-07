@@ -34,4 +34,26 @@ describe('demo condition visibility', () => {
     expect(visible).toHaveLength(1)
     expect(visible[0].system).toBe('cardiovascular')
   })
+
+  it('can explicitly show demo rows without deleting user data', async () => {
+    const db = await freshSeededDb()
+    const recordId = await insertHealthRecord(db, {
+      filename: 'user-lab.pdf',
+      recordType: 'upload',
+      extractionMethod: 'text',
+    })
+    await insertCondition(db, {
+      recordId,
+      nameMedical: 'Essential hypertension',
+      nameCommon: 'High blood pressure',
+      system: 'cardio',
+      dateDiagnosed: '2026-07-07',
+    })
+
+    const demoVisible = await getConditions(db, 'demo')
+    const storedRows = await db.getAllAsync('SELECT * FROM conditions')
+    expect(storedRows.length).toBe(23)
+    expect(demoVisible).toHaveLength(22)
+    expect(demoVisible.some((c) => c.id === 'htn')).toBe(true)
+  })
 })

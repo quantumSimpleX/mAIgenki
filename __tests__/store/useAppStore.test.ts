@@ -22,10 +22,21 @@ describe('initial state', () => {
 
 describe('actions', () => {
   it('startAnalyze resets analyze state', () => {
+    get().setConditionSource('demo')
     get().startAnalyze()
     expect(get().screen).toBe('analyzing')
     expect(get().analyzeProgress).toBe(0)
     expect(get().analyzePhase).toBe(0)
+    expect(get().conditionSource).toBe('auto')
+  })
+
+  it('startDemoAnalyze resets demo view state', () => {
+    get().setActiveSystems(['cardiovascular'])
+    get().startDemoAnalyze()
+    expect(get().screen).toBe('analyzing')
+    expect(get().pendingDemo).toBe(true)
+    expect(get().conditionSource).toBe('demo')
+    expect(get().activeSystems).toEqual(ALL_SYSTEMS)
   })
 
   it('toggleSystem removes then re-adds', () => {
