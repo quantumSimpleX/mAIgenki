@@ -60,6 +60,10 @@ const K = 2.5
 // Fallback values used only when conditions list is empty.
 const FALLBACK_MIN = 2013
 const FALLBACK_MAX = 2025
+const MONTH_IDX_SHORT: Record<string, number> = {
+  JAN: 0, FEB: 1, MAR: 2, APR: 3, MAY: 4, JUN: 5,
+  JUL: 6, AUG: 7, SEP: 8, OCT: 9, NOV: 10, DEC: 11,
+}
 
 function clamp01(n: number): number {
   return Math.max(0, Math.min(1, n))
@@ -69,9 +73,13 @@ function toLinear(yearFrac: number, rMin: number, rMax: number): number {
   if (rMax <= rMin) return 1
   return clamp01((yearFrac - rMin) / (rMax - rMin))
 }
-function toLogFrac(yearFrac: number, rMin: number, rMax: number): number {
+function toTimelineFrac(yearFrac: number, rMin: number, rMax: number): number {
   const t = toLinear(yearFrac, rMin, rMax)
-  return Math.log1p(K * t) / Math.log1p(K)
+  return (Math.exp(K * t) - 1) / (Math.exp(K) - 1)
+}
+
+function fromTimelineFrac(frac: number): number {
+  return Math.log(clamp01(frac) * (Math.exp(K) - 1) + 1) / K
 }
 function railEdgeGap(railH: number): number {
   return Math.min(sc(24), Math.max(sc(12), railH * 0.055))
@@ -86,7 +94,7 @@ function toVertPos(
   dataMax = rMax,
 ): number {
   if (dataMax <= dataMin || dataMin <= rMin || dataMax >= rMax) {
-    return (1 - toLogFrac(yearFrac, rMin, rMax)) * railH
+    return (1 - toTimelineFrac(yearFrac, rMin, rMax)) * railH
   }
   const gap = Math.min(railEdgeGap(railH), railH / 4)
   if (yearFrac <= dataMin) {
@@ -95,7 +103,7 @@ function toVertPos(
   if (yearFrac >= dataMax) {
     return gap * (1 - toLinear(yearFrac, dataMax, rMax))
   }
-  return gap + (1 - toLogFrac(yearFrac, dataMin, dataMax)) * Math.max(1, railH - gap * 2)
+  return gap + (1 - toTimelineFrac(yearFrac, dataMin, dataMax)) * Math.max(1, railH - gap * 2)
 }
 
 function fromVertPos(
@@ -117,11 +125,11 @@ function fromVertPos(
       return dataMax + ((gap - y) / gap) * (rMax - dataMax)
     }
     const frac = 1 - (y - gap) / Math.max(1, railH - gap * 2)
-    const t = Math.expm1(clamp01(frac) * Math.log1p(K)) / K
+    const t = fromTimelineFrac(frac)
     return dataMin + t * (dataMax - dataMin)
   }
   const frac = 1 - y / railH
-  const t = Math.expm1(clamp01(frac) * Math.log1p(K)) / K
+  const t = fromTimelineFrac(frac)
   return rMin + t * (rMax - rMin)
 }
 
@@ -132,6 +140,15 @@ function clampRailYear(yearFrac: number, rMin: number, rMax: number): number {
 function conditionYear(c: DesignCondition, overrides: Record<string, string>): number {
   const override = overrides[c.id] ? parseFloat(overrides[c.id]) : NaN
   return Number.isFinite(override) ? override : c.yearFrac
+}
+
+function birthYearFrac(birthYear: number, birthMonth: string): number {
+  const monthIndex = MONTH_IDX_SHORT[birthMonth] ?? 0
+  return birthYear + monthIndex / 12
+}
+
+function railLowerLimit(oldestYear: number, birthYear: number, birthMonth: string): number {
+  return Math.max(oldestYear - RAIL_RANGE_PAD_BEFORE, birthYearFrac(birthYear, birthMonth))
 }
 
 const DISCLAIMER = 'Educational only. Not medical advice. Never a substitute for professional clinical judgment.'
@@ -713,9 +730,10 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const railYears = conditions
     .map((c) => conditionYear(c, condDateOverrides))
     .filter((year) => Number.isFinite(year))
-  // Dynamic range: leave 2 months before earliest and 1 month after latest.
+  // Dynamic range: leave 2 months before earliest and 1 month after latest,
+  // without extending earlier than the user's birth month.
   const railMin = railYears.length > 0
-    ? Math.min(...railYears) - RAIL_RANGE_PAD_BEFORE
+    ? railLowerLimit(Math.min(...railYears), birthYear, birthMonth)
     : FALLBACK_MIN
   const railMax = railYears.length > 0
     ? Math.max(...railYears) + RAIL_RANGE_PAD_AFTER
@@ -857,6 +875,8 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
     dataMin,
     dataMax,
   )
+  const railLabelH = fs(9) + sc(4)
+  const railLabelTop = Math.max(0, Math.min(railH - railLabelH, thumbTop - railLabelH / 2))
 
   return (
     <Animated.View
@@ -912,7 +932,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
         })}
       <View style={[styles.railThumb, { top: thumbTop - sc(4) }]} />
       {dragging && (
-        <View style={[styles.railLabel, { top: Math.max(0, thumbTop - 14), pointerEvents: 'none' }]}>
+        <View style={[styles.railLabel, { top: railLabelTop, pointerEvents: 'none' }]}>
           <Text style={styles.railLabelText} numberOfLines={1}>
             {formatDateDisplay(currentYear, timeDisplayMode, birthYear, birthMonth)}
           </Text>
@@ -1726,6 +1746,7 @@ export default function BodyMapScreen() {
     relocatingCondition, cancelRelocation,
     lastUploadResult, setLastUploadResult,
     setCurrentYear, setConditionSource,
+    birthYear, birthMonth,
     genderPromptNeeded, setGenderPromptNeeded, setGender,
   } = useAppStore()
 
@@ -1767,7 +1788,7 @@ export default function BodyMapScreen() {
     if (years.length === 0) return
     const newest = Math.max(...years)
     const oldest = Math.min(...years)
-    const railMin = oldest - RAIL_RANGE_PAD_BEFORE
+    const railMin = railLowerLimit(oldest, birthYear, birthMonth)
     const railMax = newest + RAIL_RANGE_PAD_AFTER
     if (lastUploadResult) {
       setCurrentYear(newest)
@@ -1776,7 +1797,7 @@ export default function BodyMapScreen() {
     } else if (currentYear > railMax) {
       setCurrentYear(railMax)
     }
-  }, [lastUploadResult, conditions, condDateOverrides, currentYear, setCurrentYear])
+  }, [lastUploadResult, conditions, condDateOverrides, currentYear, birthYear, birthMonth, setCurrentYear])
 
   // ── One-time gender prompt (Phase 9.7.3) ──
   function chooseGender(g: Gender) {
