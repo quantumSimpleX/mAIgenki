@@ -1,19 +1,31 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
 
 // ── Model chain ───────────────────────────────────────────────────────────────
-// Ordered best → last-resort for medical text extraction.
-// Priority: structured-JSON accuracy, medical vocabulary, context window, speed.
-// All models must end in :free — no paid models ever flow through here.
+// One fallback chain for every OpenRouter call, following the simFolio pattern:
+// one shared model list, one call loop, first usable answer wins.
+// All models must end in :free — no paid models flow through here.
 
 export const DEFAULT_MODELS: string[] = [
-  'nousresearch/hermes-3-llama-3.1-405b:free', // Structured-output specialist; best JSON schema adherence + medical vocabulary
-  'openai/gpt-oss-120b:free',                  // Dense 120B; strong clinical reasoning
-  'nvidia/nemotron-3-super-120b-a12b:free',    // MoE — fast, 1M context for long cumulative histories
-  'meta-llama/llama-3.3-70b-instruct:free',    // Reliable 70B workhorse
-  'meta-llama/llama-3.2-3b-instruct:free',     // Emergency fallback — small but fast
+  'google/gemma-4-31b-it:free',
+  'openai/gpt-oss-120b:free',
+  'meta-llama/llama-3.3-70b-instruct:free',
+  'nvidia/nemotron-3-ultra-550b-a55b:free',
 ]
 
 const SETTINGS_KEY = 'llm_model_chain'
+
+function localOpenRouterApiKey(): string {
+  if (typeof process === 'undefined') return ''
+  return (
+    process.env.EXPO_PUBLIC_MAIGENKI_OPENROUTER_API_KEY ??
+    process.env.EXPO_PUBLIC_OPENROUTER_API_KEY ??
+    ''
+  ).trim()
+}
+
+export function resolveOpenRouterApiKey(userApiKey = ''): string {
+  return localOpenRouterApiKey() || userApiKey.trim()
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,7 +44,7 @@ export interface LLMResult<T> {
 
 interface CallOptions<T> {
   messages: LLMMessage[]
-  apiKey: string
+  apiKey?: string
   models?: string[]
   validate?: (content: string) => T | null | undefined
   temperature?: number
@@ -48,6 +60,7 @@ export async function callLLMWithFallback<T = string>(
 ): Promise<LLMResult<T>> {
   const { messages, apiKey, validate, temperature, label = 'llm' } = opts
   const models = opts.models ?? DEFAULT_MODELS
+  const resolvedApiKey = resolveOpenRouterApiKey(apiKey)
   const failures: string[] = []
 
   for (const model of models) {
@@ -57,7 +70,7 @@ export async function callLLMWithFallback<T = string>(
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${apiKey}`,
+          'Authorization': `Bearer ${resolvedApiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://github.com/quantumSimpleX/mAIgenki',
           'X-Title': 'mAIgenki',

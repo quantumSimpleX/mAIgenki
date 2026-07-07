@@ -2,6 +2,7 @@ import {
   DEFAULT_MODELS,
   callLLMWithFallback,
   getModelChain,
+  resolveOpenRouterApiKey,
   updateModelChain,
 } from '@/lib/llm/client'
 
@@ -31,18 +32,27 @@ const mockDb = {
   getFirstAsync: jest.fn().mockResolvedValue(null),
 }
 
-beforeEach(() => jest.clearAllMocks())
+beforeEach(() => {
+  jest.clearAllMocks()
+  delete process.env.EXPO_PUBLIC_MAIGENKI_OPENROUTER_API_KEY
+  delete process.env.EXPO_PUBLIC_OPENROUTER_API_KEY
+})
 
 // ── DEFAULT_MODELS ────────────────────────────────────────────────────────────
 
 describe('DEFAULT_MODELS', () => {
-  it('starts with hermes 405B (best structured-output model)', () => {
-    expect(DEFAULT_MODELS[0]).toBe('nousresearch/hermes-3-llama-3.1-405b:free')
+  it('uses the Simfolio-style four-vendor fallback order', () => {
+    expect(DEFAULT_MODELS).toEqual([
+      'google/gemma-4-31b-it:free',
+      'openai/gpt-oss-120b:free',
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'nvidia/nemotron-3-ultra-550b-a55b:free',
+    ])
   })
 
-  it('ends with a small emergency fallback', () => {
+  it('ends with the NVIDIA final fallback', () => {
     const last = DEFAULT_MODELS[DEFAULT_MODELS.length - 1]
-    expect(last).toBe('meta-llama/llama-3.2-3b-instruct:free')
+    expect(last).toBe('nvidia/nemotron-3-ultra-550b-a55b:free')
   })
 
   it('has at least 4 models in the chain', () => {
@@ -53,6 +63,24 @@ describe('DEFAULT_MODELS', () => {
     for (const m of DEFAULT_MODELS) {
       expect(m).toMatch(/:free$/)
     }
+  })
+})
+
+// ── API key resolution ────────────────────────────────────────────────────────
+
+describe('resolveOpenRouterApiKey', () => {
+  it('prefers the locally configured app key', () => {
+    process.env.EXPO_PUBLIC_MAIGENKI_OPENROUTER_API_KEY = ' sk-local '
+    expect(resolveOpenRouterApiKey('sk-user')).toBe('sk-local')
+  })
+
+  it('falls back to the generic Expo public key', () => {
+    process.env.EXPO_PUBLIC_OPENROUTER_API_KEY = 'sk-public'
+    expect(resolveOpenRouterApiKey()).toBe('sk-public')
+  })
+
+  it('uses a provided user key when no local app key exists', () => {
+    expect(resolveOpenRouterApiKey(' sk-user ')).toBe('sk-user')
   })
 })
 
@@ -160,6 +188,19 @@ describe('callLLMWithFallback', () => {
     const [, init] = mockFetch.mock.calls[0]
     const headers = init.headers as Record<string, string>
     expect(headers['Authorization']).toBe('Bearer ')
+  })
+
+  it('sends the local app key when configured', async () => {
+    process.env.EXPO_PUBLIC_MAIGENKI_OPENROUTER_API_KEY = 'sk-local'
+    mockFetch.mockReturnValueOnce(okResponse('ok'))
+    await callLLMWithFallback({
+      messages: [{ role: 'user', content: 'hi' }],
+      apiKey: 'sk-user',
+      models,
+    })
+    const [, init] = mockFetch.mock.calls[0]
+    const headers = init.headers as Record<string, string>
+    expect(headers['Authorization']).toBe('Bearer sk-local')
   })
 
   it('passes temperature when provided', async () => {
