@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { router } from 'expo-router'
 import {
   Animated, Easing, Platform, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View,
@@ -10,6 +10,9 @@ import Svg, {
 import { Image } from 'expo-image'
 import { useAppStore } from '@/store/useAppStore'
 import { ALL_SYSTEMS, type SystemId } from '@/model/conditions'
+import { useOptionalDatabase } from '@/lib/db/provider'
+import { getSetting } from '@/lib/db/queries'
+import { processHealthRecord } from '@/lib/pipeline'
 
 // The native animation driver is absent on web; using it there only warns.
 const IS_WEB = Platform.OS === 'web'
@@ -249,33 +252,119 @@ export default function AnalyzingScreen() {
   const analyzePhase = useAppStore((s) => s.analyzePhase)
   const setAnalyzeProgress = useAppStore((s) => s.setAnalyzeProgress)
   const setAnalyzePhase = useAppStore((s) => s.setAnalyzePhase)
+  const setScreen = useAppStore((s) => s.setScreen)
+  const pendingUpload = useAppStore((s) => s.pendingUpload)
   const setPendingUpload = useAppStore((s) => s.setPendingUpload)
+  const setLastUploadResult = useAppStore((s) => s.setLastUploadResult)
+  const setPipelineError = useAppStore((s) => s.setPipelineError)
+  const gender = useAppStore((s) => s.gender)
+  const db = useOptionalDatabase()
   const { width: viewportW } = useWindowDimensions()
   const fontScale = fontScaleForWidth(viewportW)
   const bottomGap = progressGap(fontScale)
   const trackW = Math.max(180, viewportW - progressInsetForWidth(viewportW))
 
   const [fadeIn] = useState(() => new Animated.Value(0))
-  const [errorMsg] = useState<string | null>(null)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [assetTop, setAssetTop] = useState(IS_WEB ? 180 : 120)
+  const startedRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  useEffect(() => () => { mountedRef.current = false }, [])
 
   // Intro animations (run once on mount).
   useEffect(() => {
     Animated.timing(fadeIn, { toValue: 1, duration: 400, useNativeDriver: !IS_WEB, easing: Easing.out(Easing.ease) }).start()
   }, [fadeIn])
 
-  // Temporary extraction-page focus mode: visual-only progress loop. No pipeline,
-  // no SQLite writes, and no navigation to bodymap.
+  // Direct route / demo path: no pending upload, so show the analysis animation
+  // briefly, then continue to the bodymap.
   useEffect(() => {
-    setPendingUpload(null)
+    if (pendingUpload || startedRef.current) return
+    startedRef.current = true
     let progress = 0
     const tick = setInterval(() => {
-      progress = (progress + 0.006) % 1
+      progress = Math.min(1, progress + 0.012)
       setAnalyzeProgress(progress)
       setAnalyzePhase(Math.min(3, Math.floor(progress * 4)))
+      if (progress >= 1) {
+        clearInterval(tick)
+        setScreen('bodymap')
+        setTimeout(() => router.replace('/bodymap'), 400)
+      }
     }, 80)
     return () => clearInterval(tick)
-  }, [setAnalyzeProgress, setAnalyzePhase, setPendingUpload])
+  }, [pendingUpload, setAnalyzeProgress, setAnalyzePhase, setScreen])
+
+  // Upload path: run extraction/enrichment/inference/persistence, then route to
+  // bodymap when SQLite has the uploaded conditions.
+  useEffect(() => {
+    if (!pendingUpload || startedRef.current) return
+
+    if (!db) {
+      const timer = setTimeout(() => {
+        if (startedRef.current || !mountedRef.current) return
+        startedRef.current = true
+        setPendingUpload(null)
+        const msg = 'Storage unavailable — uploads cannot be processed on this device.'
+        setPipelineError(msg)
+        setErrorMsg(msg)
+      }, 5000)
+      return () => clearTimeout(timer)
+    }
+
+    startedRef.current = true
+    const upload = pendingUpload
+    setPendingUpload(null)
+
+    let target = 0.05
+    const smooth = setInterval(() => {
+      if (!mountedRef.current) {
+        clearInterval(smooth)
+        return
+      }
+      const cur = useAppStore.getState().analyzeProgress
+      if (cur < target) setAnalyzeProgress(Math.min(target, cur + 0.02))
+    }, 60)
+
+    void (async () => {
+      try {
+        const apiKey = (await getSetting(db, 'openrouter_api_key')) ?? ''
+        const result = await processHealthRecord({
+          uri: upload.uri,
+          db,
+          apiKey,
+          kind: upload.kind,
+          sex: gender,
+          onProgress: (phase, progress) => {
+            if (!mountedRef.current) return
+            setAnalyzePhase(phase)
+            target = progress
+          },
+        })
+        clearInterval(smooth)
+        if (!mountedRef.current) return
+        setAnalyzeProgress(1)
+        setAnalyzePhase(3)
+        setLastUploadResult(result)
+        setPipelineError(null)
+        setScreen('bodymap')
+        setTimeout(() => router.replace('/bodymap'), 400)
+      } catch (e) {
+        clearInterval(smooth)
+        if (!mountedRef.current) return
+        const msg = e instanceof Error ? e.message : 'Something went wrong while analyzing this file.'
+        setPipelineError(msg)
+        setErrorMsg(msg)
+      }
+    })()
+
+    return () => clearInterval(smooth)
+  }, [
+    pendingUpload, db, gender,
+    setAnalyzeProgress, setAnalyzePhase, setScreen,
+    setPendingUpload, setLastUploadResult, setPipelineError,
+  ])
 
   const pct = Math.round(analyzeProgress * 100)
 
