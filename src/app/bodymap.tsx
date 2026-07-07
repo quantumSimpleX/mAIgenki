@@ -45,6 +45,11 @@ const C = {
   aquaDark: '#1A9E8A',
 }
 
+const STATIC_UI_ALPHA = 0.33
+const STATIC_STROKE_ALPHA = 0.16
+const STATIC_DARK_BG = `rgba(10,12,20,${STATIC_UI_ALPHA})`
+const STATIC_STROKE_BG = `rgba(255,255,255,${STATIC_STROKE_ALPHA})`
+
 const SUPPORTED_LANGS: {
   code: SupportedLang; flag: string; native: string; english: string
 }[] = [
@@ -767,10 +772,6 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       railMin,
       railMax,
     )
-    if (posY <= 0 || posY >= railH) {
-      setCurrentYear(rawYear)
-      return
-    }
     const visible = conditions
       .filter((c) => activeSystems.includes(c.system))
       .map((c) => conditionYear(c, condDateOverrides))
@@ -2204,7 +2205,7 @@ const styles = StyleSheet.create({
 
   legendPanel: {
     position: 'absolute', top: 0, left: 0,
-    backgroundColor: 'rgba(10,12,20,0.4)', overflow: 'hidden', zIndex: 5,
+    backgroundColor: STATIC_DARK_BG, overflow: 'hidden', zIndex: 5,
   },
   legendInner: { paddingVertical: sc(10), paddingHorizontal: sc(12) },
   legendRow: { flexDirection: 'row', alignItems: 'flex-end', gap: sc(8), paddingVertical: sc(5) },
@@ -2215,11 +2216,11 @@ const styles = StyleSheet.create({
 
   railWrap: {
     position: 'absolute', top: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(255,255,255,0.05)', overflow: 'visible', zIndex: 3,
+    backgroundColor: STATIC_DARK_BG, overflow: 'visible', zIndex: 3,
     // Browser must not vertically scroll when the finger drags the rail.
     ...(IS_WEB ? { touchAction: 'none' as const } : {}),
   },
-  railTrack: { position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, backgroundColor: 'rgba(255,255,255,0.08)' },
+  railTrack: { position: 'absolute', top: 0, bottom: 0, left: '50%', width: 1, backgroundColor: STATIC_STROKE_BG },
   railDash: { position: 'absolute', left: sc(3), right: sc(3), height: 2, borderRadius: 1 },
   railThumb: {
     position: 'absolute', left: '50%', marginLeft: sc(-4), width: sc(8), height: sc(8), borderRadius: sc(4),
@@ -2228,7 +2229,7 @@ const styles = StyleSheet.create({
       ? { boxShadow: `0 0 ${sc(4)}px ${C.aqua}` }
       : { shadowColor: C.aqua, shadowOpacity: 0.8, shadowRadius: 4, elevation: 4 }),
   },
-  railLabel: { position: 'absolute', right: RAIL_W_ACTIVE + sc(4), backgroundColor: 'rgba(10,12,20,0.9)', paddingHorizontal: sc(5), paddingVertical: sc(2), borderRadius: sc(4) },
+  railLabel: { position: 'absolute', right: RAIL_W_ACTIVE + sc(4), backgroundColor: STATIC_DARK_BG, paddingHorizontal: sc(5), paddingVertical: sc(2), borderRadius: sc(4) },
   railLabelText: { fontFamily: 'SourceCodePro', fontSize: fs(9), color: C.aqua },
   railBookend: { position: 'absolute', right: sc(2), fontFamily: 'SourceCodePro', fontSize: fs(8), color: 'rgba(255,255,255,0.3)' },
 
@@ -2429,11 +2430,11 @@ const styles = StyleSheet.create({
 
   // Upload shortcuts
   uploadWrap: { position: 'absolute', bottom: sc(20), left: sc(16), alignItems: 'flex-start', zIndex: 4 },
-  resetViewBtn: { width: sc(24), height: sc(24), borderRadius: sc(5), backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center', marginBottom: sc(5) },
+  resetViewBtn: { width: sc(24), height: sc(24), borderRadius: sc(5), borderWidth: 1, borderColor: STATIC_STROKE_BG, backgroundColor: STATIC_DARK_BG, alignItems: 'center', justifyContent: 'center', marginBottom: sc(5) },
   uploadBtns: { gap: sc(5), alignItems: 'flex-start', marginBottom: sc(6) },
-  uploadShortcut: { width: sc(24), height: sc(24), borderRadius: sc(5), backgroundColor: 'rgba(255,255,255,0.08)', alignItems: 'center', justifyContent: 'center' },
-  uploadShortcutChat: { width: sc(24), height: sc(24), borderRadius: sc(5), backgroundColor: 'rgba(138,96,235,0.12)', borderWidth: 1, borderColor: 'rgba(138,96,235,0.3)', alignItems: 'center', justifyContent: 'center' },
-  qsWordmark: { opacity: 0.3 },
+  uploadShortcut: { width: sc(24), height: sc(24), borderRadius: sc(5), borderWidth: 1, borderColor: STATIC_STROKE_BG, backgroundColor: STATIC_DARK_BG, alignItems: 'center', justifyContent: 'center' },
+  uploadShortcutChat: { width: sc(24), height: sc(24), borderRadius: sc(5), borderWidth: 1, borderColor: STATIC_STROKE_BG, backgroundColor: STATIC_DARK_BG, alignItems: 'center', justifyContent: 'center' },
+  qsWordmark: { opacity: STATIC_UI_ALPHA },
 
   backdrop: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.4)', zIndex: 9 },
 })
