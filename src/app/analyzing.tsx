@@ -45,6 +45,8 @@ const RAMP_DOWN_MS = 1250
 const RAMP_STAGGER_MS = RAMP_UP_MS + RAMP_HOLD_MS
 const ROW_OFFSET_VIEWPORT_RATIO = 0.17
 const ASSET_BASE_SCALE = 0.92169
+const PROGRESS_BAR_HEIGHT = 4
+const ANCHOR_DOTS_GAP = 6
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n))
@@ -60,6 +62,14 @@ function progressInsetForWidth(width: number): number {
   if (width < 680) return 28
   if (width < 980) return 56
   return 96
+}
+
+function progressGap(fontScale: number): number {
+  return IS_WEB ? scaled(10, fontScale) : 12
+}
+
+function progressDotsHeight(fontScale: number): number {
+  return scaled(8, fontScale) + ANCHOR_DOTS_GAP + scaled(11, fontScale)
 }
 
 function Logo({ fontScale }: { fontScale: number }) {
@@ -161,15 +171,22 @@ function AnatomyLayerPreview({ onTopChange }: { onTopChange: (top: number) => vo
   const topReserve = IS_WEB ? scaled(128, fontScale) : 92
   const headlineBottom = IS_WEB ? scaled(136, fontScale) : 102
   const rowOffset = rowGroups.length === 1 ? 0 : height * ROW_OFFSET_VIEWPORT_RATIO
+  const bottomGap = progressGap(fontScale)
+  const dotsHeight = progressDotsHeight(fontScale)
+  const dotsTop = height - bottomOffset - PROGRESS_BAR_HEIGHT - bottomGap - dotsHeight
+  const anchorRowIndex = rowGroups.length === 3 ? 1 : 0
+  const anchorBottom = dotsTop - ANCHOR_DOTS_GAP
   const assetScale = ASSET_BASE_SCALE * assetScaleForWidth(width)
   const baseImageH = Math.max(IS_WEB ? 400 : 288, Math.min((height - topReserve - bottomOffset) * 1.25, IS_WEB ? 775 : 538)) * assetScale
-  const twoRowMaxH = Math.max(1, height - bottomOffset - headlineBottom - rowOffset)
-  const imageH = rowGroups.length === 2 ? Math.min(baseImageH, twoRowMaxH) : baseImageH
+  const anchoredMaxH = Math.max(1, anchorBottom - headlineBottom - anchorRowIndex * rowOffset)
+  const imageH = rowGroups.length > 1 ? Math.min(baseImageH, anchoredMaxH) : baseImageH
   const previewH = imageH + (rowGroups.length - 1) * rowOffset
   const slotW = rowW / maxRowCount
   const imageW = Math.max(slotW * 1.75 * assetScale, imageH / 2.39)
   const previewTop = height - bottomOffset - previewH
-  const layerTop = (rowGroups.length === 1 ? previewTop : Math.max(headlineBottom, previewTop)) - 30
+  const layerTop = rowGroups.length === 1
+    ? previewTop - 30
+    : anchorBottom - imageH - anchorRowIndex * rowOffset
 
   useEffect(() => {
     opacityAnims.forEach((anim) => anim.setValue(RAMP_LOW))
@@ -210,14 +227,16 @@ function AnatomyLayerPreview({ onTopChange }: { onTopChange: (top: number) => vo
 }
 
 function PhaseDots({ fontScale, phase }: { fontScale: number, phase: number }) {
+  const dotSize = scaled(8, fontScale)
+  const labelLineHeight = scaled(11, fontScale)
   return (
-    <View style={styles.dotsRow}>
+    <View style={[styles.dotsRow, { height: progressDotsHeight(fontScale) }]}>
       {PHASES.map((label, i) => {
         const color = i < phase ? C.aqua : i === phase ? C.purpleLight : C.pending
         return (
           <View key={label} style={styles.dotCol}>
-            <View style={[styles.dot, { backgroundColor: color, width: scaled(8, fontScale), height: scaled(8, fontScale), borderRadius: scaled(4, fontScale) }]} />
-            <Text style={[styles.dotLabel, { color: i <= phase ? C.ink : C.inkMuted, fontSize: scaled(9, fontScale) }]}>{label}</Text>
+            <View style={[styles.dot, { backgroundColor: color, width: dotSize, height: dotSize, borderRadius: dotSize / 2 }]} />
+            <Text style={[styles.dotLabel, { color: i <= phase ? C.ink : C.inkMuted, fontSize: scaled(9, fontScale), lineHeight: labelLineHeight }]}>{label}</Text>
           </View>
         )
       })}
@@ -233,6 +252,7 @@ export default function AnalyzingScreen() {
   const setPendingUpload = useAppStore((s) => s.setPendingUpload)
   const { width: viewportW } = useWindowDimensions()
   const fontScale = fontScaleForWidth(viewportW)
+  const bottomGap = progressGap(fontScale)
   const trackW = Math.max(180, viewportW - progressInsetForWidth(viewportW))
 
   const [fadeIn] = useState(() => new Animated.Value(0))
@@ -287,7 +307,7 @@ export default function AnalyzingScreen() {
 
           <AnatomyLayerPreview onTopChange={setAssetTop} />
 
-          <View style={[styles.bottomBlock, { gap: IS_WEB ? scaled(10, fontScale) : 12 }]}>
+          <View style={[styles.bottomBlock, { gap: bottomGap }]}>
             <View style={styles.phaseBlock}>
               <Text style={[styles.phaseName, { fontSize: scaled(15, fontScale) }]}>{PHASES[analyzePhase]}</Text>
               <Text style={[styles.phaseSub, { fontSize: scaled(12, fontScale) }]}>{pct}% — processing on-device</Text>
@@ -298,14 +318,14 @@ export default function AnalyzingScreen() {
             {/* Gradient progress bar */}
             <View style={[styles.barTrack, { width: trackW }]}>
               <View style={[styles.barClip, { width: analyzeProgress * trackW }]}>
-                <Svg width={trackW} height={4}>
+                <Svg width={trackW} height={PROGRESS_BAR_HEIGHT}>
                   <Defs>
                     <LinearGradient id="barGrad" x1="0" y1="0" x2="1" y2="0">
                       <Stop offset="0" stopColor={C.purpleLight} />
                       <Stop offset="1" stopColor={C.aqua} />
                     </LinearGradient>
                   </Defs>
-                  <Rect x={0} y={0} width={trackW} height={4} rx={2} fill="url(#barGrad)" />
+                  <Rect x={0} y={0} width={trackW} height={PROGRESS_BAR_HEIGHT} rx={2} fill="url(#barGrad)" />
                 </Svg>
               </View>
             </View>
@@ -345,12 +365,12 @@ const styles = StyleSheet.create({
   phaseSub: { fontFamily: 'SourceCodePro', color: C.procText },
 
   dotsRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', paddingHorizontal: 8 },
-  dotCol: { alignItems: 'center', gap: 6, flex: 1 },
+  dotCol: { alignItems: 'center', gap: ANCHOR_DOTS_GAP, flex: 1 },
   dot: {},
   dotLabel: { fontFamily: 'BarlowCondensed-Regular', textAlign: 'center' },
 
-  barTrack: { height: 4, backgroundColor: C.pending, borderRadius: 2, overflow: 'hidden' },
-  barClip: { height: 4, overflow: 'hidden' },
+  barTrack: { height: PROGRESS_BAR_HEIGHT, backgroundColor: C.pending, borderRadius: 2, overflow: 'hidden' },
+  barClip: { height: PROGRESS_BAR_HEIGHT, overflow: 'hidden' },
 
   errorText: {
     fontFamily: 'BarlowCondensed-Regular', color: C.ink,
