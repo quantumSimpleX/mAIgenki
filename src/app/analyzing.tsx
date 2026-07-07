@@ -55,6 +55,13 @@ function assetScaleForWidth(width: number): number {
   return 0.9 + t * 0.1
 }
 
+function progressInsetForWidth(width: number): number {
+  if (!IS_WEB) return 64
+  if (width < 680) return 28
+  if (width < 980) return 56
+  return 96
+}
+
 function Logo({ fontScale }: { fontScale: number }) {
   return (
     <View style={styles.logoRow}>
@@ -226,7 +233,7 @@ export default function AnalyzingScreen() {
   const setPendingUpload = useAppStore((s) => s.setPendingUpload)
   const { width: viewportW } = useWindowDimensions()
   const fontScale = fontScaleForWidth(viewportW)
-  const trackW = Math.max(180, viewportW - (IS_WEB ? 96 : 64))
+  const trackW = Math.max(180, viewportW - progressInsetForWidth(viewportW))
 
   const [fadeIn] = useState(() => new Animated.Value(0))
   const [errorMsg] = useState<string | null>(null)
