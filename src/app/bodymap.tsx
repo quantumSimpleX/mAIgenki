@@ -715,6 +715,7 @@ const RAIL_W_INACTIVE = IS_DESKTOP ? sc(14) : sc(18)
 const RAIL_W_ACTIVE   = IS_DESKTOP ? sc(18) : sc(18)
 const RAIL_RANGE_PAD_BEFORE = 2 / 12
 const RAIL_RANGE_PAD_AFTER = 1 / 12
+const RAIL_SNAP_THRESHOLD_RATIO = 0.01
 
 function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
   const {
@@ -787,7 +788,7 @@ function VerticalTimeRail({ conditions }: { conditions: DesignCondition[] }) {
       const pxDist = Math.abs(toVertPos(cFrac, railH, railMin, railMax, dataMin, dataMax) - clampedY)
       if (pxDist < minPxDist) { minPxDist = pxDist; nearestFrac = cFrac }
     }
-    const threshold = railH * 0.01
+    const threshold = railH * RAIL_SNAP_THRESHOLD_RATIO
     setCurrentYear(clampRailYear(minPxDist <= threshold ? nearestFrac : rawYear, railMin, railMax))
   }
 
