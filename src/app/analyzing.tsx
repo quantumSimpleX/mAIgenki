@@ -13,8 +13,17 @@ import { ALL_SYSTEMS, type SystemId } from '@/model/conditions'
 
 // The native animation driver is absent on web; using it there only warns.
 const IS_WEB = Platform.OS === 'web'
-const WEB_FONT_SCALE = IS_WEB ? 1.75 : 1
-const ff = (n: number): number => Math.round(n * WEB_FONT_SCALE)
+
+function fontScaleForWidth(width: number): number {
+  if (!IS_WEB) return 1
+  if (width < 680) return 1
+  if (width < 980) return 1.35
+  return 1.75
+}
+
+function scaled(n: number, scale: number): number {
+  return Math.round(n * scale)
+}
 
 const C = {
   bg: '#0A0E14',
@@ -36,12 +45,12 @@ const RAMP_DOWN_MS = 1250
 const RAMP_STAGGER_MS = RAMP_UP_MS + RAMP_HOLD_MS
 const ROW_OFFSET_VIEWPORT_RATIO = 0.17
 
-function Logo() {
+function Logo({ fontScale }: { fontScale: number }) {
   return (
     <View style={styles.logoRow}>
-      <Text style={styles.logoM}>m</Text>
-      <Text style={styles.logoAI}>AI</Text>
-      <Text style={styles.logoGenki}> Genki</Text>
+      <Text style={[styles.logoM, { fontSize: scaled(18, fontScale) }]}>m</Text>
+      <Text style={[styles.logoAI, { fontSize: scaled(20, fontScale), lineHeight: scaled(20, fontScale) }]}>AI</Text>
+      <Text style={[styles.logoGenki, { fontSize: scaled(18, fontScale) }]}> Genki</Text>
     </View>
   )
 }
@@ -120,6 +129,7 @@ function runRandomOpacityRamps(opacityAnims: Animated.Value[]): () => void {
 
 function AnatomyLayerPreview({ onTopChange }: { onTopChange: (top: number) => void }) {
   const { width, height } = useWindowDimensions()
+  const fontScale = fontScaleForWidth(width)
   const [opacityAnims] = useState(() => PREVIEW_SYSTEMS.map(() => new Animated.Value(RAMP_LOW)))
   const previewW = width
   const sidePad = width >= 680 ? Math.min(width * 0.08, IS_WEB ? 96 : 30) : 0
@@ -131,8 +141,8 @@ function AnatomyLayerPreview({ onTopChange }: { onTopChange: (top: number) => vo
       : [PREVIEW_SYSTEMS.slice(0, 3), PREVIEW_SYSTEMS.slice(3, 6), PREVIEW_SYSTEMS.slice(6)]
   const maxRowCount = Math.max(...rowGroups.map((row) => row.length))
   const bottomOffset = IS_WEB ? 18 : 10
-  const topReserve = IS_WEB ? ff(128) : 92
-  const headlineBottom = IS_WEB ? ff(136) : 102
+  const topReserve = IS_WEB ? scaled(128, fontScale) : 92
+  const headlineBottom = IS_WEB ? scaled(136, fontScale) : 102
   const rowOffset = rowGroups.length === 1 ? 0 : height * ROW_OFFSET_VIEWPORT_RATIO
   const baseImageH = Math.max(IS_WEB ? 400 : 288, Math.min((height - topReserve - bottomOffset) * 1.25, IS_WEB ? 775 : 538)) * 0.92169
   const twoRowMaxH = Math.max(1, height - bottomOffset - headlineBottom - rowOffset)
@@ -181,15 +191,15 @@ function AnatomyLayerPreview({ onTopChange }: { onTopChange: (top: number) => vo
   )
 }
 
-function PhaseDots({ phase }: { phase: number }) {
+function PhaseDots({ fontScale, phase }: { fontScale: number, phase: number }) {
   return (
     <View style={styles.dotsRow}>
       {PHASES.map((label, i) => {
         const color = i < phase ? C.aqua : i === phase ? C.purpleLight : C.pending
         return (
           <View key={label} style={styles.dotCol}>
-            <View style={[styles.dot, { backgroundColor: color }]} />
-            <Text style={[styles.dotLabel, { color: i <= phase ? C.ink : C.inkMuted }]}>{label}</Text>
+            <View style={[styles.dot, { backgroundColor: color, width: scaled(8, fontScale), height: scaled(8, fontScale), borderRadius: scaled(4, fontScale) }]} />
+            <Text style={[styles.dotLabel, { color: i <= phase ? C.ink : C.inkMuted, fontSize: scaled(9, fontScale) }]}>{label}</Text>
           </View>
         )
       })}
@@ -204,6 +214,7 @@ export default function AnalyzingScreen() {
   const setAnalyzePhase = useAppStore((s) => s.setAnalyzePhase)
   const setPendingUpload = useAppStore((s) => s.setPendingUpload)
   const { width: viewportW } = useWindowDimensions()
+  const fontScale = fontScaleForWidth(viewportW)
   const trackW = Math.max(180, viewportW - (IS_WEB ? 96 : 64))
 
   const [fadeIn] = useState(() => new Animated.Value(0))
@@ -235,11 +246,11 @@ export default function AnalyzingScreen() {
       <View style={styles.root}>
         <SafeAreaView style={styles.safe}>
           <View style={styles.content}>
-            <Logo />
-            <Text style={styles.headline}>Couldn’t{'\n'}analyze</Text>
-            <Text style={styles.errorText}>{errorMsg}</Text>
+            <Logo fontScale={fontScale} />
+            <Text style={[styles.headline, { fontSize: scaled(34, fontScale), lineHeight: scaled(32, fontScale) }]}>Couldn’t{'\n'}analyze</Text>
+            <Text style={[styles.errorText, { fontSize: scaled(15, fontScale), lineHeight: scaled(21, fontScale) }]}>{errorMsg}</Text>
             <TouchableOpacity style={styles.backBtn} onPress={() => router.replace('/')}>
-              <Text style={styles.backBtnText}>Back</Text>
+              <Text style={[styles.backBtnText, { fontSize: scaled(16, fontScale) }]}>Back</Text>
             </TouchableOpacity>
           </View>
         </SafeAreaView>
@@ -251,20 +262,20 @@ export default function AnalyzingScreen() {
     <View style={styles.root}>
       <SafeAreaView style={styles.safe}>
         <Animated.View style={[styles.content, { opacity: fadeIn }]}>
-          <View style={[styles.topBlock, { top: Math.max(IS_WEB ? 10 : 6, assetTop - (IS_WEB ? ff(112) : 78)) }]}>
-            <Logo />
-            <Text style={styles.headline}>Analyzing{'\n'}records…</Text>
+          <View style={[styles.topBlock, { gap: IS_WEB ? scaled(14, fontScale) : 14, top: Math.max(IS_WEB ? 10 : 6, assetTop - (IS_WEB ? scaled(112, fontScale) : 78)) }]}>
+            <Logo fontScale={fontScale} />
+            <Text style={[styles.headline, { fontSize: scaled(34, fontScale), lineHeight: scaled(32, fontScale) }]}>Analyzing{'\n'}records…</Text>
           </View>
 
           <AnatomyLayerPreview onTopChange={setAssetTop} />
 
-          <View style={styles.bottomBlock}>
+          <View style={[styles.bottomBlock, { gap: IS_WEB ? scaled(10, fontScale) : 12 }]}>
             <View style={styles.phaseBlock}>
-              <Text style={styles.phaseName}>{PHASES[analyzePhase]}</Text>
-              <Text style={styles.phaseSub}>{pct}% — processing on-device</Text>
+              <Text style={[styles.phaseName, { fontSize: scaled(15, fontScale) }]}>{PHASES[analyzePhase]}</Text>
+              <Text style={[styles.phaseSub, { fontSize: scaled(12, fontScale) }]}>{pct}% — processing on-device</Text>
             </View>
 
-            <PhaseDots phase={analyzePhase} />
+            <PhaseDots fontScale={fontScale} phase={analyzePhase} />
 
             {/* Gradient progress bar */}
             <View style={[styles.barTrack, { width: trackW }]}>
@@ -295,15 +306,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32, paddingTop: IS_WEB ? 18 : 10, paddingBottom: IS_WEB ? 18 : 10,
     position: 'relative', overflow: 'hidden',
   },
-  topBlock: { position: 'absolute', alignItems: 'center', gap: IS_WEB ? 24 : 14, zIndex: 2 },
-  bottomBlock: { position: 'absolute', bottom: IS_WEB ? 18 : 10, alignItems: 'center', gap: IS_WEB ? 18 : 12, zIndex: 2 },
+  topBlock: { position: 'absolute', alignItems: 'center', zIndex: 2 },
+  bottomBlock: { position: 'absolute', bottom: IS_WEB ? 18 : 10, alignItems: 'center', zIndex: 2 },
 
   logoRow: { flexDirection: 'row', alignItems: 'baseline' },
-  logoM: { fontFamily: 'BarlowCondensed-Bold', fontSize: ff(18), color: 'rgba(255,255,255,0.9)' },
-  logoAI: { fontFamily: 'MOMCAKE-Bold', fontSize: ff(20), color: C.purpleLight, lineHeight: ff(20) },
-  logoGenki: { fontFamily: 'BarlowCondensed-Bold', fontSize: ff(18), color: 'rgba(255,255,255,0.9)' },
+  logoM: { fontFamily: 'BarlowCondensed-Bold', color: 'rgba(255,255,255,0.9)' },
+  logoAI: { fontFamily: 'MOMCAKE-Bold', color: C.purpleLight },
+  logoGenki: { fontFamily: 'BarlowCondensed-Bold', color: 'rgba(255,255,255,0.9)' },
 
-  headline: { fontFamily: 'MOMCAKE-Bold', fontSize: ff(34), color: C.ink, textAlign: 'center', lineHeight: ff(32), letterSpacing: 0 },
+  headline: { fontFamily: 'MOMCAKE-Bold', color: C.ink, textAlign: 'center', letterSpacing: 0 },
   layerRows: { position: 'absolute', zIndex: 0 },
   layerRow: { position: 'absolute', left: 0, right: 0, flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
   layerTile: {
@@ -312,24 +323,24 @@ const styles = StyleSheet.create({
   layerImage: {},
 
   phaseBlock: { alignItems: 'center', gap: 3 },
-  phaseName: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: ff(15), color: C.ink, letterSpacing: 0.3 },
-  phaseSub: { fontFamily: 'SourceCodePro', fontSize: ff(12), color: C.procText },
+  phaseName: { fontFamily: 'BarlowCondensed-SemiBold', color: C.ink, letterSpacing: 0.3 },
+  phaseSub: { fontFamily: 'SourceCodePro', color: C.procText },
 
   dotsRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', paddingHorizontal: 8 },
   dotCol: { alignItems: 'center', gap: 6, flex: 1 },
-  dot: { width: ff(8), height: ff(8), borderRadius: ff(4) },
-  dotLabel: { fontFamily: 'BarlowCondensed-Regular', fontSize: ff(9), textAlign: 'center' },
+  dot: {},
+  dotLabel: { fontFamily: 'BarlowCondensed-Regular', textAlign: 'center' },
 
   barTrack: { height: 4, backgroundColor: C.pending, borderRadius: 2, overflow: 'hidden' },
   barClip: { height: 4, overflow: 'hidden' },
 
   errorText: {
-    fontFamily: 'BarlowCondensed-Regular', fontSize: ff(15), color: C.ink,
-    textAlign: 'center', lineHeight: ff(21), opacity: 0.85, paddingHorizontal: 8,
+    fontFamily: 'BarlowCondensed-Regular', color: C.ink,
+    textAlign: 'center', opacity: 0.85, paddingHorizontal: 8,
   },
   backBtn: {
     borderWidth: 1, borderColor: C.purpleLight, borderRadius: 10,
     paddingVertical: 12, paddingHorizontal: 32,
   },
-  backBtnText: { fontFamily: 'BarlowCondensed-Bold', fontSize: ff(16), color: C.purpleLight, letterSpacing: 0.5 },
+  backBtnText: { fontFamily: 'BarlowCondensed-Bold', color: C.purpleLight, letterSpacing: 0.5 },
 })
