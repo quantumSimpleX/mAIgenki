@@ -119,10 +119,9 @@ function GearIcon({ color = 'rgba(255,255,255,0.55)', size = fs(20) }: { color?:
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
       <SvgPath
-        d="M19.4 13a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V20a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 18.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-        stroke={color} strokeWidth={1.6} fill="none" strokeLinecap="round" strokeLinejoin="round"
+        d="M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.28 7.28 0 0 0-1.69-.98L14.5 2.42A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.5.42L9.12 5.07c-.61.24-1.18.56-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65c-.04.32-.08.65-.08.98s.03.66.08.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.14.22.4.31.61.22l2.49-1c.51.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.38-2.65c.61-.25 1.18-.58 1.69-.98l2.49 1c.22.08.48 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"
+        fill={color}
       />
-      <Circle cx={12} cy={12} r={3} stroke={color} strokeWidth={1.6} fill="none" />
     </Svg>
   )
 }
@@ -2136,7 +2135,7 @@ const styles = StyleSheet.create({
   settingsSectionLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.aqua, textTransform: 'uppercase', letterSpacing: sc(1), marginBottom: sc(10) },
 
   langDdWrap: { position: 'relative', zIndex: 20, marginBottom: sc(18) },
-  langDdWrapOpen: { zIndex: 80, marginBottom: sc(212) },
+  langDdWrapOpen: { zIndex: 120 },
   langDdField: {
     flexDirection: 'row', alignItems: 'center', gap: sc(10), height: sc(44),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8),
@@ -2146,7 +2145,7 @@ const styles = StyleSheet.create({
   langDdList: {
     position: 'absolute', top: sc(50), left: 0, right: 0,
     backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: sc(8), overflow: 'hidden', zIndex: 50,
+    borderRadius: sc(8), overflow: 'hidden', zIndex: 130,
     ...(IS_WEB ? { boxShadow: `0 ${sc(6)}px ${sc(16)}px rgba(0,0,0,0.5)` } : { elevation: 10 }),
   },
   langRowItem: {
