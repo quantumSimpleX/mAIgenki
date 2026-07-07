@@ -1320,6 +1320,7 @@ function RecordLightbox() {
 // ─── Settings Sheet ───────────────────────────────────────────────────────────
 
 const MONTHS_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
+type SettingsDropdownId = 'language' | 'month' | null
 
 // Real flag graphics for the language picker. Flag emoji (🇺🇸 etc.) fall back to
 // plain "US"/"JP" letters on Windows, so we draw simplified SVG flags instead for
@@ -1370,11 +1371,24 @@ function LangFlag({ code }: { code: SupportedLang }) {
 
 // Compact month picker: a single field that expands into a scrollable list,
 // instead of 12 always-visible buttons.
-function MonthDropdown({ value, onChange }: { value: string; onChange: (m: string) => void }) {
-  const [open, setOpen] = useState(false)
+function MonthDropdown({
+  value, onChange, open, setOpenDropdown,
+}: {
+  value: string
+  onChange: (m: string) => void
+  open: boolean
+  setOpenDropdown: (id: SettingsDropdownId) => void
+}) {
   return (
     <View style={styles.monthDdWrap}>
-      <TouchableOpacity style={styles.monthDdField} onPress={() => setOpen((o) => !o)} activeOpacity={0.7}>
+      <TouchableOpacity
+        style={styles.monthDdField}
+        onPress={(e) => {
+          e.stopPropagation()
+          setOpenDropdown(open ? null : 'month')
+        }}
+        activeOpacity={0.7}
+      >
         <Text style={styles.monthDdValue}>{value}</Text>
         <Text style={styles.monthDdChevron}>{open ? '▲' : '▼'}</Text>
       </TouchableOpacity>
@@ -1385,7 +1399,11 @@ function MonthDropdown({ value, onChange }: { value: string; onChange: (m: strin
               <TouchableOpacity
                 key={mo}
                 style={[styles.monthDdItem, value === mo && styles.monthDdItemActive]}
-                onPress={() => { onChange(mo); setOpen(false) }}
+                onPress={(e) => {
+                  e.stopPropagation()
+                  onChange(mo)
+                  setOpenDropdown(null)
+                }}
               >
                 <Text style={[styles.monthDdItemText, value === mo && styles.monthDdItemTextActive]}>{mo}</Text>
               </TouchableOpacity>
@@ -1398,17 +1416,25 @@ function MonthDropdown({ value, onChange }: { value: string; onChange: (m: strin
 }
 
 function LanguageDropdown({
-  value, onChange,
+  value, onChange, open, setOpenDropdown,
 }: {
   value: SupportedLang
   onChange: (lang: SupportedLang) => void
+  open: boolean
+  setOpenDropdown: (id: SettingsDropdownId) => void
 }) {
-  const [open, setOpen] = useState(false)
   const selected = SUPPORTED_LANGS.find((lang) => lang.code === value) ?? SUPPORTED_LANGS[0]
 
   return (
     <View style={[styles.langDdWrap, open && styles.langDdWrapOpen]}>
-      <TouchableOpacity style={styles.langDdField} onPress={() => setOpen((o) => !o)} activeOpacity={0.75}>
+      <TouchableOpacity
+        style={styles.langDdField}
+        onPress={(e) => {
+          e.stopPropagation()
+          setOpenDropdown(open ? null : 'language')
+        }}
+        activeOpacity={0.75}
+      >
         <LangFlag code={selected.code} />
         <Text style={styles.langNative}>{selected.native}</Text>
         <Text style={styles.langEnglish}>{selected.english}</Text>
@@ -1423,7 +1449,11 @@ function LanguageDropdown({
                 <TouchableOpacity
                   key={code}
                   style={[styles.langRowItem, active && styles.langRowItemActive]}
-                  onPress={() => { onChange(code); setOpen(false) }}
+                  onPress={(e) => {
+                    e.stopPropagation()
+                    onChange(code)
+                    setOpenDropdown(null)
+                  }}
                 >
                   <LangFlag code={code} />
                   <Text style={styles.langNative}>{native}</Text>
@@ -1453,6 +1483,7 @@ function SettingsSheet() {
   const db = useOptionalDatabase()
   const [importConfirm, setImportConfirm] = useState(false)
   const [backupError, setBackupError] = useState<string | null>(null)
+  const [openDropdown, setOpenDropdown] = useState<SettingsDropdownId>(null)
 
   // Backup file I/O is web-only for now (native has no post-restore refresh path,
   // so a native import would leave the Zustand store / UI stale until restart).
@@ -1510,6 +1541,10 @@ function SettingsSheet() {
     }).start()
   }, [anim, settingsOpen])
 
+  useEffect(() => {
+    if (!settingsOpen) setOpenDropdown(null)
+  }, [settingsOpen])
+
   const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [winH + insets.bottom + sc(40), 0] })
 
   return (
@@ -1517,6 +1552,7 @@ function SettingsSheet() {
       pointerEvents={settingsOpen ? 'auto' : 'none'}
       style={[styles.settingsSheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY }] }]}
     >
+      <Pressable style={styles.settingsContent} onPress={() => setOpenDropdown(null)}>
       <View style={styles.settingsHeader}>
         <Text style={styles.settingsTitle}>Settings</Text>
         <TouchableOpacity onPress={toggleSettings} hitSlop={12}>
@@ -1525,7 +1561,12 @@ function SettingsSheet() {
       </View>
 
       <Text style={styles.settingsSectionLabel}>Language</Text>
-      <LanguageDropdown value={preferredLanguage} onChange={setPreferredLanguage} />
+      <LanguageDropdown
+        value={preferredLanguage}
+        onChange={setPreferredLanguage}
+        open={openDropdown === 'language'}
+        setOpenDropdown={setOpenDropdown}
+      />
 
       <View style={styles.birthGenderRow}>
         <View style={styles.birthCol}>
@@ -1545,7 +1586,12 @@ function SettingsSheet() {
               placeholder="YYYY"
               placeholderTextColor={C.inkMuted}
             />
-            <MonthDropdown value={birthMonth} onChange={setBirthMonth} />
+            <MonthDropdown
+              value={birthMonth}
+              onChange={setBirthMonth}
+              open={openDropdown === 'month'}
+              setOpenDropdown={setOpenDropdown}
+            />
           </View>
           <Text style={styles.settingsHint}>Privacy: date not stored.</Text>
         </View>
@@ -1617,6 +1663,7 @@ function SettingsSheet() {
       ) : !IS_WEB ? (
         <Text style={styles.settingsHint}>Backup is web-only for now.</Text>
       ) : null}
+      </Pressable>
     </Animated.View>
   )
 }
@@ -2280,6 +2327,7 @@ const styles = StyleSheet.create({
       ? { boxShadow: `0px ${sc(-4)}px ${sc(16)}px rgba(0,0,0,0.5)` }
       : { shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 20 }),
   },
+  settingsContent: { width: '100%' },
   settingsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sc(20) },
   settingsTitle: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: C.ink, textTransform: 'uppercase', letterSpacing: sc(0.5) },
   settingsSectionLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.aqua, textTransform: 'uppercase', letterSpacing: sc(1), marginBottom: sc(10) },
