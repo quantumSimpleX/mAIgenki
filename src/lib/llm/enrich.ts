@@ -33,6 +33,19 @@ export type EnrichmentResult = {
 
 const EMPTY: EnrichmentResult = { conditions: [], measurements: [] }
 
+// Thrown when every model in the fallback chain failed to produce usable
+// output (network down, all candidates errored, etc.) — distinct from a
+// successful call that legitimately found no conditions/measurements.
+export class EnrichmentFailedError extends Error {
+  failures: string[]
+
+  constructor(failures: string[]) {
+    super('LLM enrichment failed: ' + (failures.join('; ') || 'no models available'))
+    this.name = 'EnrichmentFailedError'
+    this.failures = failures
+  }
+}
+
 // ── Validate callback ─────────────────────────────────────────────────────────
 
 function parseEnrichment(content: string): EnrichmentResult | null {
@@ -114,6 +127,8 @@ export async function enrichFromText(
     label: 'enrich',
     validate: parseEnrichment,
   })
+
+  if (!result.ok) throw new EnrichmentFailedError(result.failures)
 
   return result.value ?? EMPTY
 }

@@ -25,12 +25,44 @@ export type BackupFile = {
   tables: Record<string, unknown[]>
 }
 
+// ── Secret settings ─────────────────────────────────────────────────────────
+
+// Exact `settings.key` values that must never appear in a backup export and
+// must never be written to live settings on restore. Currently the LLM
+// keystore (src/lib/llm/keystore.ts) stores provider keys in expo-secure-store
+// / localStorage, not in this table — but keep this denylist as the guard in
+// case a secret ever lands in `settings` (e.g. legacy `openrouter_api_key`).
+const SECRET_SETTING_KEYS: readonly string[] = ['openrouter_api_key']
+
+// Prefixes that mark a settings key as secret regardless of exact match, e.g.
+// a future `lmf.key.<providerId>` convention if that ever moves into this
+// table. Add new prefixes here rather than one-off exact keys.
+const SECRET_SETTING_KEY_PREFIXES: readonly string[] = ['lmf.key.']
+
+function isSecretSettingKey(key: unknown): boolean {
+  if (typeof key !== 'string') return false
+  if (SECRET_SETTING_KEYS.includes(key)) return true
+  return SECRET_SETTING_KEY_PREFIXES.some((prefix) => key.startsWith(prefix))
+}
+
+// Filters out rows in the `settings` table whose `key` is denylisted. Used on
+// both export (never write secrets to backup JSON) and restore (never let a
+// backup reintroduce a secret into live settings).
+function stripSecretSettings(rows: unknown[]): unknown[] {
+  return rows.filter((row) => {
+    if (!row || typeof row !== 'object') return true
+    const key = (row as Record<string, unknown>).key
+    return !isSecretSettingKey(key)
+  })
+}
+
 // ── Build ───────────────────────────────────────────────────────────────────
 
 export async function buildBackup(db: SQLiteDatabase): Promise<BackupFile> {
   const tables: Record<string, unknown[]> = {}
   for (const t of BACKUP_TABLES) {
-    tables[t] = await db.getAllAsync<Record<string, unknown>>(`SELECT * FROM ${t}`)
+    const rows = await db.getAllAsync<Record<string, unknown>>(`SELECT * FROM ${t}`)
+    tables[t] = t === 'settings' ? stripSecretSettings(rows) : rows
   }
   return {
     app: 'maigenki',
@@ -62,8 +94,10 @@ export async function restoreBackup(db: SQLiteDatabase, backup: BackupFile): Pro
     }
     // Parents first.
     for (const t of BACKUP_TABLES) {
-      const rows = backup.tables[t]
+      let rows = backup.tables[t]
       if (!Array.isArray(rows) || rows.length === 0) continue
+      if (t === 'settings') rows = stripSecretSettings(rows)
+      if (rows.length === 0) continue
 
       const info = await db.getAllAsync<{ name: string }>(`PRAGMA table_info(${t})`)
       const liveColumns = info.map((c) => c.name)

@@ -25,9 +25,12 @@ import {
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
 import { openQSWebsite } from '@/lib/links'
 import { useOptionalDatabase } from '@/lib/db/provider'
-import { updateConditionPosition, upsertSetting } from '@/lib/db/queries'
+import { getSetting, updateConditionPosition, upsertSetting } from '@/lib/db/queries'
 import { exportBackupToFile, pickAndReadBackup, restoreBackup } from '@/lib/db/backup'
 import { scheduleSnapshot, saveSnapshotNow } from '@/lib/db/snapshot'
+import { ProviderSettings } from '@/components/ProviderSettings'
+import { chatErrorCopyForKind } from '@/lib/llm/chatErrorCopy'
+import { shouldShowFirstChatNudge } from '@/lib/llm/firstChatNudge'
 
 const { height: SH } = Dimensions.get('window')
 
@@ -1022,13 +1025,16 @@ function ConditionSheet() {
     preferredLanguage, selectedRecords,
     condDateOverrides, editingCondDate, editDateInput,
     startEditDate, setEditDateInput, confirmEditDate, cancelEditDate,
-    startRelocation,
+    startRelocation, setOpenSettingsSection, llmTier,
   } = useAppStore()
 
+  const db = useOptionalDatabase()
   const condRecords = useConditionRecords(selectedCondition?.id)
 
   const [sheetTranslateY] = useState(() => new Animated.Value(1)) // 1 = off-screen
   const disclaimerShown = useRef(false)
+  const [firstChatNudgeVisible, setFirstChatNudgeVisible] = useState(false)
+  const firstChatNudgeChecked = useRef(false)
 
   useEffect(() => {
     Animated.timing(sheetTranslateY, {
@@ -1050,6 +1056,30 @@ function ConditionSheet() {
     }
   }, [chatOpen, sheetOpen])
 
+  // First-chat-use upgrade nudge (lmfPlan.md A1 trigger 3, Phase 6): purely
+  // additive to the disclaimer above — never gates or reorders it. Checked
+  // once per sheet mount so re-renders don't re-query settings.
+  useEffect(() => {
+    if (!chatOpen || !db || firstChatNudgeChecked.current) return
+    firstChatNudgeChecked.current = true
+    ;(async () => {
+      const [seenFlag, dismissedAt] = await Promise.all([
+        getSetting(db, 'lmf_first_chat_nudge_seen'),
+        getSetting(db, 'lmf_nudge_dismissed_at'),
+      ])
+      if (shouldShowFirstChatNudge(llmTier, seenFlag, dismissedAt, new Date())) {
+        setFirstChatNudgeVisible(true)
+      }
+    })()
+  }, [chatOpen, db, llmTier])
+
+  async function dismissFirstChatNudge() {
+    setFirstChatNudgeVisible(false)
+    if (!db) return
+    await upsertSetting(db, 'lmf_first_chat_nudge_seen', 'true')
+    await upsertSetting(db, 'lmf_nudge_dismissed_at', new Date().toISOString())
+  }
+
   const sheetH = chatOpen
     ? Math.min(sc(780), SH * 0.92)
     : Math.min(sc(400), SH * 0.8)
@@ -1065,7 +1095,7 @@ function ConditionSheet() {
     addChatMessage({ role: 'user', content: userMsg })
     setChatLoading(true)
     try {
-      const { getChatCompletion } = await import('@/lib/llm/client')
+      const { lmfChat } = await import('@/lib/llm/service')
       const cond = selectedCondition
       const selRecs = selectedRecords
       const sys = [
@@ -1077,8 +1107,15 @@ function ConditionSheet() {
         'Answer in 1–3 short sentences. Always recommend consulting a healthcare provider.',
         DISCLAIMER,
       ].filter(Boolean).join(' ')
-      const reply = await getChatCompletion(userMsg, sys)
-      addChatMessage({ role: 'assistant', content: reply })
+      const apiKey = db ? (await getSetting(db, 'openrouter_api_key')) ?? '' : ''
+      const outcome = await lmfChat(sys, userMsg, { apiKey, db: db ?? undefined })
+      if (outcome.ok) {
+        addChatMessage({ role: 'assistant', content: outcome.content })
+      } else {
+        const kind = useAppStore.getState().lastLlmFailureKind
+        const { message, showConnectChip } = chatErrorCopyForKind(kind)
+        addChatMessage({ role: 'assistant', content: message, showConnectChip })
+      }
     } catch {
       addChatMessage({ role: 'assistant', content: 'Unable to connect. Check network and LLM access.' })
     } finally {
@@ -1246,6 +1283,14 @@ function ConditionSheet() {
                 <Text style={[styles.chatBubbleText, msg.role === 'user' && styles.chatBubbleUserText]}>
                   {msg.content}
                 </Text>
+                {msg.showConnectChip && (
+                  <TouchableOpacity
+                    style={styles.chatConnectChip}
+                    onPress={() => setOpenSettingsSection('provider')}
+                  >
+                    <Text style={styles.chatConnectChipText}>Connect your account</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             ))}
             {chatLoading && (
@@ -1254,6 +1299,25 @@ function ConditionSheet() {
               </View>
             )}
           </ScrollView>
+
+          {firstChatNudgeVisible && (
+            <View style={styles.firstChatNudgeCard}>
+              <Text style={styles.firstChatNudgeText}>
+                Connect your own AI account for reliable, unlimited access.
+              </Text>
+              <View style={styles.firstChatNudgeActions}>
+                <TouchableOpacity
+                  onPress={() => { dismissFirstChatNudge(); setOpenSettingsSection('provider') }}
+                  hitSlop={6}
+                >
+                  <Text style={styles.firstChatNudgeConnect}>Connect</Text>
+                </TouchableOpacity>
+                <TouchableOpacity onPress={dismissFirstChatNudge} hitSlop={8}>
+                  <Text style={styles.firstChatNudgeDismiss}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
 
           <View style={styles.chatInputRow}>
             <TextInput
@@ -1323,7 +1387,8 @@ function RecordLightbox() {
 // ─── Settings Sheet ───────────────────────────────────────────────────────────
 
 const MONTHS_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-type SettingsDropdownId = 'language' | 'month' | null
+// 'provider' matches the eventual Phase 6 `openSettingsSection:'provider'` deep-link value (lmfPlan.md).
+type SettingsDropdownId = 'language' | 'month' | 'provider' | null
 
 // Real flag graphics for the language picker. Flag emoji (🇺🇸 etc.) fall back to
 // plain "US"/"JP" letters on Windows, so we draw simplified SVG flags instead for
@@ -1481,6 +1546,7 @@ function SettingsSheet() {
     birthYear, setBirthYear,
     birthMonth, setBirthMonth,
     gender, setGender,
+    openSettingsSection, setOpenSettingsSection,
   } = useAppStore()
 
   const db = useOptionalDatabase()
@@ -1547,6 +1613,15 @@ function SettingsSheet() {
   useEffect(() => {
     if (!settingsOpen) setOpenDropdown(null)
   }, [settingsOpen])
+
+  // React to an upgrade-nudge CTA (e.g. analyzing.tsx) asking us to open the
+  // provider section; clear the flag so it doesn't re-trigger on next render.
+  useEffect(() => {
+    if (openSettingsSection !== 'provider') return
+    setOpenDropdown('provider')
+    if (!settingsOpen) toggleSettings()
+    setOpenSettingsSection(null)
+  }, [openSettingsSection, settingsOpen, toggleSettings, setOpenSettingsSection])
 
   const translateY = anim.interpolate({ inputRange: [0, 1], outputRange: [winH + insets.bottom + sc(40), 0] })
 
@@ -1666,6 +1741,23 @@ function SettingsSheet() {
       ) : !IS_WEB ? (
         <Text style={styles.settingsHint}>Backup is web-only for now.</Text>
       ) : null}
+
+      <TouchableOpacity
+        style={styles.providerToggleRow}
+        onPress={(e) => {
+          e.stopPropagation()
+          setOpenDropdown(openDropdown === 'provider' ? null : 'provider')
+        }}
+        activeOpacity={0.75}
+      >
+        <Text style={[styles.settingsSectionLabel, { marginBottom: 0 }]}>AI Provider</Text>
+        <Text style={styles.langDdChevron}>{openDropdown === 'provider' ? '▲' : '▼'}</Text>
+      </TouchableOpacity>
+      {openDropdown === 'provider' && (
+        <View style={styles.providerSectionBox}>
+          <ProviderSettings />
+        </View>
+      )}
       </Pressable>
     </Animated.View>
   )
@@ -2288,6 +2380,27 @@ const styles = StyleSheet.create({
   chatBubbleAssist: { alignSelf: 'flex-start', backgroundColor: 'rgba(255,255,255,0.07)', borderRadius: sc(12), borderBottomLeftRadius: sc(2) },
   chatBubbleText: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(15), color: C.ink, lineHeight: fs(20) },
   chatBubbleUserText: { color: '#fff' },
+  firstChatNudgeCard: {
+    flexDirection: 'row', alignItems: 'center', gap: sc(10),
+    marginHorizontal: sc(12), marginBottom: sc(8),
+    paddingVertical: sc(10), paddingHorizontal: sc(12),
+    borderRadius: sc(10), borderWidth: 1, borderColor: C.aqua,
+    backgroundColor: 'rgba(31,195,164,0.08)',
+  },
+  firstChatNudgeText: {
+    flex: 1, fontFamily: 'BarlowCondensed-Regular', fontSize: fs(13), color: C.ink, lineHeight: fs(17),
+  },
+  firstChatNudgeActions: { flexDirection: 'row', alignItems: 'center', gap: sc(12) },
+  firstChatNudgeConnect: {
+    fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(13), color: C.aqua,
+  },
+  firstChatNudgeDismiss: { fontSize: fs(14), color: C.inkMuted },
+  chatConnectChip: {
+    marginTop: sc(8), alignSelf: 'flex-start',
+    borderWidth: 1, borderColor: C.aqua, borderRadius: sc(8),
+    paddingVertical: sc(6), paddingHorizontal: sc(12),
+  },
+  chatConnectChipText: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(13), color: C.aqua, letterSpacing: 0.3 },
   chatInputRow: { flexDirection: 'row', gap: sc(8), paddingHorizontal: sc(12), paddingVertical: sc(10), borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
   chatInput: {
     flex: 1, height: sc(40), borderRadius: sc(10), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
@@ -2390,6 +2503,15 @@ const styles = StyleSheet.create({
   genderOptLetter: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(14), color: C.inkMuted },
   genderOptTextActive: { color: '#fff' },
   settingsHint: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.inkMuted, marginBottom: sc(12) },
+
+  providerToggleRow: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    marginTop: sc(4), marginBottom: sc(4),
+  },
+  providerSectionBox: {
+    maxHeight: sc(420), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: sc(8), padding: sc(10), marginBottom: sc(18),
+  },
 
   // Upload-arrival + gender prompt cards
   arrivalCard: {

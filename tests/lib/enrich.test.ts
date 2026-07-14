@@ -1,4 +1,4 @@
-import { enrichFromText, type EnrichmentResult } from '@/lib/llm/enrich'
+import { enrichFromText, EnrichmentFailedError, type EnrichmentResult } from '@/lib/llm/enrich'
 import { callLLMWithFallback } from '@/lib/llm/client'
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -61,9 +61,21 @@ describe('enrichFromText — return shape', () => {
     expect(result.measurements[0].value_numeric).toBe(145)
   })
 
-  it('returns empty arrays when all models fail', async () => {
+  it('throws EnrichmentFailedError when all models fail', async () => {
     mockCallLLM.mockReturnValueOnce(llmFailure() as any)
-    const result = await enrichFromText('some text', '', [])
+    await expect(enrichFromText('some text', '', [])).rejects.toThrow(EnrichmentFailedError)
+  })
+
+  it('EnrichmentFailedError carries the underlying failures', async () => {
+    mockCallLLM.mockReturnValueOnce(llmFailure() as any)
+    await expect(enrichFromText('some text', '', [])).rejects.toMatchObject({
+      failures: ['test-model:free: network error'],
+    })
+  })
+
+  it('returns empty arrays without throwing when the LLM genuinely finds nothing', async () => {
+    mockCallLLM.mockReturnValueOnce(llmSuccess({ conditions: [], measurements: [] }) as any)
+    const result = await enrichFromText('Nothing clinical here.', '', [])
     expect(result.conditions).toEqual([])
     expect(result.measurements).toEqual([])
   })
@@ -129,28 +141,24 @@ describe('enrichFromText — validate callback', () => {
     expect(result.measurements).toEqual([])
   })
 
-  it('falls back to empty arrays when validate returns null (bad JSON)', async () => {
+  it('throws EnrichmentFailedError when validate returns null (bad JSON)', async () => {
     const wrapped = jest.fn().mockImplementation(async (opts: any) => {
       const value = opts.validate?.('not json at all')
       return { ok: false, model: null, content: 'not json', value: null, failures: [] }
     })
     mockCallLLM.mockImplementation(wrapped as any)
 
-    const result = await enrichFromText('test', '', [])
-    expect(result.conditions).toEqual([])
-    expect(result.measurements).toEqual([])
+    await expect(enrichFromText('test', '', [])).rejects.toThrow(EnrichmentFailedError)
   })
 
-  it('falls back to empty arrays when response is missing required keys', async () => {
+  it('throws EnrichmentFailedError when response is missing required keys', async () => {
     const wrapped = jest.fn().mockImplementation(async (opts: any) => {
       const value = opts.validate?.('{"something": "else"}')
       return { ok: false, model: null, content: '{"something":"else"}', value: null, failures: [] }
     })
     mockCallLLM.mockImplementation(wrapped as any)
 
-    const result = await enrichFromText('test', '', [])
-    expect(result.conditions).toEqual([])
-    expect(result.measurements).toEqual([])
+    await expect(enrichFromText('test', '', [])).rejects.toThrow(EnrichmentFailedError)
   })
 })
 

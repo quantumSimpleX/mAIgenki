@@ -11,8 +11,9 @@ import { Image } from 'expo-image'
 import { useAppStore } from '@/store/useAppStore'
 import { ALL_SYSTEMS, CONDITIONS, type SystemId } from '@/model/conditions'
 import { useOptionalDatabase } from '@/lib/db/provider'
-import { getSetting, upsertSetting } from '@/lib/db/queries'
+import { upsertSetting } from '@/lib/db/queries'
 import { processHealthRecord } from '@/lib/pipeline'
+import { EnrichmentFailedError } from '@/lib/llm/enrich'
 import { clearDemoData, seedDemoData } from '@/lib/db/seed'
 import { scheduleSnapshot } from '@/lib/db/snapshot'
 
@@ -256,6 +257,46 @@ function AnatomyLayerPreview({ onTopChange }: { onTopChange: (top: number) => vo
   )
 }
 
+// Post-completion passive nudge: free-tier degradation is transient and never
+// blocks the result — dismissible, and hidden again once dismissed or resolved.
+export function DegradedBanner({ complete }: { complete: boolean }) {
+  const llmStatus = useAppStore((s) => s.llmStatus)
+  const [dismissed, setDismissed] = useState(false)
+  if (!complete || llmStatus !== 'degraded' || dismissed) return null
+  return (
+    <View style={styles.degradedBanner}>
+      <Text style={styles.degradedBannerText}>
+        Free AI models are busy. Connect your own account for reliable access.
+      </Text>
+      <TouchableOpacity onPress={() => setDismissed(true)} hitSlop={8} accessibilityLabel="Dismiss">
+        <Text style={styles.degradedBannerClose}>✕</Text>
+      </TouchableOpacity>
+    </View>
+  )
+}
+
+// Shown alongside the error surface only for rate-limit/quota failures — other
+// failure kinds (e.g. network) get no upgrade nudge, per lmfPlan.md A1.
+export function ConnectProviderCta() {
+  const llmStatus = useAppStore((s) => s.llmStatus)
+  const lastLlmFailureKind = useAppStore((s) => s.lastLlmFailureKind)
+  const setOpenSettingsSection = useAppStore((s) => s.setOpenSettingsSection)
+  const show = llmStatus === 'exhausted'
+    && (lastLlmFailureKind === 'rate_limit' || lastLlmFailureKind === 'quota_billing')
+  if (!show) return null
+  return (
+    <TouchableOpacity
+      style={styles.connectBtn}
+      onPress={() => {
+        setOpenSettingsSection('provider')
+        router.replace('/bodymap')
+      }}
+    >
+      <Text style={styles.connectBtnText}>Connect provider</Text>
+    </TouchableOpacity>
+  )
+}
+
 function PhaseDots({ fontScale, phase }: { fontScale: number, phase: number }) {
   const dotSize = scaled(8, fontScale)
   const labelLineHeight = scaled(11, fontScale)
@@ -450,11 +491,9 @@ export default function AnalyzingScreen() {
 
     void (async () => {
       try {
-        const apiKey = (await getSetting(db, 'openrouter_api_key')) ?? ''
         const result = await processHealthRecord({
           uri: upload.uri,
           db,
-          apiKey,
           kind: upload.kind,
           sex: gender,
           onProgress: (phase, progress) => {
@@ -477,7 +516,13 @@ export default function AnalyzingScreen() {
       } catch (e) {
         clearInterval(smooth)
         if (!mountedRef.current) return
-        const msg = e instanceof Error ? e.message : 'Something went wrong while analyzing this file.'
+        let msg: string
+        if (e instanceof EnrichmentFailedError) {
+          console.warn('[analyzing] enrichment failed —', e.failures.join('; '))
+          msg = 'Could not analyze this record — check your connection or try again.'
+        } else {
+          msg = e instanceof Error ? e.message : 'Something went wrong while analyzing this file.'
+        }
         setPipelineError(msg)
         setErrorMsg(msg)
       }
@@ -500,6 +545,7 @@ export default function AnalyzingScreen() {
             <Logo fontScale={fontScale} />
             <Text style={[styles.headline, { fontSize: scaled(34, fontScale), lineHeight: scaled(32, fontScale) }]}>Couldn’t{'\n'}analyze</Text>
             <Text style={[styles.errorText, { fontSize: scaled(15, fontScale), lineHeight: scaled(21, fontScale) }]}>{errorMsg}</Text>
+            <ConnectProviderCta />
             <TouchableOpacity style={styles.backBtn} onPress={() => router.replace('/')}>
               <Text style={[styles.backBtnText, { fontSize: scaled(16, fontScale) }]}>Back</Text>
             </TouchableOpacity>
@@ -512,6 +558,7 @@ export default function AnalyzingScreen() {
   return (
     <View style={styles.root}>
       <SafeAreaView style={styles.safe}>
+        <DegradedBanner complete={analyzeProgress >= 1} />
         <Animated.View style={[styles.content, { opacity: fadeIn }]}>
           <View style={[styles.topBlock, { gap: IS_WEB ? scaled(14, fontScale) : 14, top: Math.max(IS_WEB ? 10 : 6, assetTop - (IS_WEB ? scaled(112, fontScale) : 78)) }]}>
             <Logo fontScale={fontScale} />
@@ -594,4 +641,20 @@ const styles = StyleSheet.create({
     paddingVertical: 12, paddingHorizontal: 32,
   },
   backBtnText: { fontFamily: 'BarlowCondensed-Bold', color: C.purpleLight, letterSpacing: 0.5 },
+
+  degradedBanner: {
+    position: 'absolute', top: 0, left: 0, right: 0, zIndex: 10,
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: C.pending, paddingVertical: 10, paddingHorizontal: 16,
+  },
+  degradedBannerText: {
+    flex: 1, fontFamily: 'BarlowCondensed-Regular', color: C.ink, fontSize: 13,
+  },
+  degradedBannerClose: { color: C.inkMuted, fontSize: 16 },
+
+  connectBtn: {
+    borderWidth: 1, borderColor: C.aqua, borderRadius: 10,
+    paddingVertical: 12, paddingHorizontal: 32, marginTop: 8,
+  },
+  connectBtnText: { fontFamily: 'BarlowCondensed-Bold', color: C.aqua, letterSpacing: 0.5 },
 })

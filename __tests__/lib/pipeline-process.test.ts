@@ -5,15 +5,18 @@
 
 jest.mock('@/lib/pdf/extract', () => ({ extractTextFromPDF: jest.fn() }))
 jest.mock('@/lib/ocr/extract', () => ({ extractTextFromImage: jest.fn() }))
-jest.mock('@/lib/llm/enrich', () => ({ enrichFromText: jest.fn() }))
+jest.mock('@/lib/llm/enrich', () => ({
+  ...jest.requireActual('@/lib/llm/enrich'),
+  enrichFromText: jest.fn(),
+}))
 
 import type { SQLiteDatabase } from 'expo-sqlite'
 import { processHealthRecord, OcrRequiredError, type ProgressPhase } from '@/lib/pipeline'
-import { initDatabase } from '@/lib/db/queries'
+import { initDatabase, upsertSetting } from '@/lib/db/queries'
 import { makeFakeDb } from '../db/fakeDb'
 import { extractTextFromPDF } from '@/lib/pdf/extract'
 import { extractTextFromImage } from '@/lib/ocr/extract'
-import { enrichFromText } from '@/lib/llm/enrich'
+import { enrichFromText, EnrichmentFailedError } from '@/lib/llm/enrich'
 import type { EnrichmentResult } from '@/lib/llm/enrich'
 import { redactPII } from '@/lib/privacy/redact'
 
@@ -107,6 +110,27 @@ describe('processHealthRecord — persistence (real fake DB)', () => {
     expect(await countRows(db, 'health_records')).toBe(1)
     expect(await countRows(db, 'conditions')).toBe(0)
   })
+
+  it('resolves the stored openrouter_api_key setting when apiKey is omitted', async () => {
+    mockPdf.mockResolvedValue({ text: 'Some records with text.', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue(EMPTY)
+
+    const db = await freshDb()
+    await upsertSetting(db, 'openrouter_api_key', 'sk-or-stored')
+    await processHealthRecord({ uri: 'file:///r.pdf', db })
+
+    expect(mockEnrich).toHaveBeenCalledWith(expect.any(String), 'sk-or-stored', expect.any(Array))
+  })
+
+  it('falls back to an empty key when apiKey is omitted and no setting is stored', async () => {
+    mockPdf.mockResolvedValue({ text: 'Some records with text.', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue(EMPTY)
+
+    const db = await freshDb()
+    await processHealthRecord({ uri: 'file:///r.pdf', db })
+
+    expect(mockEnrich).toHaveBeenCalledWith(expect.any(String), '', expect.any(Array))
+  })
 })
 
 describe('processHealthRecord — hard constraint: redact before enrich', () => {
@@ -133,6 +157,16 @@ describe('processHealthRecord — input routing', () => {
     const db = await freshDb()
     await expect(processHealthRecord({ uri: 'file:///scan.pdf', db, apiKey: '' }))
       .rejects.toThrow(OcrRequiredError)
+    expect(await countRows(db, 'health_records')).toBe(0)
+  })
+
+  it('propagates EnrichmentFailedError from a total LLM failure (no rows persisted)', async () => {
+    mockPdf.mockResolvedValue({ text: 'Some records text.', pageCount: 1, method: 'text' })
+    mockEnrich.mockRejectedValue(new EnrichmentFailedError(['model-a:free: network error']))
+
+    const db = await freshDb()
+    await expect(processHealthRecord({ uri: 'file:///r.pdf', db, apiKey: '' }))
+      .rejects.toThrow(EnrichmentFailedError)
     expect(await countRows(db, 'health_records')).toBe(0)
   })
 

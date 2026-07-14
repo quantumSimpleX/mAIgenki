@@ -3,6 +3,7 @@ import {
   ALL_SYSTEMS, ChatMessage, ConditionRecord, DesignCondition,
   SupportedLang, SystemId,
 } from '@/model/conditions'
+import { LMFErrorKind } from '@/lib/lmf'
 
 type Screen = 'upload' | 'analyzing' | 'bodymap'
 type TimeDisplayMode = 'date' | 'age'
@@ -66,6 +67,13 @@ type AppState = {
   // Set when body-type inference finds no gendered signal and none was stored,
   // so the bodymap can prompt the user once instead of silently defaulting.
   genderPromptNeeded: boolean
+  // LLM fallback (LMF) telemetry — ephemeral, session-only, never persisted.
+  llmTier: 0 | 1 | 2 | 3
+  llmStatus: 'ok' | 'degraded' | 'exhausted'
+  lastLlmFailureKind: LMFErrorKind | null
+  // Set by an upgrade-nudge CTA to tell the SettingsSheet which section to
+  // open/scroll to on next render; the sheet clears it after reacting.
+  openSettingsSection: 'provider' | null
 }
 
 type AppActions = {
@@ -114,6 +122,10 @@ type AppActions = {
   setLastUploadResult: (result: UploadResult | null) => void
   setPipelineError: (error: string | null) => void
   setGenderPromptNeeded: (needed: boolean) => void
+  setLlmTier: (tier: 0 | 1 | 2 | 3) => void
+  setLlmStatus: (status: 'ok' | 'degraded' | 'exhausted') => void
+  setLastLlmFailureKind: (kind: LMFErrorKind | null) => void
+  setOpenSettingsSection: (section: 'provider' | null) => void
 }
 
 export const useAppStore = create<AppState & AppActions>((set, get) => ({
@@ -154,6 +166,10 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   lastUploadResult: null,
   pipelineError: null,
   genderPromptNeeded: false,
+  llmTier: 0,
+  llmStatus: 'ok',
+  lastLlmFailureKind: null,
+  openSettingsSection: null,
 
   setScreen: (screen) => set({ screen }),
   setDragOver: (dragOver) => set({ dragOver }),
@@ -290,4 +306,8 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   setLastUploadResult: (lastUploadResult) => set({ lastUploadResult }),
   setPipelineError: (pipelineError) => set({ pipelineError }),
   setGenderPromptNeeded: (genderPromptNeeded) => set({ genderPromptNeeded }),
+  setLlmTier: (llmTier) => set({ llmTier }),
+  setLlmStatus: (llmStatus) => set({ llmStatus }),
+  setLastLlmFailureKind: (lastLlmFailureKind) => set({ lastLlmFailureKind }),
+  setOpenSettingsSection: (openSettingsSection) => set({ openSettingsSection }),
 }))

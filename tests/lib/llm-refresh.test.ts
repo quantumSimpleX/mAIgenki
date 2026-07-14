@@ -58,19 +58,6 @@ describe('scoreModel', () => {
     expect(score).toBeLessThanOrEqual(100)
   })
 
-  it('scores higher when arena ELO data is also provided', () => {
-    const model = makeModel('x:free', {
-      benchmarks: {
-        artificial_analysis: { intelligence_index: 80, agentic_index: 70, coding_index: 60 },
-      },
-    })
-    const withoutArena = scoreModel(model)
-    const withArena = scoreModel(model, { documentElo: 1400, instructionElo: 1380 })
-    // Both use same OR data; arena data should refine but not wildly differ
-    expect(typeof withArena).toBe('number')
-    expect(withArena).not.toBe(withoutArena)
-  })
-
   it('Nemotron Ultra scores lower than Hermes 405B on same benchmark set', () => {
     const nemotron = makeModel('nvidia/nemotron-3-ultra-550b-a55b:free', {
       benchmarks: { artificial_analysis: { intelligence_index: 37.8, agentic_index: 27.4, coding_index: 49.3 } },
@@ -173,26 +160,8 @@ describe('refreshModelChain', () => {
     })
   }
 
-  function arenaPageResponse(html: string) {
-    return Promise.resolve({
-      ok: true,
-      text: () => Promise.resolve(html),
-    })
-  }
-
-  function llmArenaResponse(json: string) {
-    return Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ choices: [{ message: { content: json } }] }),
-    })
-  }
-
   it('ranks hermes above nemotron ultra based on benchmark scores', async () => {
-    // OR API → arena page fetch → LLM parse of arena data → LLM call fails gracefully
-    mockFetch
-      .mockReturnValueOnce(orApiResponse())                // OpenRouter models
-      .mockReturnValueOnce(arenaPageResponse('<html>leaderboard</html>')) // arena.ai
-      .mockReturnValueOnce(llmArenaResponse('[]'))         // LLM returns empty arena data
+    mockFetch.mockReturnValueOnce(orApiResponse())
 
     const chain = await refreshModelChain(mockDb as any, '')
     const hermesIdx = chain.indexOf('nousresearch/hermes-3-llama-3.1-405b:free')
@@ -203,10 +172,7 @@ describe('refreshModelChain', () => {
   })
 
   it('stores the refreshed chain in settings', async () => {
-    mockFetch
-      .mockReturnValueOnce(orApiResponse())
-      .mockReturnValueOnce(arenaPageResponse('<html></html>'))
-      .mockReturnValueOnce(llmArenaResponse('[]'))
+    mockFetch.mockReturnValueOnce(orApiResponse())
 
     await refreshModelChain(mockDb as any, '')
     expect(mockDb.runAsync).toHaveBeenCalledWith(
@@ -216,10 +182,7 @@ describe('refreshModelChain', () => {
   })
 
   it('stores llm_chain_last_checked timestamp after refresh', async () => {
-    mockFetch
-      .mockReturnValueOnce(orApiResponse())
-      .mockReturnValueOnce(arenaPageResponse('<html></html>'))
-      .mockReturnValueOnce(llmArenaResponse('[]'))
+    mockFetch.mockReturnValueOnce(orApiResponse())
 
     await refreshModelChain(mockDb as any, '')
     const calls = mockDb.runAsync.mock.calls.map((c: unknown[]) => c[1])
@@ -227,16 +190,6 @@ describe('refreshModelChain', () => {
       (args: unknown) => Array.isArray(args) && args[0] === 'llm_chain_last_checked',
     )
     expect(hasTimestamp).toBe(true)
-  })
-
-  it('still produces a valid chain if arena.ai fetch fails', async () => {
-    mockFetch
-      .mockReturnValueOnce(orApiResponse())
-      .mockRejectedValueOnce(new Error('arena.ai unreachable'))
-
-    const chain = await refreshModelChain(mockDb as any, '')
-    expect(chain.length).toBeGreaterThan(0)
-    expect(chain.every((id: string) => id.endsWith(':free'))).toBe(true)
   })
 
   it('falls back to DEFAULT_MODELS if OpenRouter API fails', async () => {
@@ -248,10 +201,7 @@ describe('refreshModelChain', () => {
   })
 
   it('excludes models with no benchmarks from top positions', async () => {
-    mockFetch
-      .mockReturnValueOnce(orApiResponse())
-      .mockReturnValueOnce(arenaPageResponse('<html></html>'))
-      .mockReturnValueOnce(llmArenaResponse('[]'))
+    mockFetch.mockReturnValueOnce(orApiResponse())
 
     const chain = await refreshModelChain(mockDb as any, '')
     // llama-3.2-3b has no benchmarks — should be last if it appears at all
@@ -259,5 +209,116 @@ describe('refreshModelChain', () => {
     if (smallIdx >= 0) {
       expect(smallIdx).toBe(chain.length - 1)
     }
+  })
+})
+
+// ── service.ts wiring (pB07-T02) ───────────────────────────────────────────────
+// service.ts's `refreshTriggered` flag is module-scoped, so each test below
+// resets the module registry and re-requires `lmfChat` fresh to isolate it.
+
+describe('service.ts refresh wiring', () => {
+  function makeWiringDb(lastChecked: string | null) {
+    return {
+      getFirstAsync: jest.fn().mockImplementation((sql: string) => {
+        if (typeof sql === 'string' && sql.includes('FROM settings')) {
+          return Promise.resolve(lastChecked ? { value: lastChecked } : null)
+        }
+        return Promise.resolve(null)
+      }),
+      runAsync: jest.fn().mockResolvedValue(undefined),
+      getAllAsync: jest.fn().mockResolvedValue([]),
+      execAsync: jest.fn().mockResolvedValue(undefined),
+    }
+  }
+
+  function chatResponse() {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ choices: [{ message: { content: 'reply' } }] }),
+    })
+  }
+
+  function modelsListResponse() {
+    return Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ data: [] }),
+    })
+  }
+
+  beforeEach(() => {
+    jest.resetModules()
+    mockFetch.mockReset()
+    delete process.env.EXPO_PUBLIC_MAIGENKI_OPENROUTER_API_KEY
+    delete process.env.EXPO_PUBLIC_OPENROUTER_API_KEY
+  })
+
+  it('skips the refresh fetch when last checked was recent (shouldRefresh gate)', async () => {
+    const recent = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString()
+    const db = makeWiringDb(recent)
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/chat/completions')) return chatResponse()
+      return modelsListResponse()
+    })
+
+    const { lmfChat } = await import('@/lib/llm/service')
+    const result = await lmfChat('sys', 'hi', { apiKey: 'key', db: db as any })
+    expect(result.ok).toBe(true)
+
+    // Let any fire-and-forget microtask work settle.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const modelsListCalled = mockFetch.mock.calls.some((c: unknown[]) =>
+      String(c[0]).includes('/models?max_price=0'),
+    )
+    expect(modelsListCalled).toBe(false)
+  })
+
+  it('does not block or delay the calling lmfChat when a refresh is due', async () => {
+    const db = makeWiringDb(null) // no timestamp stored → shouldRefresh gate is due
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/chat/completions')) return chatResponse()
+      // Never-resolving models-list fetch simulates a slow/hung refresh.
+      return new Promise(() => {})
+    })
+
+    const { lmfChat } = await import('@/lib/llm/service')
+    const result = await lmfChat('sys', 'hi', { apiKey: 'key', db: db as any })
+    expect(result).toEqual({ ok: true, content: 'reply' })
+  })
+
+  it('leaves the existing model chain untouched when the refresh fetch fails', async () => {
+    const db = makeWiringDb(null)
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/chat/completions')) return chatResponse()
+      return Promise.reject(new Error('network error'))
+    })
+
+    const { lmfChat } = await import('@/lib/llm/service')
+    const result = await lmfChat('sys', 'hi', { apiKey: 'key', db: db as any })
+    expect(result.ok).toBe(true)
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    // refreshModelChain swallows the fetch failure and never calls updateModelChain —
+    // no write to the llm_model_chain settings row.
+    const chainWrite = db.runAsync.mock.calls.some((c: unknown[]) =>
+      Array.isArray(c[1]) && c[1][0] === 'llm_model_chain',
+    )
+    expect(chainWrite).toBe(false)
+  })
+
+  it('only triggers the refresh check once per process even across repeated calls', async () => {
+    const db = makeWiringDb(null)
+    let modelsListCalls = 0
+    mockFetch.mockImplementation((url: string) => {
+      if (url.includes('/chat/completions')) return chatResponse()
+      modelsListCalls += 1
+      return modelsListResponse()
+    })
+
+    const { lmfChat } = await import('@/lib/llm/service')
+    await lmfChat('sys', 'hi', { apiKey: 'key', db: db as any })
+    await lmfChat('sys', 'hi again', { apiKey: 'key', db: db as any })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(modelsListCalls).toBe(1)
   })
 })

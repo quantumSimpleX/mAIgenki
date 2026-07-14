@@ -23,6 +23,7 @@ jest.mock('@/lib/db/queries', () => ({
   insertHealthRecord: jest.fn(),
   insertCondition: jest.fn(),
   insertMeasurement: jest.fn(),
+  getSetting: jest.fn(),
 }))
 
 import { extractTextFromPDF } from '@/lib/pdf/extract'
@@ -30,7 +31,7 @@ import { extractTextFromImage } from '@/lib/ocr/extract'
 import { enrichFromText } from '@/lib/llm/enrich'
 import { applyInferenceRules } from '@/lib/inference/rules'
 import { getModelChain } from '@/lib/llm/client'
-import { insertHealthRecord, insertCondition, insertMeasurement } from '@/lib/db/queries'
+import { insertHealthRecord, insertCondition, insertMeasurement, getSetting } from '@/lib/db/queries'
 
 const mockExtractPDF   = extractTextFromPDF   as jest.MockedFunction<typeof extractTextFromPDF>
 const mockExtractImage = extractTextFromImage  as jest.MockedFunction<typeof extractTextFromImage>
@@ -40,6 +41,7 @@ const mockGetChain     = getModelChain         as jest.MockedFunction<typeof get
 const mockInsertRecord = insertHealthRecord    as jest.MockedFunction<typeof insertHealthRecord>
 const mockInsertCond   = insertCondition       as jest.MockedFunction<typeof insertCondition>
 const mockInsertMeas   = insertMeasurement     as jest.MockedFunction<typeof insertMeasurement>
+const mockGetSetting   = getSetting            as jest.MockedFunction<typeof getSetting>
 
 const mockDb = {} as any
 
@@ -76,6 +78,7 @@ beforeEach(() => {
   mockInsertCond.mockResolvedValue('cond-id-1')
   mockInsertMeas.mockResolvedValue('meas-id-1')
   mockRules.mockReturnValue([])
+  mockGetSetting.mockResolvedValue(null)
 })
 
 // ── PDF path ──────────────────────────────────────────────────────────────────
@@ -103,6 +106,26 @@ describe('processHealthRecord — PDF input', () => {
 
     await processHealthRecord({ uri: 'file:///docs/report.pdf', db: mockDb, apiKey: 'sk-key' })
     expect(mockEnrich).toHaveBeenCalledWith('Patient has hypertension', 'sk-key', expect.any(Array))
+    expect(mockGetSetting).not.toHaveBeenCalled()
+  })
+
+  it('falls back to the stored openrouter_api_key setting when apiKey is omitted', async () => {
+    mockExtractPDF.mockResolvedValue({ text: 'Patient has hypertension', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue(EMPTY_ENRICHMENT)
+    mockGetSetting.mockResolvedValue('sk-stored')
+
+    await processHealthRecord({ uri: 'file:///docs/report.pdf', db: mockDb })
+    expect(mockGetSetting).toHaveBeenCalledWith(mockDb, 'openrouter_api_key')
+    expect(mockEnrich).toHaveBeenCalledWith('Patient has hypertension', 'sk-stored', expect.any(Array))
+  })
+
+  it('falls back to an empty key (free tier) when apiKey is omitted and no setting is stored', async () => {
+    mockExtractPDF.mockResolvedValue({ text: 'Patient has hypertension', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue(EMPTY_ENRICHMENT)
+    mockGetSetting.mockResolvedValue(null)
+
+    await processHealthRecord({ uri: 'file:///docs/report.pdf', db: mockDb })
+    expect(mockEnrich).toHaveBeenCalledWith('Patient has hypertension', '', expect.any(Array))
   })
 })
 

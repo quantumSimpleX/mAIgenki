@@ -307,6 +307,13 @@ export async function getSetting(
   return row?.value ?? null
 }
 
+export async function deleteSetting(
+  db: SQLiteDatabase,
+  key: string,
+): Promise<void> {
+  await db.runAsync('DELETE FROM settings WHERE key = ?', [key])
+}
+
 // ── Queries ───────────────────────────────────────────────────────────────────
 
 export async function getAllConditions(db: SQLiteDatabase): Promise<ConditionRow[]> {

@@ -7,6 +7,10 @@ import {
 } from '@/lib/llm/client'
 
 // ── Mock fetch ────────────────────────────────────────────────────────────────
+// Calls now flow through the lmf engine (service.ts -> lmfChat/lmfEnrich ->
+// buildRoute/callWithFallback), which dispatches via the openai-compat adapter —
+// same wire shape (POST .../chat/completions, OpenAI-style body/response) as the
+// old hand-rolled fetch loop, so the mock shape below is unchanged.
 
 const mockFetch = jest.fn()
 ;(globalThis as any).fetch = mockFetch
@@ -18,9 +22,16 @@ function okResponse(content: string) {
   })
 }
 
-function errorResponse(message: string) {
+// status/headers matter now: the engine classifies failures by HTTP status
+// (401/403 -> auth, 429 -> rate_limit, 400 -> invalid_request, 5xx -> server).
+// Only 'timeout'/'network'/'server' trigger the engine's one-shot transient
+// retry, so tests that expect an immediate move to the next model use a
+// non-retryable status (400) rather than 5xx.
+function errorResponse(status: number, message: string) {
   return Promise.resolve({
     ok: false,
+    status,
+    headers: new Map(),
     json: () => Promise.resolve({ error: { message } }),
   })
 }
@@ -67,14 +78,22 @@ describe('DEFAULT_MODELS', () => {
 })
 
 // ── API key resolution ────────────────────────────────────────────────────────
+// BYOK precedence flip (pB02-T02): a user-supplied key now always wins when
+// present. The local/env app key is only used as the tier-0 fallback when the
+// user hasn't configured one.
 
 describe('resolveOpenRouterApiKey', () => {
-  it('prefers the locally configured app key', () => {
+  it('prefers the user key over the local app key when both are configured', () => {
     process.env.EXPO_PUBLIC_MAIGENKI_OPENROUTER_API_KEY = ' sk-local '
-    expect(resolveOpenRouterApiKey('sk-user')).toBe('sk-local')
+    expect(resolveOpenRouterApiKey('sk-user')).toBe('sk-user')
   })
 
-  it('falls back to the generic Expo public key', () => {
+  it('falls back to the local app key when no user key is provided', () => {
+    process.env.EXPO_PUBLIC_MAIGENKI_OPENROUTER_API_KEY = ' sk-local '
+    expect(resolveOpenRouterApiKey()).toBe('sk-local')
+  })
+
+  it('falls back to the generic Expo public key when no user key or MAIGENKI key exists', () => {
     process.env.EXPO_PUBLIC_OPENROUTER_API_KEY = 'sk-public'
     expect(resolveOpenRouterApiKey()).toBe('sk-public')
   })
@@ -105,7 +124,7 @@ describe('callLLMWithFallback', () => {
 
   it('falls back to second model when first returns an error response', async () => {
     mockFetch
-      .mockReturnValueOnce(errorResponse('rate limited'))
+      .mockReturnValueOnce(errorResponse(400, 'rate limited'))
       .mockReturnValueOnce(okResponse('fallback answer'))
     const result = await callLLMWithFallback({
       messages: [{ role: 'user', content: 'hi' }],
@@ -119,7 +138,10 @@ describe('callLLMWithFallback', () => {
   })
 
   it('falls back when fetch throws (network error)', async () => {
+    // 'network' failures trigger the engine's one-shot transient retry, so
+    // model-a fails twice (initial attempt + retry) before the walk moves on.
     mockFetch
+      .mockRejectedValueOnce(new Error('network timeout'))
       .mockRejectedValueOnce(new Error('network timeout'))
       .mockReturnValueOnce(okResponse('recovered'))
     const result = await callLLMWithFallback({
@@ -129,6 +151,7 @@ describe('callLLMWithFallback', () => {
     })
     expect(result.ok).toBe(true)
     expect(result.model).toBe('model-b:free')
+    expect(result.failures).toHaveLength(1)
     expect(result.failures[0]).toContain('network timeout')
   })
 
@@ -152,9 +175,9 @@ describe('callLLMWithFallback', () => {
 
   it('returns ok:false with all failures when every model fails', async () => {
     mockFetch
-      .mockReturnValueOnce(errorResponse('down'))
-      .mockReturnValueOnce(errorResponse('overloaded'))
-      .mockReturnValueOnce(errorResponse('unavailable'))
+      .mockReturnValueOnce(errorResponse(500, 'down'))
+      .mockReturnValueOnce(errorResponse(500, 'overloaded'))
+      .mockReturnValueOnce(errorResponse(500, 'unavailable'))
     const result = await callLLMWithFallback({
       messages: [{ role: 'user', content: 'hi' }],
       apiKey: 'test-key',
@@ -178,7 +201,7 @@ describe('callLLMWithFallback', () => {
     expect(headers['Authorization']).toBe('Bearer sk-or-mykey')
   })
 
-  it('sends empty Bearer token when apiKey is empty (free tier)', async () => {
+  it('sends the request with no Authorization header when apiKey is empty (free tier)', async () => {
     mockFetch.mockReturnValueOnce(okResponse('ok'))
     await callLLMWithFallback({
       messages: [{ role: 'user', content: 'hi' }],
@@ -187,10 +210,15 @@ describe('callLLMWithFallback', () => {
     })
     const [, init] = mockFetch.mock.calls[0]
     const headers = init.headers as Record<string, string>
-    expect(headers['Authorization']).toBe('Bearer ')
+    // No local/env key configured either (cleared in beforeEach) — the engine's
+    // auth gate treats an empty-string key as "attempt anonymously" (only a
+    // `null` key, i.e. genuinely unconfigured, skips the candidate), and the
+    // openai-compat adapter omits the Authorization header for a falsy key
+    // rather than sending an empty `Bearer `.
+    expect(headers['Authorization']).toBeUndefined()
   })
 
-  it('sends the local app key when configured', async () => {
+  it('sends the user key over the local app key when both are configured', async () => {
     process.env.EXPO_PUBLIC_MAIGENKI_OPENROUTER_API_KEY = 'sk-local'
     mockFetch.mockReturnValueOnce(okResponse('ok'))
     await callLLMWithFallback({
@@ -200,7 +228,7 @@ describe('callLLMWithFallback', () => {
     })
     const [, init] = mockFetch.mock.calls[0]
     const headers = init.headers as Record<string, string>
-    expect(headers['Authorization']).toBe('Bearer sk-local')
+    expect(headers['Authorization']).toBe('Bearer sk-user')
   })
 
   it('passes temperature when provided', async () => {

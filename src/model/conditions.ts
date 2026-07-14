@@ -4,7 +4,9 @@ export type SystemId = OrgSystem
 
 export type SupportedLang = 'en' | 'zh-TW' | 'ja' | 'es'
 
-export type ChatMessage = { role: 'user' | 'assistant'; content: string }
+// showConnectChip: rate_limit/quota_billing chat failures render an inline
+// "Connect your account" chip beneath this message (lmfPlan.md Phase 6).
+export type ChatMessage = { role: 'user' | 'assistant'; content: string; showConnectChip?: boolean }
 
 export type DesignCondition = {
   id: string

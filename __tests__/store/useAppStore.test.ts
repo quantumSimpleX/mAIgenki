@@ -221,6 +221,28 @@ describe('simple setters', () => {
   })
 })
 
+describe('llm telemetry', () => {
+  it('defaults to tier 0, status ok, no failure kind', () => {
+    expect(get().llmTier).toBe(0)
+    expect(get().llmStatus).toBe('ok')
+    expect(get().lastLlmFailureKind).toBeNull()
+  })
+  it('setLlmTier updates tier', () => {
+    get().setLlmTier(2)
+    expect(get().llmTier).toBe(2)
+  })
+  it('setLlmStatus updates status', () => {
+    get().setLlmStatus('degraded')
+    expect(get().llmStatus).toBe('degraded')
+  })
+  it('setLastLlmFailureKind updates and clears failure kind', () => {
+    get().setLastLlmFailureKind('rate_limit')
+    expect(get().lastLlmFailureKind).toBe('rate_limit')
+    get().setLastLlmFailureKind(null)
+    expect(get().lastLlmFailureKind).toBeNull()
+  })
+})
+
 describe('removed bodyMapMode API', () => {
   it('bodyMapMode does not exist', () => {
     expect((get() as any).bodyMapMode).toBeUndefined()

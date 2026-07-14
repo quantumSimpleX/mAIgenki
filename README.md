@@ -20,4 +20,4 @@ npm test            # jest --coverage
 npx expo lint       # ESLint
 ```
 
-See `CLAUDE.md` for full architecture and `SPEC.md` for requirements.
+See `CLAUDE.md` for full architecture and `doc.InitialCoreBuild/SPEC.md` for requirements.

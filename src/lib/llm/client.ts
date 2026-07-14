@@ -1,4 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
+import type { Telemetry } from '@/lib/lmf'
+import { lmfChat, lmfEnrich } from './service'
 
 // ── Model chain ───────────────────────────────────────────────────────────────
 // One fallback chain for every OpenRouter call, following the simFolio pattern:
@@ -23,8 +25,10 @@ function localOpenRouterApiKey(): string {
   ).trim()
 }
 
+// BYOK precedence: a user-supplied key always wins when present. The local/env
+// app key is only used as the tier-0 fallback when the user hasn't set one.
 export function resolveOpenRouterApiKey(userApiKey = ''): string {
-  return localOpenRouterApiKey() || userApiKey.trim()
+  return userApiKey.trim() || localOpenRouterApiKey()
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -52,56 +56,66 @@ interface CallOptions<T> {
 }
 
 // ── Fallback chain ────────────────────────────────────────────────────────────
-// Walks the model list in order. Never throws on a model error — records the
-// reason and moves on so a single unavailable model never breaks the caller.
+// Thin wrapper over the lmf engine (service.ts's lmfChat/lmfEnrich): builds the
+// system/user message pair the engine expects, then reconstructs the legacy
+// LLMResult shape (including per-candidate `model`/`content`, which lmfChat/
+// lmfEnrich don't expose in their own return types) from the engine's telemetry
+// hooks. Never throws on a model error — records the reason and moves on so a
+// single unavailable model never breaks the caller.
+
+function splitMessages(messages: LLMMessage[]): { systemPrompt: string; userMessage: string } {
+  const systemPrompt = messages.find((m) => m.role === 'system')?.content ?? ''
+  const userMessage = messages
+    .filter((m) => m.role !== 'system')
+    .map((m) => m.content)
+    .join('\n\n')
+  return { systemPrompt, userMessage }
+}
 
 export async function callLLMWithFallback<T = string>(
   opts: CallOptions<T>,
 ): Promise<LLMResult<T>> {
   const { messages, apiKey, validate, temperature, label = 'llm' } = opts
   const models = opts.models ?? DEFAULT_MODELS
-  const resolvedApiKey = resolveOpenRouterApiKey(apiKey)
+  const { systemPrompt, userMessage } = splitMessages(messages)
+
+  let model: string | null = null
+  let content: string | null = null
   const failures: string[] = []
+  const telemetry: Telemetry = {
+    onSuccess: (result) => {
+      model = result.model
+      content = result.content
+    },
+    onFailure: (f) => {
+      failures.push(`${f.model}: ${f.message}`)
+    },
+  }
+  const serviceOpts = { apiKey, models, temperature, telemetry }
 
-  for (const model of models) {
-    let content: string | undefined
-    let why = ''
-    try {
-      const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${resolvedApiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://github.com/quantumSimpleX/mAIgenki',
-          'X-Title': 'mAIgenki',
-        },
-        body: JSON.stringify({
-          model,
-          messages,
-          ...(temperature !== undefined ? { temperature } : {}),
-        }),
-      })
-      const data = await res.json()
-      content = data.choices?.[0]?.message?.content
-      why = data.error?.message ?? `HTTP ${res.status}`
-    } catch (err) {
-      why = String(err)
+  let ok = false
+  let value: T | null = null
+  if (validate) {
+    const outcome = await lmfEnrich<T>(systemPrompt, userMessage, validate, serviceOpts)
+    if (outcome.ok) {
+      ok = true
+      value = outcome.value
     }
-
-    if (content) {
-      const value = validate ? validate(content) : (content as unknown as T)
-      if (value !== null && value !== undefined) {
-        return { ok: true, model, content, value: value as T, failures }
-      }
-      why = 'returned content failed validation'
+  } else {
+    const outcome = await lmfChat(systemPrompt, userMessage, serviceOpts)
+    if (outcome.ok) {
+      ok = true
+      value = outcome.content as unknown as T
     }
-
-    // A model failing is an expected part of walking the fallback chain — record
-    // it for the caller (returned in `failures`) without warning per model. Only
-    // a total wipeout (every model failed) is worth a single console warning.
-    failures.push(`${model}: ${why}`)
   }
 
+  if (ok) {
+    return { ok: true, model, content, value, failures }
+  }
+
+  // A model failing is an expected part of walking the fallback chain — record
+  // it for the caller (returned in `failures`) without warning per model. Only
+  // a total wipeout (every model failed) is worth a single console warning.
   console.warn(`[${label}] all models failed —`, failures.join('; '))
   return { ok: false, model: null, content: null, value: null, failures }
 }

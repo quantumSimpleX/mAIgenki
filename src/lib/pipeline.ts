@@ -4,7 +4,7 @@ import { extractTextFromImage } from './ocr/extract'
 import { enrichFromText } from './llm/enrich'
 import { applyInferenceRules } from './inference/rules'
 import { getModelChain } from './llm/client'
-import { insertHealthRecord, insertCondition, insertMeasurement } from './db/queries'
+import { insertHealthRecord, insertCondition, insertMeasurement, getSetting } from './db/queries'
 import { scheduleSnapshot } from './db/snapshot'
 import { redactPII } from './privacy/redact'
 
@@ -26,7 +26,10 @@ export type ProgressPhase = 0 | 1 | 2 | 3
 export type PipelineOptions = {
   uri: string
   db: SQLiteDatabase
-  apiKey: string
+  // Optional — falls back to the stored `openrouter_api_key` setting, then to
+  // the free tier (service.ts resolves an empty key against the local/env
+  // fallback key). Callers no longer need to read the setting themselves.
+  apiKey?: string
   models?: string[]
   sex?: 'male' | 'female'
   // Explicit input kind from the picker; overrides the URI-suffix heuristic
@@ -58,7 +61,7 @@ function today(): string {
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
 export async function processHealthRecord(opts: PipelineOptions): Promise<PipelineResult> {
-  const { uri, db, apiKey, sex, kind, onProgress } = opts
+  const { uri, db, sex, kind, onProgress } = opts
   const report = (phase: ProgressPhase, progress: number): void => onProgress?.(phase, progress)
 
   // Step 1 — extract text
@@ -83,8 +86,9 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   report(1, 0.4)
   const safeText = redactPII(text)
 
-  // Step 3 — get model chain, enrich with LLM
+  // Step 3 — get model chain + API key, enrich with LLM
   const models = opts.models ?? await getModelChain(db)
+  const apiKey = opts.apiKey ?? (await getSetting(db, 'openrouter_api_key')) ?? ''
   const { conditions: llmConditions, measurements } = await enrichFromText(safeText, apiKey, models)
 
   // Step 4 — apply threshold inference rules

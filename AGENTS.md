@@ -8,7 +8,7 @@ mAIgenki is a mobile-first health visualization app. Users upload medical PDFs; 
 
 This project is pinned to **Expo SDK 56** (React Native 0.85, React 19). Expo's APIs change between SDKs — consult the exact versioned docs at https://docs.expo.dev/versions/v56.0.0/ before writing native/Expo code, not older examples.
 
-**Docs in this repo:** `SPEC.md` (full spec), `PLAN.md` (implementation plan), `SPEC-research.md` (research log). Historical / lower-authority now that core development is done: `task.md` (dev-subagent task checklist + QA bug log), `test.md` (QA-subagent test plan + results), and `mAIGenki-handoff/` (the original Codex-design handoff that seeded the build — mostly implemented, so treat as background reference rather than a spec to follow).
+**Docs in this repo:** `doc.InitialCoreBuild/SPEC.md` (full spec), `doc.InitialCoreBuild/PLAN.md` (implementation plan), `doc.InitialCoreBuild/SPEC-research.md` (research log). Historical / lower-authority now that core development is done: `doc.InitialCoreBuild/task.md` (dev-subagent task checklist + QA bug log), `doc.InitialCoreBuild/test.md` (QA-subagent test plan + results), and `mAIGenki-handoff/` (the original Codex-design handoff that seeded the build — mostly implemented, so treat as background reference rather than a spec to follow). `doc.lmFallbackBuild/lmfPlan.md` (LLM provider fallback/BYOK design) is the current-phase plan; task/test docs for this phase land in `doc.lmFallbackBuild/` as work proceeds.
 
 ## Commands
 
@@ -52,6 +52,8 @@ Two condition shapes coexist: the snake_case LLM/DB extraction shape (`name_medi
 **Body canvas** (in `src/app/bodymap.tsx`: `BodyLayers` + `BodySvg`) is the visual core: it stacks 11 absolute-positioned `Image` components (transparent PNG layers, one per organ system) toggled by `activeSystems`, with the condition hotspot dots drawn on top in SVG. The current layers are interim 2D art (`assets/maigenki-systems-2colorized/`), pending Blender-rendered PNGs.
 
 **OpenRouter** is the only network call. The `openai` npm package is used with `baseURL: 'https://openrouter.ai/api/v1'`. No API key is required for free-tier models; the user's key (if set) is read from the Zustand settings store and stored in SQLite.
+
+**LMF (LLM fallback → BYOK) layer**, see `doc.lmFallbackBuild/lmfPlan.md` for the full design: a dependency-free `src/lib/lmf/` module tries a route of candidate providers/models in order, falling back on failure, and supports users bringing their own provider key/OAuth connection when the shared tier-0 pool is exhausted. Provider connection UI lives in `src/components/ProviderSettings.tsx`, mounted in `bodymap.tsx`'s SettingsSheet.
 
 ## Key Types
 
