@@ -1,5 +1,7 @@
 # mAIgenki
 
+![mAI Genki Splash Screen](https://github.com/quantumSimpleX/mAIgenki/blob/2412d749f7cdd701028b9cccbe275d452ad56963/SplashScreen.png)
+
 ## Why
 
 Medical history piles up as disconnected PDFs across different providers, portals, and years. Nobody has time to re-read years of lab reports and visit summaries to understand how their health has actually changed — so most people never do, and the big picture stays invisible.
