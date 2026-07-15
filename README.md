@@ -1,6 +1,6 @@
 # mAIgenki
 
-![mAI Genki Splash Screen](./SplashScreen.jpg)
+![mAI Genki Splash Screen](./assets/images/SplashScreen.jpg)
 
 ## Why
 
