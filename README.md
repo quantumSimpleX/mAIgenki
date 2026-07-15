@@ -1,6 +1,6 @@
 # mAIgenki
 
-![mAI Genki Splash Screen](https://github.com/quantumSimpleX/mAIgenki/blob/2412d749f7cdd701028b9cccbe275d452ad56963/SplashScreen.jpg)
+![mAI Genki Splash Screen](./SplashScreen.jpg)
 
 ## Why
 
