@@ -1881,7 +1881,7 @@ export default function BodyMapScreen() {
     genderPromptNeeded, setGenderPromptNeeded, setGender,
   } = useAppStore()
 
-  const [conditions, refreshConditions] = useConditions(routeConditionSource)
+  const [conditions, refreshConditions, updateConditionPositionLocally] = useConditions(routeConditionSource)
   const db = useOptionalDatabase()
   const clearAddedParam = useCallback(() => {
     if (!IS_WEB || typeof window === 'undefined') return
@@ -1948,13 +1948,14 @@ export default function BodyMapScreen() {
     const cxPercent = (cx / 260) * 100
     const cyPercent = (cy / 460) * 100
     // console.log(`[Condition Relocated] ${relocatingCondition.label}: ${cxPercent.toFixed(2)}% x ${cyPercent.toFixed(2)}%`)
+    updateConditionPositionLocally(relocatingCondition.id, cxPercent, cyPercent)
     if (db) {
       await updateConditionPosition(db, relocatingCondition.id, cxPercent, cyPercent)
       scheduleSnapshot(db)
     }
     refreshConditions()
     cancelRelocation()
-  }, [relocatingCondition, db, refreshConditions, cancelRelocation])
+  }, [relocatingCondition, db, refreshConditions, cancelRelocation, updateConditionPositionLocally])
 
   const dismissUploadMessage = useCallback(() => {
     if (useAppStore.getState().lastUploadResult) setLastUploadResult(null)

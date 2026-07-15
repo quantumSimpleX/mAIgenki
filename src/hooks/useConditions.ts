@@ -8,7 +8,11 @@ import { useAppStore, type ConditionSource } from '@/store/useAppStore'
 
 // Loads seeded conditions from SQLite, falling back to the hardcoded CONDITIONS
 // (used in tests, before the DB is seeded, or when the DB is unavailable on web).
-export function useConditions(sourceOverride?: ConditionSource): [DesignCondition[], () => void] {
+export function useConditions(sourceOverride?: ConditionSource): [
+  DesignCondition[],
+  () => void,
+  (id: string, cxPercent: number, cyPercent: number) => void,
+] {
   // Seed initial state with the hardcoded fallback so no state is ever empty —
   // this also avoids a synchronous setState when the DB is unavailable.
   const [conditions, setConditions] = useState<DesignCondition[]>(CONDITIONS)
@@ -23,9 +27,17 @@ export function useConditions(sourceOverride?: ConditionSource): [DesignConditio
       .catch(() => setConditions(CONDITIONS))
   }, [db, effectiveSource])
 
+  const updatePosition = useCallback((id: string, cxPercent: number, cyPercent: number) => {
+    setConditions((current) => current.map((condition) => (
+      condition.id === id
+        ? { ...condition, cx_percent: cxPercent, cy_percent: cyPercent }
+        : condition
+    )))
+  }, [])
+
   useEffect(() => { refresh() }, [refresh])
 
-  return [conditions, refresh]
+  return [conditions, refresh, updatePosition]
 }
 
 // Loads a condition's attached records from SQLite, falling back to the
