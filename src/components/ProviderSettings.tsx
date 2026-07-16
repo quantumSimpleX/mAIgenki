@@ -1,31 +1,31 @@
 // src/components/ProviderSettings.tsx
-// "AI Provider" settings section (pB04-T02). Standalone so bodymap.tsx doesn't
-// grow further — mounting it into the settings sheet is a separate card
-// (pB04-T03). Styled to match bodymap.tsx's SettingsSheet (same dark palette,
-// BarlowCondensed section labels, surfaceHigh fields).
+// "AI Provider" settings section. Styled to match bodymap.tsx's SettingsSheet
+// (same dark palette, BarlowCondensed section labels, surfaceHigh fields).
 //
 // Hard constraints (see CLAUDE.md): the provider key is never logged, never
 // written to SQLite, and only ever sent to the selected provider's own
 // baseURL — enforced here by only ever using validateKey/listModels (which
 // take the ProviderSpec's baseURL) and KeyStore, never a bespoke fetch.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ActivityIndicator, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View,
+  ActivityIndicator, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View,
 } from 'react-native'
 import { fs, sc } from '@/lib/scale'
+import { SETTINGS_CONTROL_GAP } from '@/lib/settingsLayout'
 import { useAppStore } from '@/store/useAppStore'
 import { useOptionalDatabase } from '@/lib/db/provider'
 import { loadProfile, saveProfile } from '@/lib/llm/profile'
 import { makeKeyStore } from '@/lib/llm/keystore'
 import { connectOpenRouter } from '@/lib/llm/oauth'
+import { SettingsDropdown, type SettingsDropdownId } from '@/components/SettingsDropdown'
 import {
   filterModels, isAllowedBaseURL, resolveSelectedModel,
   validationMessage, validationStateFromResult,
   type KeyValidationState,
 } from '@/lib/llm/providerSettingsLogic'
 import {
-  BUILT_IN_PROVIDERS, CURATED_MODELS, listModels, validateKey,
+  BUILT_IN_PROVIDERS, listModels, validateKey,
 } from '@/lib/lmf'
 import type { KeyStore, LMFProfile, ProviderSpec } from '@/lib/lmf'
 
@@ -43,12 +43,21 @@ const C = {
 }
 
 const PROVIDER_LIST = Object.values(BUILT_IN_PROVIDERS)
+const IS_WEB = Platform.OS === 'web'
 
 function effectiveSpec(spec: ProviderSpec, customBaseURL: string): ProviderSpec {
   return spec.id === 'custom' && customBaseURL ? { ...spec, baseURL: customBaseURL } : spec
 }
 
-export function ProviderSettings() {
+export function ProviderSettings({
+  openDropdown = null,
+  setOpenDropdown = () => {},
+  onDirtyChange = () => {},
+}: {
+  openDropdown?: SettingsDropdownId
+  setOpenDropdown?: (id: SettingsDropdownId) => void
+  onDirtyChange?: (dirty: boolean) => void
+} = {}) {
   const llmTier = useAppStore((s) => s.llmTier)
   const llmStatus = useAppStore((s) => s.llmStatus)
   const setLlmTier = useAppStore((s) => s.setLlmTier)
@@ -67,11 +76,13 @@ export function ProviderSettings() {
   const [allModels, setAllModels] = useState<string[]>([])
   const [allModelsLoading, setAllModelsLoading] = useState(false)
   const [modelQuery, setModelQuery] = useState('')
+  const modelSearchRef = useRef<TextInput>(null)
 
   const [customBaseURLInput, setCustomBaseURLInput] = useState('')
   const [fallbackToFree, setFallbackToFree] = useState(true)
 
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false)
 
   const [connecting, setConnecting] = useState(false)
   const [connectError, setConnectError] = useState<string | null>(null)
@@ -79,6 +90,13 @@ export function ProviderSettings() {
   useEffect(() => {
     makeKeyStore().then(setKeyStore)
   }, [])
+
+  useEffect(() => {
+    if (!keyStore || !profile?.activeProviderId) return
+    keyStore.get(profile.activeProviderId).then((storedKey) => {
+      setKeyInput(storedKey ?? '')
+    })
+  }, [keyStore, profile?.activeProviderId])
 
   // Shared by the mount-time profile load and a successful connect, so the
   // status line's `llmTier` (read from the store, not local state) is kept in
@@ -98,14 +116,31 @@ export function ProviderSettings() {
     loadProfile(db).then(applyProfile)
   }, [db, applyProfile])
 
+  useEffect(() => {
+    onDirtyChange(hasUnsavedChanges)
+  }, [hasUnsavedChanges, onDirtyChange])
+
   const spec = BUILT_IN_PROVIDERS[providerId] ?? BUILT_IN_PROVIDERS.custom
   const isCustom = providerId === 'custom'
-  const curated = CURATED_MODELS[providerId] ?? []
   const baseURLValid = !isCustom || customBaseURLInput.length === 0 || isAllowedBaseURL(customBaseURLInput)
   const visibleModels = useMemo(() => filterModels(allModels, modelQuery), [allModels, modelQuery])
   const vMessage = validationMessage(validation)
+  // OpenRouter also supports its OAuth connection flow, which does not need
+  // an API key before the Connect control can be shown.
+  const credentialsReady = providerId === 'openrouter'
+    || spec.authStyle === 'none'
+    || keyInput.trim().length > 0
+  const connected = validation.status === 'valid'
+    || (profile?.activeProviderId === providerId && profile.tier > 0)
+
+  useEffect(() => {
+    if (openDropdown !== 'model') return
+    const timer = setTimeout(() => modelSearchRef.current?.focus(), 0)
+    return () => clearTimeout(timer)
+  }, [openDropdown])
 
   function selectProvider(id: string) {
+    setHasUnsavedChanges(true)
     setProviderId(id)
     setKeyInput('')
     setValidation({ status: 'idle' })
@@ -114,9 +149,17 @@ export function ProviderSettings() {
     setAllModels([])
     setAllModelsOpen(false)
     setModelQuery('')
+    setOpenDropdown(null)
   }
 
-  async function handleValidate() {
+  function selectModel(model: string) {
+    setHasUnsavedChanges(true)
+    setPickedModel(model)
+    setFreeTextModel('')
+    setOpenDropdown(null)
+  }
+
+  const handleValidate = useCallback(async () => {
     if (isCustom && !baseURLValid) {
       setValidation({ status: 'invalid', kind: 'validation' })
       return
@@ -126,7 +169,22 @@ export function ProviderSettings() {
     const model = resolveSelectedModel(pickedModel, freeTextModel) ?? undefined
     const result = await validateKey(activeSpec, keyInput, { model })
     setValidation(validationStateFromResult(result))
-  }
+    if (result.ok) {
+      setFallbackToFree(false)
+      setHasUnsavedChanges(true)
+    }
+  }, [isCustom, baseURLValid, spec, customBaseURLInput, pickedModel, freeTextModel, keyInput])
+
+  // Validate after the user pauses typing instead of requiring a separate
+  // action. The debounce avoids sending a request for every keypress.
+  useEffect(() => {
+    if (spec.authStyle === 'none' || !keyInput) {
+      setValidation({ status: 'idle' })
+      return
+    }
+    const timer = setTimeout(() => { void handleValidate() }, 700)
+    return () => clearTimeout(timer)
+  }, [keyInput, providerId, customBaseURLInput, pickedModel, freeTextModel, handleValidate, spec.authStyle])
 
   async function handleLoadAllModels() {
     setAllModelsOpen(true)
@@ -156,6 +214,7 @@ export function ProviderSettings() {
     if (keyInput) await keyStore.set(providerId, keyInput)
     await saveProfile(db, next)
     setProfile(next)
+    setHasUnsavedChanges(false)
     setSaveStatus('Saved.')
   }
 
@@ -192,11 +251,14 @@ export function ProviderSettings() {
     setProfile(next)
     setKeyInput('')
     setValidation({ status: 'idle' })
+    setHasUnsavedChanges(false)
     setSaveStatus('Disconnected.')
   }
 
+  const selectedModel = resolveSelectedModel(pickedModel, freeTextModel)
+
   return (
-    <ScrollView style={styles.wrap} contentContainerStyle={styles.content}>
+    <View style={styles.wrap}>
       <Text style={styles.sectionLabel}>AI Provider</Text>
 
       <View style={styles.tierRow}>
@@ -205,29 +267,52 @@ export function ProviderSettings() {
         </Text>
       </View>
 
-      <TouchableOpacity style={styles.connectBtn} onPress={handleConnect} disabled={!db || connecting}>
-        {connecting ? (
-          <ActivityIndicator size="small" color={C.ink} />
-        ) : (
-          <Text style={styles.connectBtnText}>Connect OpenRouter</Text>
-        )}
-      </TouchableOpacity>
-      {connectError && <Text style={styles.errorText}>{connectError}</Text>}
+      <View style={[styles.providerModelRow, openDropdown === 'provider' && styles.providerModelRowOpen]}>
+        <View style={styles.providerModelCol}>
+          <Text style={styles.label}>Provider</Text>
+          <SettingsDropdown
+            open={openDropdown === 'provider'}
+            onToggle={() => setOpenDropdown(openDropdown === 'provider' ? null : 'provider')}
+            onSelect={(provider) => selectProvider(provider.id)}
+            options={PROVIDER_LIST}
+            optionKey={(provider) => provider.id}
+            optionLabel={(provider) => provider.label}
+            value={<Text style={styles.dropdownValue} numberOfLines={1}>{spec.label}</Text>}
+            isActive={(provider) => provider.id === providerId}
+          />
+        </View>
 
-      <Text style={styles.label}>Provider</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.providerRow}>
-        {PROVIDER_LIST.map((p) => (
-          <TouchableOpacity
-            key={p.id}
-            style={[styles.providerChip, providerId === p.id && styles.providerChipActive]}
-            onPress={() => selectProvider(p.id)}
-          >
-            <Text style={[styles.providerChipText, providerId === p.id && styles.providerChipTextActive]}>
-              {p.label}
+        <View style={styles.providerModelCol}>
+          <Text style={styles.label}>API key</Text>
+          <TextInput
+            style={[styles.input, spec.authStyle === 'none' && styles.disabledInput]}
+            value={keyInput}
+            onChangeText={(v) => {
+              setKeyInput(v)
+              setValidation({ status: 'idle' })
+              setHasUnsavedChanges(true)
+            }}
+            placeholder={spec.authStyle === 'none'
+              ? 'Not required'
+              : (spec.keyURL ? `Get a key at ${spec.keyURL}` : 'API key')}
+            placeholderTextColor={C.inkMuted}
+            secureTextEntry={spec.authStyle !== 'none'}
+            editable={spec.authStyle !== 'none'}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          {vMessage && (
+            <Text style={[
+              styles.validationText,
+              validation.status === 'valid' && styles.validationTextOk,
+              validation.status === 'invalid' && styles.validationTextBad,
+            ]}
+            >
+              {vMessage}
             </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+          )}
+        </View>
+      </View>
 
       {isCustom && (
         <>
@@ -235,7 +320,7 @@ export function ProviderSettings() {
           <TextInput
             style={[styles.input, !baseURLValid && styles.inputError]}
             value={customBaseURLInput}
-            onChangeText={setCustomBaseURLInput}
+            onChangeText={(v) => { setCustomBaseURLInput(v); setHasUnsavedChanges(true) }}
             placeholder="https://your-endpoint.example.com/v1"
             placeholderTextColor={C.inkMuted}
             autoCapitalize="none"
@@ -249,137 +334,93 @@ export function ProviderSettings() {
         </>
       )}
 
-      {spec.authStyle !== 'none' && (
-        <>
-          <Text style={styles.label}>API key</Text>
-          <View style={styles.keyRow}>
+      {credentialsReady && <View style={[styles.modelConnectRow, openDropdown === 'model' && styles.modelConnectRowOpen]}>
+        <View style={[styles.modelIdCol, providerId !== 'openrouter' && styles.modelIdColFull]}>
+          <Text style={styles.label}>Model ID</Text>
+          {isCustom ? (
             <TextInput
-              style={[styles.input, styles.keyInput]}
-              value={keyInput}
-              onChangeText={(v) => { setKeyInput(v); setValidation({ status: 'idle' }) }}
-              placeholder={spec.keyURL ? `Get a key at ${spec.keyURL}` : 'API key'}
+              style={styles.input}
+              value={freeTextModel}
+              onChangeText={(v) => { setFreeTextModel(v); setHasUnsavedChanges(true) }}
+              placeholder="Enter model ID"
               placeholderTextColor={C.inkMuted}
-              secureTextEntry
               autoCapitalize="none"
               autoCorrect={false}
             />
-            <TouchableOpacity
-              style={styles.validateBtn}
-              onPress={handleValidate}
-              disabled={!keyInput || validation.status === 'validating'}
-            >
-              {validation.status === 'validating' ? (
+          ) : (
+            <SettingsDropdown
+              open={openDropdown === 'model'}
+              onToggle={() => {
+                const opening = openDropdown !== 'model'
+                setOpenDropdown(opening ? 'model' : null)
+                if (opening) {
+                  setModelQuery('')
+                  if (!allModelsOpen) void handleLoadAllModels()
+                }
+              }}
+              onSelect={selectModel}
+              options={visibleModels}
+              optionKey={(model) => model}
+              optionLabel={(model) => model}
+              value={<Text style={styles.dropdownValue} numberOfLines={1}>{selectedModel ?? 'Select model'}</Text>}
+              isActive={(model) => model === pickedModel && !freeTextModel}
+              openField={(
+                <TextInput
+                  ref={modelSearchRef}
+                  style={styles.modelSearchFieldInput}
+                  value={modelQuery}
+                  onChangeText={setModelQuery}
+                  placeholder="Search models"
+                  placeholderTextColor={C.inkMuted}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              )}
+            />
+          )}
+        </View>
+        {providerId === 'openrouter' && (
+          <View style={styles.connectCol}>
+            <Text style={styles.label}>{spec.label}</Text>
+            <TouchableOpacity style={styles.connectBtn} onPress={handleConnect} disabled={!db || connecting}>
+              {connecting ? (
                 <ActivityIndicator size="small" color={C.ink} />
               ) : (
-                <Text style={styles.validateBtnText}>Validate</Text>
+                <Text style={styles.connectBtnText}>Connect</Text>
               )}
             </TouchableOpacity>
           </View>
-          {vMessage && (
-            <Text style={[
-              styles.validationText,
-              validation.status === 'valid' && styles.validationTextOk,
-              validation.status === 'invalid' && styles.validationTextBad,
-            ]}
-            >
-              {vMessage}
-            </Text>
-          )}
-        </>
-      )}
+        )}
+      </View>}
+      {connectError && <Text style={styles.errorText}>{connectError}</Text>}
 
-      <Text style={styles.label}>Model</Text>
-      <View style={styles.modelChipRow}>
-        {curated.map((m) => (
-          <TouchableOpacity
-            key={m}
-            style={[styles.providerChip, pickedModel === m && !freeTextModel && styles.providerChipActive]}
-            onPress={() => { setPickedModel(m); setFreeTextModel('') }}
-          >
-            <Text style={[styles.providerChipText, pickedModel === m && !freeTextModel && styles.providerChipTextActive]}>
-              {m}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-
-      <TouchableOpacity style={styles.allModelsToggle} onPress={handleLoadAllModels}>
-        <Text style={styles.allModelsToggleText}>{allModelsOpen ? '▲ All models' : '▼ All models'}</Text>
-      </TouchableOpacity>
-      {allModelsOpen && (
-        <View style={styles.allModelsBox}>
-          {allModelsLoading ? (
-            <ActivityIndicator size="small" color={C.ink} style={{ marginVertical: sc(8) }} />
-          ) : (
-            <>
-              <TextInput
-                style={styles.input}
-                value={modelQuery}
-                onChangeText={setModelQuery}
-                placeholder="Search models…"
-                placeholderTextColor={C.inkMuted}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
-              <ScrollView style={{ maxHeight: sc(160) }} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-                {visibleModels.map((m) => (
-                  <TouchableOpacity
-                    key={m}
-                    style={styles.allModelsItem}
-                    onPress={() => { setPickedModel(m); setFreeTextModel(''); setAllModelsOpen(false) }}
-                  >
-                    <Text style={[styles.allModelsItemText, pickedModel === m && styles.validationTextOk]}>{m}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
-            </>
-          )}
-        </View>
-      )}
-
-      <Text style={styles.label}>Model ID (free-text, required for custom endpoints)</Text>
-      <TextInput
-        style={styles.input}
-        value={freeTextModel}
-        onChangeText={setFreeTextModel}
-        placeholder="e.g. llama3.3"
-        placeholderTextColor={C.inkMuted}
-        autoCapitalize="none"
-        autoCorrect={false}
-      />
-
-      <View style={styles.fallbackRow}>
+      {connected && <View style={styles.fallbackRow}>
         <Text style={styles.fallbackText}>
           If your provider fails, retry on free models via OpenRouter. Turn off to keep requests only on chosen provider.
         </Text>
         <Switch
           value={fallbackToFree}
-          onValueChange={setFallbackToFree}
+          onValueChange={(value) => { setFallbackToFree(value); setHasUnsavedChanges(true) }}
           trackColor={{ false: C.border, true: C.purpleTint }}
           thumbColor={fallbackToFree ? C.purpleLight : C.inkMuted}
         />
-      </View>
+      </View>}
 
-      <View style={styles.actionsRow}>
+      {connected && <View style={styles.actionsRow}>
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={!db}>
           <Text style={styles.saveBtnText}>Save</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.disconnectBtn} onPress={handleDisconnect} disabled={!db}>
           <Text style={styles.disconnectBtnText}>Disconnect</Text>
         </TouchableOpacity>
-      </View>
+      </View>}
       {saveStatus && <Text style={styles.saveStatusText}>{saveStatus}</Text>}
-    </ScrollView>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
-  // flex: 1 lets this ScrollView actually scroll/clip when its parent (the
-  // SettingsSheet's collapsible box, bodymap.tsx pB04-T03) constrains height
-  // via maxHeight — without it, ScrollView just sizes to content and ignores
-  // the parent bound.
-  wrap: { width: '100%', flex: 1 },
-  content: { paddingBottom: sc(24) },
+  wrap: { width: '100%' },
   sectionLabel: {
     fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.aqua,
     textTransform: 'uppercase', letterSpacing: sc(1), marginBottom: sc(10),
@@ -388,7 +429,7 @@ const styles = StyleSheet.create({
   tierText: { fontFamily: 'SourceCodePro', fontSize: fs(13), color: C.ink, textTransform: 'capitalize' },
   connectBtn: {
     height: sc(40), borderRadius: sc(8), backgroundColor: C.purple,
-    alignItems: 'center', justifyContent: 'center', marginBottom: sc(16),
+    alignItems: 'center', justifyContent: 'center',
   },
   connectBtnText: {
     fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(13), color: C.ink,
@@ -398,15 +439,38 @@ const styles = StyleSheet.create({
     fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(11), color: C.inkMuted,
     textTransform: 'uppercase', letterSpacing: sc(0.5), marginBottom: sc(6), marginTop: sc(12),
   },
-  providerRow: { marginBottom: sc(4) },
-  providerChip: {
-    borderWidth: 1, borderColor: C.border, borderRadius: sc(8),
-    paddingVertical: sc(6), paddingHorizontal: sc(10), marginRight: sc(6),
-    backgroundColor: C.surfaceHigh,
+  providerModelRow: { flexDirection: 'row', gap: sc(SETTINGS_CONTROL_GAP), zIndex: 200 },
+  providerModelRowOpen: { zIndex: 10000, elevation: 10000 },
+  providerModelCol: { flex: 1, minWidth: 0, zIndex: 200 },
+  dropdownWrap: { position: 'relative', zIndex: 30 },
+  dropdownWrapOpen: { zIndex: 120 },
+  dropdownField: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: sc(6),
+    height: sc(40), borderWidth: 1, borderColor: C.border, borderRadius: sc(8),
+    paddingHorizontal: sc(10), backgroundColor: C.surfaceHigh,
   },
-  providerChipActive: { backgroundColor: C.purpleTint, borderColor: C.purpleLight },
-  providerChipText: { fontFamily: 'SourceCodePro', fontSize: fs(12), color: C.ink },
-  providerChipTextActive: { color: C.purpleLight },
+  dropdownValue: { flex: 1, fontFamily: 'SourceCodePro', fontSize: fs(11), color: C.ink },
+  dropdownChevron: { fontSize: fs(9), color: C.aqua },
+  dropdownList: {
+    position: 'absolute', top: sc(46), left: 0, right: 0,
+    backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: C.border,
+    borderRadius: sc(8), overflow: 'hidden', zIndex: 130,
+    ...(IS_WEB ? { boxShadow: `0 ${sc(6)}px ${sc(16)}px rgba(0,0,0,0.5)` } : { elevation: 10 }),
+  },
+  dropdownOptionScroll: { maxHeight: sc(190) },
+  dropdownItem: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    minHeight: sc(38), paddingVertical: sc(8), paddingHorizontal: sc(10),
+  },
+  dropdownItemActive: { backgroundColor: C.purpleTint },
+  dropdownItemText: { flex: 1, fontFamily: 'SourceCodePro', fontSize: fs(11), color: C.ink },
+  dropdownItemTextActive: { color: C.purpleLight },
+  dropdownCheck: { fontSize: fs(14), color: C.aqua, marginLeft: sc(6) },
+  modelConnectRow: { flexDirection: 'row', gap: sc(SETTINGS_CONTROL_GAP), alignItems: 'flex-end', zIndex: 200 },
+  modelConnectRowOpen: { zIndex: 10000, elevation: 10000 },
+  modelIdCol: { flex: 1, minWidth: 0, zIndex: 200 },
+  modelIdColFull: { flexBasis: '100%' },
+  connectCol: { flex: 1, minWidth: 0 },
   input: {
     height: sc(40), borderWidth: 1, borderColor: C.border, borderRadius: sc(8),
     paddingHorizontal: sc(10), backgroundColor: C.surfaceHigh, color: C.ink,
@@ -415,6 +479,7 @@ const styles = StyleSheet.create({
   inputError: { borderColor: C.bad },
   errorText: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.bad, marginTop: sc(4) },
   keyRow: { flexDirection: 'row', gap: sc(8) },
+  disabledInput: { opacity: 0.55 },
   keyInput: { flex: 1 },
   validateBtn: {
     paddingHorizontal: sc(14), borderRadius: sc(8), backgroundColor: C.surfaceHigh,
@@ -423,8 +488,7 @@ const styles = StyleSheet.create({
   validateBtnText: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(12), color: C.ink, textTransform: 'uppercase' },
   validationText: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.inkMuted, marginTop: sc(6) },
   validationTextOk: { color: C.aqua },
-  validationTextBad: { color: C.warn },
-  modelChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: sc(6) },
+  validationTextBad: { color: C.bad },
   allModelsToggle: { marginTop: sc(10) },
   allModelsToggleText: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(12), color: C.aqua, textTransform: 'uppercase' },
   allModelsBox: {
@@ -433,9 +497,19 @@ const styles = StyleSheet.create({
   },
   allModelsItem: { paddingVertical: sc(8), paddingHorizontal: sc(6) },
   allModelsItemText: { fontFamily: 'SourceCodePro', fontSize: fs(12), color: C.ink },
+  modelDropdownFooter: { padding: sc(8), borderTopWidth: 1, borderTopColor: C.border },
+  modelSearchFieldInput: {
+    flex: 1, height: sc(40), paddingHorizontal: sc(10), color: C.ink,
+    fontFamily: 'SourceCodePro', fontSize: fs(11),
+  },
+  modelSearchInput: {
+    height: sc(34), borderWidth: 1, borderColor: C.border, borderRadius: sc(6),
+    paddingHorizontal: sc(8), backgroundColor: C.surfaceHigh, color: C.ink,
+    fontFamily: 'SourceCodePro', fontSize: fs(11),
+  },
   fallbackRow: { flexDirection: 'row', alignItems: 'center', gap: sc(12), marginTop: sc(18) },
   fallbackText: { flex: 1, fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.inkMuted },
-  actionsRow: { flexDirection: 'row', gap: sc(10), marginTop: sc(18) },
+  actionsRow: { flexDirection: 'row', gap: sc(SETTINGS_CONTROL_GAP), marginTop: sc(18) },
   saveBtn: {
     flex: 1, height: sc(40), borderRadius: sc(8), backgroundColor: C.purple,
     alignItems: 'center', justifyContent: 'center',

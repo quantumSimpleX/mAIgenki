@@ -12,7 +12,7 @@ mAIgenki turns a stack of medical PDFs into a single visual story: upload your r
 
 ## For Who
 
-Anyone with accumulated medical records — especially people managing multiple chronic conditions across multiple providers — who wants to see the whole picture at a glance instead of re-reading every document.
+Anyone with accumulated medical records — especially elderly, busy professionals, or people managing multiple chronic conditions across multiple providers — who wants to see the whole picture of their wellness at a glance at one place instead of re-reading every document.
 
 ## How
 

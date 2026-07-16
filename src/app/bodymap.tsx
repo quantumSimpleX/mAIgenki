@@ -6,6 +6,7 @@ import {
   TouchableOpacity, useWindowDimensions, View,
 } from 'react-native'
 import { IS_WEB, IS_DESKTOP, S, fs, sc } from '@/lib/scale'
+import { SETTINGS_CONTROL_GAP } from '@/lib/settingsLayout'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, {
   Circle, Ellipse, G, Line, Path as SvgPath, Rect,
@@ -29,6 +30,7 @@ import { getSetting, updateConditionPosition, upsertSetting } from '@/lib/db/que
 import { exportBackupToFile, pickAndReadBackup, restoreBackup } from '@/lib/db/backup'
 import { scheduleSnapshot, saveSnapshotNow } from '@/lib/db/snapshot'
 import { ProviderSettings } from '@/components/ProviderSettings'
+import { SettingsDropdown, type SettingsDropdownId } from '@/components/SettingsDropdown'
 import { chatErrorCopyForKind } from '@/lib/llm/chatErrorCopy'
 import { shouldShowFirstChatNudge } from '@/lib/llm/firstChatNudge'
 
@@ -1387,8 +1389,7 @@ function RecordLightbox() {
 // ─── Settings Sheet ───────────────────────────────────────────────────────────
 
 const MONTHS_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC']
-// 'provider' matches the eventual Phase 6 `openSettingsSection:'provider'` deep-link value (lmfPlan.md).
-type SettingsDropdownId = 'language' | 'month' | 'provider' | null
+// The provider deep-link still uses `openSettingsSection:'provider'`.
 
 // Real flag graphics for the language picker. Flag emoji (🇺🇸 etc.) fall back to
 // plain "US"/"JP" letters on Windows, so we draw simplified SVG flags instead for
@@ -1448,37 +1449,20 @@ function MonthDropdown({
   setOpenDropdown: (id: SettingsDropdownId) => void
 }) {
   return (
-    <View style={styles.monthDdWrap}>
-      <TouchableOpacity
-        style={styles.monthDdField}
-        onPress={(e) => {
-          e.stopPropagation()
-          setOpenDropdown(open ? null : 'month')
-        }}
-        activeOpacity={0.7}
-      >
-        <Text style={styles.monthDdValue}>{value}</Text>
-        <Text style={styles.monthDdChevron}>{open ? '▲' : '▼'}</Text>
-      </TouchableOpacity>
-      {open && (
-        <View style={styles.monthDdList}>
-          <ScrollView style={{ maxHeight: sc(176) }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-            {MONTHS_SHORT.map((mo) => (
-              <TouchableOpacity
-                key={mo}
-                style={[styles.monthDdItem, value === mo && styles.monthDdItemActive]}
-                onPress={(e) => {
-                  e.stopPropagation()
-                  onChange(mo)
-                  setOpenDropdown(null)
-                }}
-              >
-                <Text style={[styles.monthDdItemText, value === mo && styles.monthDdItemTextActive]}>{mo}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        </View>
-      )}
+    <View style={[styles.monthDdWrap, open && styles.monthDdWrapOpen]}>
+      <SettingsDropdown
+        open={open}
+        onToggle={() => setOpenDropdown(open ? null : 'month')}
+        onSelect={onChange}
+        options={MONTHS_SHORT}
+        optionKey={(mo) => mo}
+        optionLabel={(mo) => mo}
+        value={<Text style={styles.monthDdValue}>{value}</Text>}
+        renderOption={(mo, active) => (
+          <Text style={[styles.monthDdItemText, active && styles.monthDdItemTextActive]}>{mo}</Text>
+        )}
+        isActive={(mo) => mo === value}
+      />
     </View>
   )
 }
@@ -1495,44 +1479,29 @@ function LanguageDropdown({
 
   return (
     <View style={[styles.langDdWrap, open && styles.langDdWrapOpen]}>
-      <TouchableOpacity
-        style={styles.langDdField}
-        onPress={(e) => {
-          e.stopPropagation()
-          setOpenDropdown(open ? null : 'language')
-        }}
-        activeOpacity={0.75}
-      >
-        <LangFlag code={selected.code} />
-        <Text style={styles.langNative}>{selected.native}</Text>
-        <Text style={styles.langEnglish}>{selected.english}</Text>
-        <Text style={styles.langDdChevron}>{open ? '▲' : '▼'}</Text>
-      </TouchableOpacity>
-      {open && (
-        <View style={styles.langDdList}>
-          <ScrollView style={{ maxHeight: sc(188) }} showsVerticalScrollIndicator={false} nestedScrollEnabled>
-            {SUPPORTED_LANGS.map(({ code, native, english }) => {
-              const active = value === code
-              return (
-                <TouchableOpacity
-                  key={code}
-                  style={[styles.langRowItem, active && styles.langRowItemActive]}
-                  onPress={(e) => {
-                    e.stopPropagation()
-                    onChange(code)
-                    setOpenDropdown(null)
-                  }}
-                >
-                  <LangFlag code={code} />
-                  <Text style={styles.langNative}>{native}</Text>
-                  <Text style={styles.langEnglish}>{english}</Text>
-                  {active && <Text style={styles.langCheck}>✓</Text>}
-                </TouchableOpacity>
-              )
-            })}
-          </ScrollView>
-        </View>
-      )}
+      <SettingsDropdown
+        open={open}
+        onToggle={() => setOpenDropdown(open ? null : 'language')}
+        onSelect={(lang) => onChange(lang.code)}
+        options={SUPPORTED_LANGS}
+        optionKey={(lang) => lang.code}
+        optionLabel={(lang) => lang.english}
+        value={(
+          <View style={styles.langValue}>
+            <LangFlag code={selected.code} />
+            <Text style={styles.langNative}>{selected.native}</Text>
+            <Text style={styles.langEnglish}>{selected.english}</Text>
+          </View>
+        )}
+        renderOption={(lang) => (
+          <View style={styles.langOption}>
+            <LangFlag code={lang.code} />
+            <Text style={styles.langNative}>{lang.native}</Text>
+            <Text style={styles.langEnglish}>{lang.english}</Text>
+          </View>
+        )}
+        isActive={(lang) => lang.code === value}
+      />
     </View>
   )
 }
@@ -1553,6 +1522,17 @@ function SettingsSheet() {
   const [importConfirm, setImportConfirm] = useState(false)
   const [backupError, setBackupError] = useState<string | null>(null)
   const [openDropdown, setOpenDropdown] = useState<SettingsDropdownId>(null)
+  const [providerSettingsDirty, setProviderSettingsDirty] = useState(false)
+  const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
+
+  function closeSettings() {
+    setOpenDropdown(null)
+    if (!providerSettingsDirty) {
+      toggleSettings()
+      return
+    }
+    setDiscardConfirmOpen(true)
+  }
 
   // Backup file I/O is web-only for now (native has no post-restore refresh path,
   // so a native import would leave the Zustand store / UI stale until restart).
@@ -1615,10 +1595,10 @@ function SettingsSheet() {
   }, [settingsOpen])
 
   // React to an upgrade-nudge CTA (e.g. analyzing.tsx) asking us to open the
-  // provider section; clear the flag so it doesn't re-trigger on next render.
+  // Open settings from an upgrade-nudge CTA; clear the flag so it does not
+  // re-trigger on the next render.
   useEffect(() => {
     if (openSettingsSection !== 'provider') return
-    setOpenDropdown('provider')
     if (!settingsOpen) toggleSettings()
     setOpenSettingsSection(null)
   }, [openSettingsSection, settingsOpen, toggleSettings, setOpenSettingsSection])
@@ -1628,16 +1608,21 @@ function SettingsSheet() {
   return (
     <Animated.View
       pointerEvents={settingsOpen ? 'auto' : 'none'}
-      style={[styles.settingsSheet, { paddingBottom: insets.bottom + 16, transform: [{ translateY }] }]}
+      style={[styles.settingsSheet, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 16, transform: [{ translateY }] }]}
     >
       <Pressable style={styles.settingsContent} onPress={() => setOpenDropdown(null)}>
       <View style={styles.settingsHeader}>
         <Text style={styles.settingsTitle}>Settings</Text>
-        <TouchableOpacity onPress={toggleSettings} hitSlop={12}>
+        <TouchableOpacity onPress={closeSettings} hitSlop={12}>
           <Text style={styles.sheetCloseBtn}>✕</Text>
         </TouchableOpacity>
       </View>
-
+      <ScrollView
+        style={styles.settingsScroll}
+        contentContainerStyle={styles.settingsScrollContent}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+      >
       <Text style={styles.settingsSectionLabel}>Language</Text>
       <LanguageDropdown
         value={preferredLanguage}
@@ -1646,7 +1631,7 @@ function SettingsSheet() {
         setOpenDropdown={setOpenDropdown}
       />
 
-      <View style={styles.birthGenderRow}>
+      <View style={[styles.birthGenderRow, openDropdown === 'month' && styles.birthGenderRowOpen]}>
         <View style={styles.birthCol}>
           <Text style={styles.settingsSectionLabel}>Birth: Inferred</Text>
           <View style={styles.dobRow}>
@@ -1699,7 +1684,7 @@ function SettingsSheet() {
       </View>
 
       <Text style={styles.settingsSectionLabel}>Backup</Text>
-      <View style={{ flexDirection: 'row', gap: sc(8) }}>
+      <View style={{ flexDirection: 'row', gap: sc(SETTINGS_CONTROL_GAP) }}>
         <TouchableOpacity
           style={[styles.backupBtn, !backupAvailable && { opacity: 0.4 }]}
           onPress={handleExport}
@@ -1742,20 +1727,40 @@ function SettingsSheet() {
         <Text style={styles.settingsHint}>Backup is web-only for now.</Text>
       ) : null}
 
-      <TouchableOpacity
-        style={styles.providerToggleRow}
-        onPress={(e) => {
-          e.stopPropagation()
-          setOpenDropdown(openDropdown === 'provider' ? null : 'provider')
-        }}
-        activeOpacity={0.75}
-      >
-        <Text style={[styles.settingsSectionLabel, { marginBottom: 0 }]}>AI Provider</Text>
-        <Text style={styles.langDdChevron}>{openDropdown === 'provider' ? '▲' : '▼'}</Text>
-      </TouchableOpacity>
-      {openDropdown === 'provider' && (
-        <View style={styles.providerSectionBox}>
-          <ProviderSettings />
+      <View style={[styles.providerSectionBox, providerSettingsDirty && styles.providerSectionBoxOpen]}>
+        <ProviderSettings
+          openDropdown={openDropdown}
+          setOpenDropdown={setOpenDropdown}
+          onDirtyChange={setProviderSettingsDirty}
+        />
+      </View>
+      </ScrollView>
+      {discardConfirmOpen && (
+        <View style={styles.unsavedOverlay}>
+          <View style={styles.unsavedDialog}>
+            <Text style={styles.unsavedTitle}>Unsaved changes</Text>
+            <Text style={styles.unsavedMessage}>
+              Your validated provider settings are not saved. Discard them and leave settings?
+            </Text>
+            <View style={styles.unsavedActions}>
+              <TouchableOpacity
+                style={styles.unsavedKeepBtn}
+                onPress={() => setDiscardConfirmOpen(false)}
+              >
+                <Text style={styles.unsavedKeepText}>Keep editing</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.unsavedDiscardBtn}
+                onPress={() => {
+                  setDiscardConfirmOpen(false)
+                  setProviderSettingsDirty(false)
+                  toggleSettings()
+                }}
+              >
+                <Text style={styles.unsavedDiscardText}>Discard</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       )}
       </Pressable>
@@ -2425,19 +2430,30 @@ const styles = StyleSheet.create({
 
   // Settings
   settingsSheet: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, backgroundColor: C.surface,
-    borderTopLeftRadius: sc(20), borderTopRightRadius: sc(20), paddingHorizontal: sc(20), paddingTop: sc(12), zIndex: 15,
+    position: 'absolute', top: 0, bottom: 0, left: 0, right: 0, backgroundColor: C.surface,
+    paddingHorizontal: sc(20), zIndex: 15,
     ...(IS_WEB
       ? { boxShadow: `0px ${sc(-4)}px ${sc(16)}px rgba(0,0,0,0.5)` }
       : { shadowColor: '#000', shadowOffset: { width: 0, height: -4 }, shadowOpacity: 0.5, shadowRadius: 16, elevation: 20 }),
   },
-  settingsContent: { width: '100%' },
-  settingsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sc(20) },
+  settingsContent: { width: '100%', flex: 1 },
+  settingsScroll: { flex: 1 },
+  settingsScrollContent: { paddingTop: sc(1), paddingHorizontal: sc(1), paddingBottom: sc(24) },
+  settingsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: sc(12) },
+  unsavedOverlay: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, backgroundColor: 'rgba(11,15,24,0.7)', alignItems: 'center', justifyContent: 'center', padding: sc(20), zIndex: 20000 },
+  unsavedDialog: { width: '100%', maxWidth: sc(360), backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: C.border, borderRadius: sc(8), padding: sc(16) },
+  unsavedTitle: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(17), color: C.ink, textTransform: 'uppercase' },
+  unsavedMessage: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(12), color: C.inkMuted, marginTop: sc(8), lineHeight: fs(16) },
+  unsavedActions: { flexDirection: 'row', gap: sc(SETTINGS_CONTROL_GAP), marginTop: sc(16) },
+  unsavedKeepBtn: { flex: 1, height: sc(38), borderWidth: 1, borderColor: C.border, borderRadius: sc(8), alignItems: 'center', justifyContent: 'center' },
+  unsavedKeepText: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(12), color: C.ink, textTransform: 'uppercase' },
+  unsavedDiscardBtn: { flex: 1, height: sc(38), borderRadius: sc(8), backgroundColor: '#E05252', alignItems: 'center', justifyContent: 'center' },
+  unsavedDiscardText: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(12), color: C.ink, textTransform: 'uppercase' },
   settingsTitle: { fontFamily: 'BarlowCondensed-Bold', fontSize: fs(18), color: C.ink, textTransform: 'uppercase', letterSpacing: sc(0.5) },
   settingsSectionLabel: { fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), color: C.aqua, textTransform: 'uppercase', letterSpacing: sc(1), marginBottom: sc(10) },
 
   langDdWrap: { position: 'relative', zIndex: 20, marginBottom: sc(18) },
-  langDdWrapOpen: { zIndex: 120 },
+  langDdWrapOpen: { zIndex: 10000, elevation: 10000 },
   langDdField: {
     flexDirection: 'row', alignItems: 'center', gap: sc(10), height: sc(44),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8),
@@ -2462,11 +2478,14 @@ const styles = StyleSheet.create({
   langNative: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(14), fontWeight: '500', color: C.ink },
   langEnglish: { fontFamily: 'SourceCodePro', fontSize: fs(9.5), color: 'rgba(250,250,247,0.5)', flex: 1 },
   langCheck: { fontSize: fs(14), color: C.aqua },
+  langValue: { flexDirection: 'row', alignItems: 'center', gap: sc(10), flex: 1 },
+  langOption: { flexDirection: 'row', alignItems: 'center', gap: sc(10), flex: 1 },
 
-  birthGenderRow: { flexDirection: 'row', gap: sc(24), alignItems: 'flex-start', zIndex: 60 },
+  birthGenderRow: { flexDirection: 'row', gap: sc(SETTINGS_CONTROL_GAP), alignItems: 'flex-start', zIndex: 60 },
+  birthGenderRowOpen: { zIndex: 10001, elevation: 10001 },
   birthCol: { flex: 1, minWidth: 0, zIndex: 70 },
   genderCol: { flex: 1, minWidth: 0 },
-  dobRow: { flexDirection: 'row', gap: sc(8), marginBottom: sc(6), alignItems: 'flex-start', zIndex: 70 },
+  dobRow: { flexDirection: 'row', gap: sc(SETTINGS_CONTROL_GAP), marginBottom: sc(6), alignItems: 'flex-start', zIndex: 70 },
   dobYearInput: {
     height: sc(40), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', borderRadius: sc(8), paddingHorizontal: sc(10),
     fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink, backgroundColor: C.surfaceHigh,
@@ -2474,7 +2493,8 @@ const styles = StyleSheet.create({
   },
 
   // Month dropdown
-  monthDdWrap: { position: 'relative', zIndex: 90, flexGrow: 0, flexShrink: 1, flexBasis: sc(60), minWidth: 0 },
+  monthDdWrap: { position: 'relative', zIndex: 90, elevation: 90, flexGrow: 0, flexShrink: 1, flexBasis: sc(60), minWidth: 0 },
+  monthDdWrapOpen: { zIndex: 10001, elevation: 10001 },
   monthDdField: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     height: sc(40), width: '100%', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
@@ -2483,7 +2503,7 @@ const styles = StyleSheet.create({
   monthDdValue: { fontFamily: 'SourceCodePro', fontSize: fs(14), color: C.ink },
   monthDdChevron: { fontSize: fs(9), color: C.inkMuted },
   monthDdList: {
-    position: 'absolute', bottom: sc(44), left: 0, right: 0,
+    position: 'absolute', top: sc(44), left: 0, right: 0,
     backgroundColor: C.surfaceHigh, borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
     borderRadius: sc(8), overflow: 'hidden', zIndex: 100,
     ...(IS_WEB ? { boxShadow: `0 ${sc(6)}px ${sc(16)}px rgba(0,0,0,0.5)` } : { elevation: 8 }),
@@ -2494,7 +2514,7 @@ const styles = StyleSheet.create({
   monthDdItemTextActive: { color: C.purpleLight },
 
   // Gender
-  genderRow: { flexDirection: 'row', gap: sc(10), marginBottom: sc(6) },
+  genderRow: { flexDirection: 'row', gap: sc(SETTINGS_CONTROL_GAP), marginBottom: sc(6) },
   genderOpt: {
     width: sc(60), height: sc(40), borderRadius: sc(8), flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: sc(4),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)', backgroundColor: C.surfaceHigh,
@@ -2505,14 +2525,11 @@ const styles = StyleSheet.create({
   genderOptTextActive: { color: '#fff' },
   settingsHint: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(11), color: C.inkMuted, marginBottom: sc(12) },
 
-  providerToggleRow: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginTop: sc(4), marginBottom: sc(4),
-  },
   providerSectionBox: {
-    maxHeight: sc(420), borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: sc(8), padding: sc(10), marginBottom: sc(18),
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.12)',
+    paddingTop: sc(14), marginTop: sc(18), marginBottom: sc(18),
   },
+  providerSectionBoxOpen: { zIndex: 10000, elevation: 10000 },
 
   // Upload-arrival + gender prompt cards
   arrivalCard: {
