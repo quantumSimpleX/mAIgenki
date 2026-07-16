@@ -1,4 +1,4 @@
-import { callLLMWithFallback, DEFAULT_MODELS } from './client'
+import { callLLMWithFallback, DEFAULT_MODELS, type LLMTraceEvent } from './client'
 import type { SQLiteDatabase } from 'expo-sqlite'
 import type { KeyStore, LMFProfile } from '@/lib/lmf'
 
@@ -17,16 +17,18 @@ export type ConditionInput = {
   date_diagnosed: string | null
   evidence: string | null
   provider?: ProviderInput | null
+  care_events?: CareEventInput[]
 }
 
 export type MeasurementInput = {
   name: string
   value_numeric: number
   unit: string
-  reference_low: number | null
-  reference_high: number | null
-  flag: 'low' | 'high' | 'critical' | null
   date: string | null
+  /** Legacy response fields accepted for migration compatibility; ignored on write. */
+  reference_low?: number | null
+  reference_high?: number | null
+  flag?: 'low' | 'high' | 'critical' | null
 }
 
 export type ProviderInput = {
@@ -34,6 +36,22 @@ export type ProviderInput = {
   specialty: string | null
   email: string | null
   phone: string | null
+  evidence: string | null
+}
+
+export type FacilityInput = {
+  name: string
+  address: string | null
+  city: string | null
+  state: string | null
+  country: string | null
+}
+
+export type CareEventInput = {
+  event_type: 'diagnosed' | 'revisited' | 'treated' | 'monitored' | 'referred' | 'other'
+  date: string
+  provider: ProviderInput
+  facility: FacilityInput | null
   evidence: string | null
 }
 
@@ -137,10 +155,10 @@ Never invent conditions. Never recommend treatment or medication.`
 const CONDITION_PROMPT = `You are the second stage of a clinical data extraction pipeline.
 The user message contains one condition candidate and the complete medical record.
 Return only JSON with exactly this shape:
-{"condition":{"name_medical":"standardized English name","name_common":"plain English name or null","system":"one of the supported organ systems","organ":"specific organ or null","anatomical_location":"specific location or null","status":"documented | resolved | suspected","severity":"mild | moderate | severe | null","certainty":"confirmed | probable | possible | null","date_onset":"YYYY-MM-DD or null","date_diagnosed":"YYYY-MM-DD or null","evidence":"brief supporting quote or null","provider":{"name":"clinician who diagnosed or managed this condition, or null","specialty":"specialty or null","email":"that clinician's email or null","phone":"that clinician's phone or null","evidence":"brief quote linking this clinician to this condition, or null"}},"measurements":[]}
+{"condition":{"name_medical":"standardized English name","name_common":"plain English name or null","system":"one of the supported organ systems","organ":"specific organ or null","anatomical_location":"specific location or null","status":"documented | resolved | suspected","severity":"mild | moderate | severe | null","certainty":"confirmed | probable | possible | null","date_onset":"YYYY-MM-DD or null","date_diagnosed":"YYYY-MM-DD or null","evidence":"brief supporting quote or null","care_events":[{"event_type":"diagnosed | revisited | treated | monitored | referred | other","date":"YYYY-MM-DD","provider":{"name":"clinician name","specialty":"specialty or null","email":"email or null","phone":"phone or null","evidence":"provider evidence or null"},"facility":{"name":"institution","address":"street address or null","city":"city or null","state":"state or null","country":"country or null"},"evidence":"brief quote supporting this event or null"}]},"measurements":[]}
 Determine the earliest supported diagnosis date in the entire record. A summary date is not necessarily the diagnosis date. Use dated history, assessment notes, referrals, test results, and explicit diagnosis statements. If no reliable date exists, return null.
 Do not assign the primary physician unless the record supports that relationship. A specialist at another clinic may be the diagnosing provider.
-The measurements array should contain numeric labs/vitals found in the report. It may be repeated across calls; the app will deduplicate it.
+The measurements array should contain actual numeric lab/vital values, their units, and dates. Do not output reference ranges or interpretation flags. It may be repeated across calls; the app will deduplicate it.
 Never invent data or recommend treatment.`
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
@@ -163,13 +181,13 @@ Always respond with a single JSON object — no markdown, no explanation. The JS
       "date_onset": "YYYY-MM-DD or null",
       "date_diagnosed": "YYYY-MM-DD or null",
       "evidence": "brief verbatim quote from the record that supports this condition, or null",
-      "provider": {
-        "name": "clinician who diagnosed or managed this condition, or null",
-        "specialty": "specialty or null",
-        "email": "that clinician's email or null",
-        "phone": "that clinician's phone or null",
-        "evidence": "brief quote identifying the clinician's relationship to this condition, or null"
-      }
+      "care_events": [{
+        "event_type": "diagnosed | revisited | treated | monitored | referred | other",
+        "date": "YYYY-MM-DD",
+        "provider": {"name": "clinician name", "specialty": "specialty or null", "email": "email or null", "phone": "phone or null", "evidence": "provider evidence or null"},
+        "facility": {"name": "institution", "address": "address or null", "city": "city or null", "state": "state or null", "country": "country or null"},
+        "evidence": "brief quote supporting this event or null"
+      }]
     }
   ],
   "measurements": [
@@ -177,9 +195,6 @@ Always respond with a single JSON object — no markdown, no explanation. The JS
       "name": "standardized English measurement name (e.g. HbA1c, Blood Pressure Systolic)",
       "value_numeric": <number>,
       "unit": "unit string (e.g. %, mmHg, mg/dL)",
-      "reference_low": <number or null>,
-      "reference_high": <number or null>,
-      "flag": "low | high | critical | null",
       "date": "YYYY-MM-DD or null"
     }
   ],
@@ -213,7 +228,7 @@ export async function enrichFromText(
   text: string,
   apiKey: string,
   models?: string[],
-  routing?: { db?: SQLiteDatabase; profile?: LMFProfile; keys?: KeyStore; timeoutMs?: number },
+  routing?: { db?: SQLiteDatabase; profile?: LMFProfile; keys?: KeyStore; timeoutMs?: number; onTrace?: (event: LLMTraceEvent) => void },
   onConditionProgress?: (completed: number, total: number) => void,
 ): Promise<EnrichmentResult> {
   const inventoryResult = await callLLMWithFallback<ConditionInventory | EnrichmentResult>({

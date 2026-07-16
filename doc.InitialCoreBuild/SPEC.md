@@ -528,3 +528,41 @@ a successful open into a failed one.
 
 - **Anatomy SVG paths:** Final organ paths need to be traced into the 260×460 coordinate space per body type. Placeholder ellipses are used during development. This is 2–3 days of design/tracing work.
 - **Additional languages:** Architecture supports adding more `SupportedLang` values; localNames in CONDITIONS would need to be populated.
+
+## Clinical Data Model Contract
+
+The database must represent a condition as a longitudinal entity, not as one diagnosis
+owned by one doctor on one date. A condition can have many dated care events. Each event
+may represent `diagnosed`, `revisited`, `treated`, `monitored`, `referred`, or `other`.
+
+### Clinicians and institutions
+
+- `providers` stores clinician identity: name, specialty, email, and phone.
+- `facilities` stores institution identity and address: name, street address, city, state,
+  and country. Missing city/state/country may be inferred by the LLM only when evidence
+  supports the inference; otherwise the field is null.
+- `provider_affiliations` is many-to-many. A clinician may work at multiple institutions,
+  and an institution may have many clinicians. The affiliation stores role and evidence.
+- Contact details are stored only on `providers`, never duplicated on condition events.
+
+### Condition care events
+
+`condition_care_events` stores condition, clinician, institution, event type, required event
+date, and evidence. This is the authoritative relationship for deciding which specialist
+diagnosed, revisited, treated, or monitored a condition. The condition-level diagnosis date
+is only a display/indexing convenience and must not replace the event history.
+
+### Measurements
+
+Measurements store the measurement name, observed value (`value_numeric` or `value_text`),
+unit, and measurement date, plus optional source links and evidence. Reference ranges and interpreted
+flags are deliberately not part of the application data contract because they vary by time,
+country, laboratory, and guideline. Current reference standards are applied at display or
+analysis time.
+
+### Evidence and privacy
+
+Evidence from the locally extracted provider/facility metadata is stored on the relevant
+provider affiliation or care event. Patient-identifying text is redacted before any LLM
+request. API keys are stored separately from SQLite and are never included in evidence,
+logs, or backups.

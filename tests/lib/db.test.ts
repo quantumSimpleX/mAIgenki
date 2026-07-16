@@ -175,21 +175,18 @@ describe('insertConditionProvider', () => {
 // ── measurements ─────────────────────────────────────────────────────────────
 
 describe('insertMeasurement', () => {
-  it('inserts a lab value with flag and reference range', async () => {
+  it('inserts a lab value with its observed value, unit, and date', async () => {
     await insertMeasurement(mockDb as any, {
       recordId: 'rec-1',
       name: 'HbA1c',
       valueNumeric: 7.2,
       valueText: '7.2%',
       unit: '%',
-      referenceLow: 4.0,
-      referenceHigh: 5.6,
-      flag: 'H',
       date: '2023-06-01',
     })
     expect(mockDb.runAsync).toHaveBeenCalledWith(
       expect.stringContaining('INSERT INTO measurements'),
-      expect.arrayContaining(['HbA1c', 7.2, '%', 'H']),
+      expect.arrayContaining(['HbA1c', 7.2, '%', '2023-06-01']),
     )
   })
 })

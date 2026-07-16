@@ -21,10 +21,28 @@ export function useConditions(sourceOverride?: ConditionSource): [
   const effectiveSource = sourceOverride ?? conditionSource
 
   const refresh = useCallback(() => {
-    if (!db) return // initial/current state already holds the fallback
+    if (!db) {
+      if (effectiveSource === 'auto') console.warn('[health-pipeline] bodymap-load-skipped', { reason: 'database-unavailable' })
+      return // initial/current state already holds the fallback
+    }
+    const startedAt = Date.now()
+    if (effectiveSource === 'auto') console.info('[health-pipeline] bodymap-load-started')
     getConditions(db, effectiveSource)
-      .then((rows) => setConditions(rows.length > 0 ? rows : CONDITIONS))
-      .catch(() => setConditions(CONDITIONS))
+      .then((rows) => {
+        if (effectiveSource === 'auto') console.info('[health-pipeline] bodymap-load-completed', {
+          rows: rows.length,
+          usedFallback: rows.length === 0,
+          durationMs: Date.now() - startedAt,
+        })
+        setConditions(rows.length > 0 ? rows : CONDITIONS)
+      })
+      .catch((error: unknown) => {
+        if (effectiveSource === 'auto') console.error('[health-pipeline] bodymap-load-failed', {
+          message: error instanceof Error ? error.message : String(error),
+          durationMs: Date.now() - startedAt,
+        })
+        setConditions(CONDITIONS)
+      })
   }, [db, effectiveSource])
 
   const updatePosition = useCallback((id: string, cxPercent: number, cyPercent: number) => {

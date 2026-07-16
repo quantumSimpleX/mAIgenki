@@ -1,5 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
 import type { KeyStore, LMFProfile, Telemetry } from '@/lib/lmf'
+import type { Candidate, ChatResult, LMFFailure } from '@/lib/lmf'
 import { lmfChat, lmfEnrich } from './service'
 
 // ── Model chain ───────────────────────────────────────────────────────────────
@@ -57,7 +58,14 @@ interface CallOptions<T> {
   profile?: LMFProfile
   keys?: KeyStore
   timeoutMs?: number
+  onTrace?: (event: LLMTraceEvent) => void
 }
+
+export type LLMTraceEvent =
+  | { type: 'attempt'; label: string; candidate: Candidate }
+  | { type: 'failure'; label: string; failure: LMFFailure }
+  | { type: 'success'; label: string; result: ChatResult; attemptCount: number }
+  | { type: 'exhausted'; label: string; failures: LMFFailure[] }
 
 // ── Fallback chain ────────────────────────────────────────────────────────────
 // Thin wrapper over the lmf engine (service.ts's lmfChat/lmfEnrich): builds the
@@ -79,7 +87,7 @@ function splitMessages(messages: LLMMessage[]): { systemPrompt: string; userMess
 export async function callLLMWithFallback<T = string>(
   opts: CallOptions<T>,
 ): Promise<LLMResult<T>> {
-  const { messages, apiKey, validate, temperature, label = 'llm', db, profile, keys, timeoutMs } = opts
+  const { messages, apiKey, validate, temperature, label = 'llm', db, profile, keys, timeoutMs, onTrace } = opts
   const models = opts.models ?? DEFAULT_MODELS
   const { systemPrompt, userMessage } = splitMessages(messages)
 
@@ -87,13 +95,17 @@ export async function callLLMWithFallback<T = string>(
   let content: string | null = null
   const failures: string[] = []
   const telemetry: Telemetry = {
-    onSuccess: (result) => {
+    onAttempt: (candidate) => onTrace?.({ type: 'attempt', label, candidate }),
+    onFailure: (failure) => {
+      failures.push(`${failure.model}: ${failure.message}`)
+      onTrace?.({ type: 'failure', label, failure })
+    },
+    onSuccess: (result, attemptCount) => {
       model = result.model
       content = result.content
+      onTrace?.({ type: 'success', label, result, attemptCount })
     },
-    onFailure: (f) => {
-      failures.push(`${f.model}: ${f.message}`)
-    },
+    onExhausted: (exhaustedFailures) => onTrace?.({ type: 'exhausted', label, failures: exhaustedFailures }),
   }
   const serviceOpts = { apiKey, models, temperature, telemetry, db, profile, keys, timeoutMs }
 
@@ -116,6 +128,7 @@ export async function callLLMWithFallback<T = string>(
   if (ok) {
     return { ok: true, model, content, value, failures }
   }
+
 
   // A model failing is an expected part of walking the fallback chain — record
   // it for the caller (returned in `failures`) without warning per model. Only

@@ -116,7 +116,7 @@ describe('processHealthRecord — PDF input', () => {
 
     await processHealthRecord({ uri: 'file:///docs/report.pdf', db: mockDb })
     expect(mockGetSetting).toHaveBeenCalledWith(mockDb, 'openrouter_api_key')
-    expect(mockEnrich).toHaveBeenCalledWith('Patient has hypertension', 'sk-stored', expect.any(Array))
+    expect(mockEnrich).toHaveBeenCalledWith('Patient has hypertension', 'sk-stored', expect.any(Array), expect.any(Object), expect.any(Function))
   })
 
   it('falls back to an empty key (free tier) when apiKey is omitted and no setting is stored', async () => {
@@ -125,7 +125,7 @@ describe('processHealthRecord — PDF input', () => {
     mockGetSetting.mockResolvedValue(null)
 
     await processHealthRecord({ uri: 'file:///docs/report.pdf', db: mockDb })
-    expect(mockEnrich).toHaveBeenCalledWith('Patient has hypertension', '', expect.any(Array))
+    expect(mockEnrich).toHaveBeenCalledWith('Patient has hypertension', '', expect.any(Array), expect.any(Object), expect.any(Function))
   })
 })
 

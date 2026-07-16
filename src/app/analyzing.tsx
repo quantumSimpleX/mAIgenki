@@ -518,6 +518,11 @@ export default function AnalyzingScreen() {
         setLastUploadResult(result)
         setConditionSource('auto')
         setPendingUpload(null)
+        console.info('[health-pipeline] bodymap-transition', {
+          recordId: result.recordId,
+          conditionCount: result.conditionCount,
+          measurementCount: result.measurementCount,
+        })
         await upsertSetting(db, 'condition_source', 'auto')
         scheduleSnapshot(db)
         setPipelineError(null)
@@ -529,11 +534,20 @@ export default function AnalyzingScreen() {
         let msg: string
         if (e instanceof EnrichmentFailedError) {
           console.warn('[analyzing] enrichment failed —', e.failures.join('; '))
+          console.error('[health-pipeline] failed', {
+            errorType: e.name,
+            failureCount: e.failures.length,
+            failures: e.failures,
+          })
           const cooldown = e.failures.some((failure) => failure.includes('on cooldown'))
           msg = cooldown
             ? 'The selected Gemini model is temporarily rate-limited. Wait briefly, choose another model, or enable free-model fallback in Settings.'
             : 'Could not analyze this record — check your connection or try again.'
         } else {
+          console.error('[health-pipeline] failed', {
+            errorType: e instanceof Error ? e.name : 'unknown',
+            message: e instanceof Error ? e.message : String(e),
+          })
           msg = e instanceof Error ? e.message : 'Something went wrong while analyzing this file.'
         }
         setPendingUpload(null)

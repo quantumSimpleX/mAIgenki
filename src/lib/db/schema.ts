@@ -21,6 +21,15 @@ export type ProviderRow = {
   created_at: string
 }
 
+export type ProviderAffiliationRow = {
+  id: string
+  provider_id: string
+  facility_id: string
+  role: string | null
+  evidence: string | null
+  created_at: string
+}
+
 export type HealthRecordRow = {
   id: string
   filename: string
@@ -68,6 +77,17 @@ export type ConditionProviderRow = {
   facility_id: string | null
 }
 
+export type ConditionCareEventRow = {
+  id: string
+  condition_id: string
+  provider_id: string
+  facility_id: string | null
+  event_type: string
+  event_date: string
+  evidence: string | null
+  created_at: string
+}
+
 export type MeasurementRow = {
   id: string
   record_id: string | null
@@ -75,9 +95,6 @@ export type MeasurementRow = {
   value_numeric: number | null
   value_text: string | null
   unit: string | null
-  reference_low: number | null
-  reference_high: number | null
-  flag: string | null
   date: string
   provider_id: string | null
   facility_id: string | null
@@ -149,6 +166,16 @@ export const CREATE_TABLES_SQL = `
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS provider_affiliations (
+    id TEXT PRIMARY KEY,
+    provider_id TEXT NOT NULL REFERENCES providers(id),
+    facility_id TEXT NOT NULL REFERENCES facilities(id),
+    role TEXT,
+    evidence TEXT,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(provider_id, facility_id)
+  );
+
   CREATE TABLE IF NOT EXISTS health_records (
     id TEXT PRIMARY KEY,
     filename TEXT NOT NULL,
@@ -200,6 +227,17 @@ export const CREATE_TABLES_SQL = `
     PRIMARY KEY (condition_id, provider_id, role)
   );
 
+  CREATE TABLE IF NOT EXISTS condition_care_events (
+    id TEXT PRIMARY KEY,
+    condition_id TEXT NOT NULL REFERENCES conditions(id),
+    provider_id TEXT NOT NULL REFERENCES providers(id),
+    facility_id TEXT REFERENCES facilities(id),
+    event_type TEXT NOT NULL,
+    event_date TEXT NOT NULL,
+    evidence TEXT,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE TABLE IF NOT EXISTS measurements (
     id TEXT PRIMARY KEY,
     record_id TEXT REFERENCES health_records(id),
@@ -207,9 +245,6 @@ export const CREATE_TABLES_SQL = `
     value_numeric REAL,
     value_text TEXT,
     unit TEXT,
-    reference_low REAL,
-    reference_high REAL,
-    flag TEXT,
     date TEXT NOT NULL,
     provider_id TEXT REFERENCES providers(id),
     facility_id TEXT REFERENCES facilities(id),

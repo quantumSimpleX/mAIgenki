@@ -242,3 +242,33 @@ Phase 4 (condition dot position editor — independent of Phases 2/3)
 ```
 
 **Next up:** Task 2.6 — wire upload → pipeline → body map data flow.
+
+## Data Model Revision: Longitudinal Care History
+
+This revision supersedes the earlier one-provider-per-condition assumption.
+
+### SQLite tables
+
+1. `providers`: clinician `name`, `specialty`, `email`, and `phone` only.
+2. `facilities`: institution `name`, `address`, `city`, `state`, and `country`.
+3. `provider_affiliations`: many-to-many provider/facility links with role and evidence.
+4. `conditions`: canonical condition identity and display fields. Its date fields are not a
+   substitute for event history.
+5. `condition_care_events`: one row per dated clinician interaction with a condition:
+   `condition_id`, `provider_id`, optional `facility_id`, `event_type`, required `event_date`,
+   and evidence. Multiple clinicians, institutions, event types, and dates are expected.
+6. `measurements`: measurement name, observed value, unit, date, optional source links, and evidence. Legacy
+   reference-range/flag columns are ignored by new writes and are not part of the new model.
+
+### Extraction contract
+
+The first LLM stage inventories every condition in the complete report. The enrichment stage
+must return a `care_events` array for each condition. Every care event must include an event
+type, date, clinician, institution when available, and supporting evidence. The LLM must use
+the earliest supported historical diagnosis date rather than copying a later summary date.
+Provider contact information is normalized into `providers`; facility details are normalized
+into `facilities`; event evidence remains on the affiliation/event row where it was observed.
+
+The implementation locations are `src/lib/db/schema.ts`, `src/lib/db/queries.ts`,
+`src/lib/llm/enrich.ts`, and `src/lib/pipeline.ts`. Future migrations must preserve legacy
+rows while writing only to the revised tables and fields.

@@ -14,6 +14,7 @@ export type ProviderContact = {
   name: string | null
   email: string | null
   phone: string | null
+  evidence: string
 }
 
 // ── Name extraction patterns (capture group 1 = the name value) ───────────────
@@ -134,7 +135,7 @@ export function extractProviderContacts(text: string): ProviderContact[] {
     const email = window.match(emailPattern)?.[0] ?? null
     const phone = window.match(phonePattern)?.[0]?.trim() ?? null
     if (email || phone) {
-      contacts.push({ name: nameMatch?.[1]?.trim() ?? null, email, phone })
+      contacts.push({ name: nameMatch?.[1]?.trim() ?? null, email, phone, evidence: lines[index].trim() })
     }
   }
 

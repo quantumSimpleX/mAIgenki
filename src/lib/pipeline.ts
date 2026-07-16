@@ -4,9 +4,14 @@ import { extractTextFromImage } from './ocr/extract'
 import { enrichFromText } from './llm/enrich'
 import { applyInferenceRules } from './inference/rules'
 import { getModelChain } from './llm/client'
+import type { LLMTraceEvent } from './llm/client'
 import { loadProfile } from './llm/profile'
 import { makeKeyStore } from './llm/keystore'
-import { insertHealthRecord, insertCondition, insertMeasurement, findOrCreateProvider, insertConditionProvider, getSetting } from './db/queries'
+import {
+  insertHealthRecord, insertCondition, insertMeasurement, findOrCreateFacility,
+  findOrCreateProvider, insertProviderAffiliation, insertConditionProvider,
+  insertConditionCareEvent, getSetting,
+} from './db/queries'
 import { scheduleSnapshot } from './db/snapshot'
 import { redactPII, extractProviderContacts } from './privacy/redact'
 
@@ -81,7 +86,49 @@ function contactForProvider(
 
 export async function processHealthRecord(opts: PipelineOptions): Promise<PipelineResult> {
   const { uri, db, sex, kind, onProgress } = opts
+  const pipelineStartedAt = Date.now()
+  const trace = (event: string, details: Record<string, unknown> = {}): void => {
+    console.info('[health-pipeline]', event, { elapsedMs: Date.now() - pipelineStartedAt, ...details })
+  }
+  const traceLlm = (event: LLMTraceEvent): void => {
+    if (event.type === 'attempt') {
+      trace('llm-attempt', { label: event.label, provider: event.candidate.providerId, model: event.candidate.model })
+    } else if (event.type === 'failure') {
+      trace('llm-failure', {
+        label: event.label,
+        provider: event.failure.providerId,
+        model: event.failure.model,
+        kind: event.failure.kind,
+        status: event.failure.status,
+        retryAfterMs: event.failure.retryAfterMs,
+        message: event.failure.message,
+      })
+    } else if (event.type === 'success') {
+      trace('llm-success', {
+        label: event.label,
+        provider: event.result.providerId,
+        model: event.result.model,
+        attemptCount: event.attemptCount,
+        promptTokens: event.result.usage?.promptTokens ?? null,
+        completionTokens: event.result.usage?.completionTokens ?? null,
+      })
+    } else {
+      trace('llm-exhausted', {
+        label: event.label,
+        failureCount: event.failures.length,
+        failures: event.failures.map((failure) => ({
+          provider: failure.providerId,
+          model: failure.model,
+          kind: failure.kind,
+          status: failure.status,
+          retryAfterMs: failure.retryAfterMs,
+          message: failure.message,
+        })),
+      })
+    }
+  }
   const report = (phase: ProgressPhase, progress: number): void => onProgress?.(phase, progress)
+  trace('started', { inputKind: kind ?? 'auto', sexProvided: sex != null })
 
   // Step 1 — extract text
   let text: string
@@ -89,10 +136,15 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   let pageCount: number | null = null
 
   report(0, 0.05)
+  const extractionStartedAt = Date.now()
+  trace('extraction-started', { inputKind: isPdf(uri) ? 'pdf' : 'image' })
   const isPdfInput = kind ? kind === 'pdf' : isPdf(uri)
   if (isPdfInput) {
     const extracted = await extractTextFromPDF(uri)
-    if (extracted.method === 'ocr') throw new OcrRequiredError()
+    if (extracted.method === 'ocr') {
+      trace('extraction-failed', { reason: 'ocr-required' })
+      throw new OcrRequiredError()
+    }
     text = extracted.text
     pageCount = extracted.pageCount
     extractionMethod = 'text'
@@ -100,11 +152,23 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
     text = await extractTextFromImage(uri)
     extractionMethod = 'image'
   }
+  trace('extraction-completed', {
+    method: extractionMethod,
+    pageCount,
+    textCharacters: text.length,
+    durationMs: Date.now() - extractionStartedAt,
+  })
 
   // Step 2 — redact PII before any text leaves the device
   report(1, 0.4)
   const safeText = redactPII(text)
   const localProviderContacts = extractProviderContacts(text)
+  trace('redaction-completed', {
+    originalCharacters: text.length,
+    redactedCharacters: safeText.length,
+    changed: text !== safeText,
+    localProviderContacts: localProviderContacts.length,
+  })
 
   // Step 3 — get model chain + API key, enrich with LLM
   const models = opts.models ?? await getModelChain(db)
@@ -113,15 +177,44 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   // bypass the persisted profile. The app upload flow leaves this unset and
   // therefore uses the saved provider profile below.
   const profile = opts.apiKey ? null : await loadProfile(db)
+  trace('routing-selected', {
+    profileTier: profile?.tier ?? 0,
+    provider: profile?.activeProviderId ?? 'openrouter-tier-0',
+    model: profile?.model ?? null,
+    fallbackToFree: profile?.fallbackToFree ?? true,
+    configuredApiKey: Boolean(opts.apiKey || apiKey || (profile && profile.activeProviderId)),
+    modelChainLength: models.length,
+    timeoutMs: profile?.activeProviderId === 'gemini' ? 180_000 : 90_000,
+  })
+  const enrichmentStartedAt = Date.now()
   const enrichment = profile && profile.tier > 0 && profile.activeProviderId && profile.model
     ? await enrichFromText(safeText, apiKey, models, {
       db,
       profile,
       keys: await makeKeyStore(),
       timeoutMs: profile.activeProviderId === 'gemini' ? 180_000 : undefined,
-    }, (completed, total) => report(1, 0.4 + (total > 0 ? 0.35 * completed / total : 0.35)))
-    : await enrichFromText(safeText, apiKey, models)
+      onTrace: traceLlm,
+    }, (completed, total) => {
+      trace('condition-enrichment-progress', { completed, total })
+      report(1, 0.4 + (total > 0 ? 0.35 * completed / total : 0.35))
+    })
+    : profile
+      ? await enrichFromText(safeText, apiKey, models, {
+        db,
+        profile,
+        onTrace: traceLlm,
+      }, (completed, total) => {
+        trace('condition-enrichment-progress', { completed, total })
+        report(1, 0.4 + (total > 0 ? 0.35 * completed / total : 0.35))
+      })
+      : await enrichFromText(safeText, apiKey, models)
   const { conditions: llmConditions, measurements, providers: llmProviders = [] } = enrichment
+  trace('enrichment-completed', {
+    conditions: llmConditions.length,
+    measurements: measurements.length,
+    providers: llmProviders.length,
+    durationMs: Date.now() - enrichmentStartedAt,
+  })
   const providers = llmProviders.map((provider, index) => {
     const providerName = String(provider.name ?? '').trim()
     const normalizedProviderName = normalizedName(providerName)
@@ -131,6 +224,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
       name: providerName,
       email: provider.email ?? local?.email ?? null,
       phone: provider.phone ?? local?.phone ?? null,
+      evidence: provider.evidence ?? local?.evidence ?? null,
     }
   })
 
@@ -138,6 +232,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   report(2, 0.75)
   const inferredConditions = applyInferenceRules(measurements, llmConditions, sex)
   const allConditions = [...llmConditions, ...inferredConditions]
+  trace('inference-completed', { llmConditions: llmConditions.length, inferredConditions: inferredConditions.length })
 
   // Step 5 — persist health record
   report(3, 0.9)
@@ -146,6 +241,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
     pageCount,
     extractionMethod,
   })
+  trace('health-record-persisted', { recordId, extractionMethod, pageCount })
 
   // Step 6 — persist conditions
   for (const c of allConditions) {
@@ -168,8 +264,47 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
         ...c.provider,
         email: c.provider.email ?? contactForProvider(c.provider.name, 0, localProviderContacts)?.email ?? null,
         phone: c.provider.phone ?? contactForProvider(c.provider.name, 0, localProviderContacts)?.phone ?? null,
+        evidence: c.provider.evidence ?? contactForProvider(c.provider.name, 0, localProviderContacts)?.evidence ?? null,
       }]
       : providers
+    const careEvents = c.care_events ?? []
+    for (const event of careEvents) {
+      if (!event.date || !event.provider?.name) continue
+      const localContact = contactForProvider(event.provider.name, 0, localProviderContacts)
+      const providerEvidence = event.evidence ?? event.provider.evidence ?? localContact?.evidence ?? null
+      const facilityId = event.facility?.name
+        ? await findOrCreateFacility(db, {
+          name: event.facility.name,
+          address: event.facility.address,
+          city: event.facility.city,
+          state: event.facility.state,
+          country: event.facility.country,
+        })
+        : null
+      const providerId = await findOrCreateProvider(db, {
+        name: event.provider.name,
+        specialty: event.provider.specialty,
+        email: event.provider.email ?? localContact?.email ?? null,
+        phone: event.provider.phone ?? localContact?.phone ?? null,
+        primaryFacilityId: facilityId,
+      })
+      if (facilityId) {
+        await insertProviderAffiliation(db, {
+          providerId,
+          facilityId,
+          role: event.event_type,
+          evidence: providerEvidence,
+        })
+      }
+      await insertConditionCareEvent(db, {
+        conditionId,
+        providerId,
+        facilityId,
+        eventType: event.event_type,
+        eventDate: event.date,
+        evidence: providerEvidence,
+      })
+    }
     for (const provider of conditionProviders) {
       if (!provider.name) continue
       const providerId = await findOrCreateProvider(db, {
@@ -193,15 +328,20 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
       name: m.name,
       valueNumeric: m.value_numeric,
       unit: m.unit,
-      referenceLow: m.reference_low,
-      referenceHigh: m.reference_high,
-      flag: m.flag,
       date: m.date ?? today(),
     })
   }
 
+  trace('persistence-completed', {
+    recordId,
+    conditions: allConditions.length,
+    measurements: measurements.length,
+    durationMs: Date.now() - pipelineStartedAt,
+  })
+
   scheduleSnapshot(db)
   report(3, 1)
+  trace('completed', { recordId, durationMs: Date.now() - pipelineStartedAt })
 
   return {
     recordId,

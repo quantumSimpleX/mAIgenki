@@ -87,11 +87,13 @@ export async function findOrCreateProvider(
     [input.name, input.specialty ?? null, input.specialty ?? null],
   )
   if (existing) {
-    await db.runAsync(
-      `UPDATE providers SET email = COALESCE(?, email), phone = COALESCE(?, phone)
-       WHERE id = ?`,
-      [input.email ?? null, input.phone ?? null, existing.id],
-    )
+    if (input.email || input.phone) {
+      await db.runAsync(
+        `UPDATE providers SET email = COALESCE(?, email), phone = COALESCE(?, phone)
+         WHERE id = ?`,
+        [input.email ?? null, input.phone ?? null, existing.id],
+      )
+    }
     return existing.id
   }
 
@@ -223,6 +225,48 @@ export async function insertConditionProvider(
   )
 }
 
+type ProviderAffiliationInput = {
+  providerId: string
+  facilityId: string
+  role?: string | null
+  evidence?: string | null
+}
+
+export async function insertProviderAffiliation(
+  db: SQLiteDatabase,
+  input: ProviderAffiliationInput,
+): Promise<void> {
+  await db.runAsync(
+    `INSERT OR IGNORE INTO provider_affiliations (id, provider_id, facility_id, role, evidence)
+     VALUES (?, ?, ?, ?, ?)`,
+    [uuid(), input.providerId, input.facilityId, input.role ?? null, input.evidence ?? null],
+  )
+}
+
+type ConditionCareEventInput = {
+  conditionId: string
+  providerId: string
+  facilityId?: string | null
+  eventType: string
+  eventDate: string
+  evidence?: string | null
+}
+
+export async function insertConditionCareEvent(
+  db: SQLiteDatabase,
+  input: ConditionCareEventInput,
+): Promise<string> {
+  const id = uuid()
+  await db.runAsync(
+    `INSERT INTO condition_care_events
+       (id, condition_id, provider_id, facility_id, event_type, event_date, evidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.conditionId, input.providerId, input.facilityId ?? null, input.eventType,
+     input.eventDate, input.evidence ?? null],
+  )
+  return id
+}
+
 // ── Measurements ──────────────────────────────────────────────────────────────
 
 type MeasurementInput = {
@@ -231,6 +275,7 @@ type MeasurementInput = {
   valueNumeric?: number | null
   valueText?: string | null
   unit?: string | null
+  /** Legacy columns are accepted from old callers but are intentionally ignored. */
   referenceLow?: number | null
   referenceHigh?: number | null
   flag?: string | null
@@ -248,12 +293,11 @@ export async function insertMeasurement(
   await db.runAsync(
     `INSERT INTO measurements (
        id, record_id, name, value_numeric, value_text,
-       unit, reference_low, reference_high, flag,
-       date, provider_id, facility_id, evidence
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       unit, date, provider_id, facility_id, evidence
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id, input.recordId ?? null, input.name, input.valueNumeric ?? null, input.valueText ?? null,
-      input.unit ?? null, input.referenceLow ?? null, input.referenceHigh ?? null, input.flag ?? null,
+      input.unit ?? null,
       input.date, input.providerId ?? null, input.facilityId ?? null, input.evidence ?? null,
     ],
   )
