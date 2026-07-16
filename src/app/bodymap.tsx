@@ -16,6 +16,7 @@ import * as DocumentPicker from 'expo-document-picker'
 import * as ImagePicker from 'expo-image-picker'
 import { router, useLocalSearchParams } from 'expo-router'
 import { QSWordmark } from '@/components/QSWordmark'
+import { GearIcon } from '@/components/GearIcon'
 import { useAppStore } from '@/store/useAppStore'
 import type { Gender, PendingUpload } from '@/store/useAppStore'
 import { useConditions, useConditionRecords } from '@/hooks/useConditions'
@@ -196,17 +197,6 @@ function ChatBubbleIcon({ color = '#fff', size = fs(14) }: { color?: string; siz
       <SvgPath
         d="M4 5h16v11H9l-4 4v-4H4z"
         stroke={color} strokeWidth={1.8} fill="none" strokeLinejoin="round"
-      />
-    </Svg>
-  )
-}
-
-function GearIcon({ color = 'rgba(255,255,255,0.55)', size = fs(20) }: { color?: string; size?: number }) {
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <SvgPath
-        d="M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.28 7.28 0 0 0-1.69-.98L14.5 2.42A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.5.42L9.12 5.07c-.61.24-1.18.56-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65c-.04.32-.08.65-.08.98s.03.66.08.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.14.22.4.31.61.22l2.49-1c.51.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.5.42h4c.25 0 .46-.18.5-.42l.38-2.65c.61-.25 1.18-.58 1.69-.98l2.49 1c.22.08.48 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z"
-        fill={color}
       />
     </Svg>
   )
@@ -1506,7 +1496,7 @@ function LanguageDropdown({
   )
 }
 
-function SettingsSheet() {
+function SettingsSheet({ onExit }: { onExit?: () => void }) {
   const insets = useSafeAreaInsets()
   const { height: winH } = useWindowDimensions()
   const {
@@ -1529,6 +1519,7 @@ function SettingsSheet() {
     setOpenDropdown(null)
     if (!providerSettingsDirty) {
       toggleSettings()
+      onExit?.()
       return
     }
     setDiscardConfirmOpen(true)
@@ -1755,6 +1746,7 @@ function SettingsSheet() {
                   setDiscardConfirmOpen(false)
                   setProviderSettingsDirty(false)
                   toggleSettings()
+                  onExit?.()
                 }}
               >
                 <Text style={styles.unsavedDiscardText}>Discard</Text>
@@ -1867,7 +1859,7 @@ function UploadShortcuts({
 // ─── Root Screen ──────────────────────────────────────────────────────────────
 
 export default function BodyMapScreen() {
-  const { source, added } = useLocalSearchParams<{ source?: string; added?: string }>()
+  const { source, added, settings, returnTo } = useLocalSearchParams<{ source?: string; added?: string; settings?: string; returnTo?: string }>()
   const browserParams = IS_WEB && typeof window !== 'undefined'
     ? new URLSearchParams(window.location.search)
     : null
@@ -1875,6 +1867,7 @@ export default function BodyMapScreen() {
   const addedParam = added ?? browserParams?.get('added') ?? undefined
   const routeConditionSource = sourceParam === 'demo' || sourceParam === 'auto' ? sourceParam : undefined
   const routeAddedCount = addedParam && /^\d+$/.test(addedParam) ? parseInt(addedParam, 10) : null
+  const returnToLanding = returnTo === 'landing'
   const {
     activeSystems, selectCondition,
     currentYear, sheetOpen, settingsOpen,
@@ -1882,12 +1875,24 @@ export default function BodyMapScreen() {
     relocatingCondition, cancelRelocation,
     lastUploadResult, setLastUploadResult,
     setCurrentYear, setConditionSource,
+    toggleSettings,
     birthYear, birthMonth,
     genderPromptNeeded, setGenderPromptNeeded, setGender,
   } = useAppStore()
 
   const [conditions, refreshConditions, updateConditionPositionLocally] = useConditions(routeConditionSource)
   const db = useOptionalDatabase()
+  const settingsRequested = useRef(false)
+
+  useEffect(() => {
+    if (settings !== '1' || settingsRequested.current) return
+    settingsRequested.current = true
+    if (!useAppStore.getState().settingsOpen) toggleSettings()
+  }, [settings, toggleSettings])
+
+  const handleSettingsExit = useCallback(() => {
+    if (returnToLanding) router.replace('/')
+  }, [returnToLanding])
   const clearAddedParam = useCallback(() => {
     if (!IS_WEB || typeof window === 'undefined') return
     const url = new URL(window.location.href)
@@ -2202,7 +2207,7 @@ export default function BodyMapScreen() {
       </SafeAreaView>
 
       <ConditionSheet />
-      <SettingsSheet />
+      <SettingsSheet onExit={returnToLanding ? handleSettingsExit : undefined} />
       <RecordLightbox />
 
       {(sheetOpen || settingsOpen) && (

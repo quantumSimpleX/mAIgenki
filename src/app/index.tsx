@@ -9,6 +9,7 @@ import * as ImagePicker from 'expo-image-picker'
 import { useAppStore, PendingUpload } from '@/store/useAppStore'
 import { useConditions } from '@/hooks/useConditions'
 import { QSWordmark } from '@/components/QSWordmark'
+import { GearIcon } from '@/components/GearIcon'
 import { IS_DESKTOP, IS_WEB, S } from '@/lib/scale'
 import { openQSWebsite } from '@/lib/links'
 
@@ -172,6 +173,14 @@ export default function UploadScreen() {
         {/* Nav */}
         <View style={styles.nav}>
           <Logo s={styles} />
+          <TouchableOpacity
+            style={styles.settingsBtn}
+            onPress={() => router.push({ pathname: '/bodymap', params: { settings: '1', returnTo: 'landing' } })}
+            accessibilityLabel="Settings"
+            hitSlop={10}
+          >
+            <GearIcon color={C.inkMuted} />
+          </TouchableOpacity>
         </View>
 
         <ScrollView
@@ -275,7 +284,8 @@ function createStyles(fs: (n: number) => number, sc: (n: number) => number) {
     root: { flex: 1, backgroundColor: C.bg },
     safe: { flex: 1 },
 
-    nav: { paddingHorizontal: sc(20), paddingTop: sc(8), paddingBottom: sc(8) },
+    nav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: sc(20), paddingTop: sc(8), paddingBottom: sc(8) },
+    settingsBtn: { width: sc(28), height: sc(28), alignItems: 'center', justifyContent: 'center' },
     logoRow: { flexDirection: 'row', alignItems: 'baseline' },
     logoM: {
       fontFamily: 'BarlowCondensed-Bold',

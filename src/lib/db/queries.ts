@@ -73,6 +73,8 @@ export async function findOrCreateFacility(
 type ProviderInput = {
   name: string
   specialty?: string | null
+  email?: string | null
+  phone?: string | null
   primaryFacilityId?: string | null
 }
 
@@ -84,12 +86,21 @@ export async function findOrCreateProvider(
     'SELECT id FROM providers WHERE name = ? AND (specialty = ? OR (specialty IS NULL AND ? IS NULL)) LIMIT 1',
     [input.name, input.specialty ?? null, input.specialty ?? null],
   )
-  if (existing) return existing.id
+  if (existing) {
+    await db.runAsync(
+      `UPDATE providers SET email = COALESCE(?, email), phone = COALESCE(?, phone)
+       WHERE id = ?`,
+      [input.email ?? null, input.phone ?? null, existing.id],
+    )
+    return existing.id
+  }
 
   const id = uuid()
   await db.runAsync(
-    `INSERT INTO providers (id, name, specialty, primary_facility_id) VALUES (?, ?, ?, ?)`,
-    [id, input.name, input.specialty ?? null, input.primaryFacilityId ?? null],
+    `INSERT INTO providers (id, name, specialty, email, phone, primary_facility_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [id, input.name, input.specialty ?? null, input.email ?? null, input.phone ?? null,
+     input.primaryFacilityId ?? null],
   )
   return id
 }

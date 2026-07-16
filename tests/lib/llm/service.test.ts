@@ -57,9 +57,7 @@ describe('lmfChat', () => {
 })
 
 // Two-provider profile/keys so a 429 on the primary candidate cools down only
-// that provider (per-provider cooldown, see engine.ts) and the free-chain
-// fallback (a different provider, "openrouter") still gets a real fetch call
-// rather than being skipped as "on cooldown" like a same-provider retry would be.
+// that model and the free-chain fallback still gets a real fetch call.
 function twoProviderSetup(): { profile: LMFProfile; keys: KeyStore } {
   const profile: LMFProfile = {
     tier: 1,

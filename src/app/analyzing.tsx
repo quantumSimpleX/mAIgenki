@@ -43,6 +43,8 @@ const C = {
 }
 
 const PHASES = ['Reading records', 'Extracting diagnoses', 'Mapping anatomy', 'Building story']
+const ANALYSIS_PROGRESS_REMAINING_FRACTION = 1 / 17
+const ANALYSIS_PROGRESS_TICK_MS = 2_000
 const RAMP_LOW = 0.25
 const RAMP_HIGH = 0.85
 const RAMP_UP_MS = 1250
@@ -477,17 +479,24 @@ export default function AnalyzingScreen() {
 
     startedRef.current = true
     const upload = pendingUpload
-    setPendingUpload(null)
 
-    let target = 0.05
+    // Each phase owns a progress interval. The bar approaches the interval's
+    // end by the configured fraction of the remaining distance per tick, and only
+    // advances to the next interval when the pipeline reports completion.
+    let target = 0.4
+    setAnalyzeProgress(0)
     const smooth = setInterval(() => {
       if (!mountedRef.current) {
         clearInterval(smooth)
         return
       }
       const cur = useAppStore.getState().analyzeProgress
-      if (cur < target) setAnalyzeProgress(Math.min(target, cur + 0.02))
-    }, 60)
+      if (cur < target) {
+        const remaining = target - cur
+        const step = remaining * ANALYSIS_PROGRESS_REMAINING_FRACTION
+        setAnalyzeProgress(Math.min(target, cur + step))
+      }
+    }, ANALYSIS_PROGRESS_TICK_MS)
 
     void (async () => {
       try {
@@ -508,6 +517,7 @@ export default function AnalyzingScreen() {
         setAnalyzePhase(3)
         setLastUploadResult(result)
         setConditionSource('auto')
+        setPendingUpload(null)
         await upsertSetting(db, 'condition_source', 'auto')
         scheduleSnapshot(db)
         setPipelineError(null)
@@ -519,10 +529,14 @@ export default function AnalyzingScreen() {
         let msg: string
         if (e instanceof EnrichmentFailedError) {
           console.warn('[analyzing] enrichment failed —', e.failures.join('; '))
-          msg = 'Could not analyze this record — check your connection or try again.'
+          const cooldown = e.failures.some((failure) => failure.includes('on cooldown'))
+          msg = cooldown
+            ? 'The selected Gemini model is temporarily rate-limited. Wait briefly, choose another model, or enable free-model fallback in Settings.'
+            : 'Could not analyze this record — check your connection or try again.'
         } else {
           msg = e instanceof Error ? e.message : 'Something went wrong while analyzing this file.'
         }
+        setPendingUpload(null)
         setPipelineError(msg)
         setErrorMsg(msg)
       }

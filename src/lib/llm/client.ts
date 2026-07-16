@@ -1,5 +1,5 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
-import type { Telemetry } from '@/lib/lmf'
+import type { KeyStore, LMFProfile, Telemetry } from '@/lib/lmf'
 import { lmfChat, lmfEnrich } from './service'
 
 // ── Model chain ───────────────────────────────────────────────────────────────
@@ -9,7 +9,7 @@ import { lmfChat, lmfEnrich } from './service'
 
 export const DEFAULT_MODELS: string[] = [
   'google/gemma-4-31b-it:free',
-  'openai/gpt-oss-120b:free',
+  'openai/gpt-oss-20b:free',
   'meta-llama/llama-3.3-70b-instruct:free',
   'nvidia/nemotron-3-ultra-550b-a55b:free',
 ]
@@ -53,6 +53,10 @@ interface CallOptions<T> {
   validate?: (content: string) => T | null | undefined
   temperature?: number
   label?: string
+  db?: SQLiteDatabase
+  profile?: LMFProfile
+  keys?: KeyStore
+  timeoutMs?: number
 }
 
 // ── Fallback chain ────────────────────────────────────────────────────────────
@@ -75,7 +79,7 @@ function splitMessages(messages: LLMMessage[]): { systemPrompt: string; userMess
 export async function callLLMWithFallback<T = string>(
   opts: CallOptions<T>,
 ): Promise<LLMResult<T>> {
-  const { messages, apiKey, validate, temperature, label = 'llm' } = opts
+  const { messages, apiKey, validate, temperature, label = 'llm', db, profile, keys, timeoutMs } = opts
   const models = opts.models ?? DEFAULT_MODELS
   const { systemPrompt, userMessage } = splitMessages(messages)
 
@@ -91,7 +95,7 @@ export async function callLLMWithFallback<T = string>(
       failures.push(`${f.model}: ${f.message}`)
     },
   }
-  const serviceOpts = { apiKey, models, temperature, telemetry }
+  const serviceOpts = { apiKey, models, temperature, telemetry, db, profile, keys, timeoutMs }
 
   let ok = false
   let value: T | null = null

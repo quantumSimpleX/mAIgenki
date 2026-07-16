@@ -1,11 +1,10 @@
 // src/lib/llm/service.ts
 // Composition root wiring the dependency-free src/lib/lmf/ engine into the app:
-// builds a Route from the (eventually stored) LMFProfile + free chain, resolves
+// builds a Route from the stored LMFProfile + free chain, resolves
 // keys, and exposes the two call shapes the rest of the app needs.
 //
-// Profile/KeyStore wiring is still tier-0-only (pB03-T02/T03 land the real
-// SecureStore-backed KeyStore and persisted LMFProfile) — until then this
-// always routes through the free OpenRouter chain, matching pre-LMF behavior.
+// Callers that do not provide a profile retain the tier-0 OpenRouter behavior.
+// The upload pipeline provides the persisted profile and provider KeyStore.
 
 import type { SQLiteDatabase } from 'expo-sqlite'
 import {
@@ -120,10 +119,8 @@ const TIER_0_PROFILE: LMFProfile = {
   keySource: null,
 }
 
-// Stand-in KeyStore: only ever resolves the openrouter env/user key, mirroring
-// today's `resolveOpenRouterApiKey` precedence. Replaced by a real per-provider
-// KeyStore in pB03-T02, at which point `activeProviderId` on the profile drives
-// which provider's key gets read here instead of this openrouter-only shim.
+// Legacy compatibility KeyStore for callers that have not supplied the real
+// per-provider KeyStore. The app upload pipeline supplies the real one.
 function envKeyStore(userApiKey: string): KeyStore {
   return {
     async get(providerId: string) {
@@ -152,6 +149,7 @@ export type LmfServiceOptions = {
   keys?: KeyStore
   telemetry?: Telemetry
   temperature?: number
+  timeoutMs?: number
 }
 
 export type LmfChatOutcome =
@@ -181,7 +179,7 @@ export async function lmfChat(
     { messages, temperature: opts.temperature ?? 0.4 },
     keys,
     undefined,
-    { cooldown: cooldownLedger, telemetry: composeTelemetry(createStoreTelemetry(), opts.telemetry) },
+    { cooldown: cooldownLedger, telemetry: composeTelemetry(createStoreTelemetry(), opts.telemetry), timeoutMs: opts.timeoutMs },
   )
 
   if (result.ok) return { ok: true, content: result.result.content }
@@ -213,7 +211,7 @@ export async function lmfEnrich<T>(
     { messages, temperature: opts.temperature ?? 0, responseFormat: 'json' },
     keys,
     validate,
-    { cooldown: cooldownLedger, telemetry: composeTelemetry(createStoreTelemetry(), opts.telemetry) },
+    { cooldown: cooldownLedger, telemetry: composeTelemetry(createStoreTelemetry(), opts.telemetry), timeoutMs: opts.timeoutMs },
   )
 
   if (result.ok) return { ok: true, value: result.value }

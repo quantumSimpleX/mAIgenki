@@ -19,7 +19,8 @@ import type {
   Route,
 } from './types'
 
-const DEFAULT_TIMEOUT_MS = 45_000
+// Long medical-record prompts and Gemini cold starts can exceed 45 seconds.
+const DEFAULT_TIMEOUT_MS = 90_000
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000
 const RETRY_JITTER_MIN_MS = 250
 const RETRY_JITTER_MAX_MS = 500
@@ -261,8 +262,9 @@ export async function callWithFallback<T = string>(
       } else if (outcome.errorKind === 'rate_limit') {
         const cooldownMs = outcome.retryAfterMs ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS
         const until = Date.now() + cooldownMs
-        // Account-scoped (no model in message) cools the whole provider; default to provider-wide.
-        cooldown.set(candidate.providerId, until)
+        // Cool only the failed model. Other models from the same provider are
+        // still valid fallback candidates, especially on model-specific limits.
+        cooldown.set(modelCooldownKey(candidate), until)
       }
       continue
     }

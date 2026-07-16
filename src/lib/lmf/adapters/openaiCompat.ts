@@ -64,23 +64,36 @@ export const openaiCompatAdapter: Adapter = {
   },
 
   classifyError(_spec: ProviderSpec, status: number, json: unknown): ClassifiedError {
-    const obj = json as { error?: { message?: string; code?: string; type?: string } }
+    const obj = json as {
+      error?: {
+        message?: string
+        code?: string
+        type?: string
+        metadata?: { provider_name?: string; raw?: string }
+      }
+    }
     const message = obj.error?.message ?? `HTTP ${status}`
     const code = obj.error?.code ?? ''
     const type = obj.error?.type ?? ''
-    const lower = `${message} ${code} ${type}`.toLowerCase()
+    const providerName = obj.error?.metadata?.provider_name
+    const providerDetail = obj.error?.metadata?.raw
+    const detail = providerName
+      ? ` (${providerName}${providerDetail ? `: ${providerDetail.slice(0, 240)}` : ''})`
+      : ''
+    const detailedMessage = `${message}${detail}`
+    const lower = `${detailedMessage} ${code} ${type}`.toLowerCase()
 
     if (lower.includes('insufficient_quota')) {
-      return { kind: 'quota_billing', status, message, retryAfterMs: null }
+      return { kind: 'quota_billing', status, message: detailedMessage, retryAfterMs: null }
     }
     if (lower.includes('context_length_exceeded')) {
-      return { kind: 'invalid_request', status, message, retryAfterMs: null }
+      return { kind: 'invalid_request', status, message: detailedMessage, retryAfterMs: null }
     }
     if (lower.includes('moderation') || lower.includes('content_filter')) {
-      return { kind: 'content_filter', status, message, retryAfterMs: null }
+      return { kind: 'content_filter', status, message: detailedMessage, retryAfterMs: null }
     }
 
-    return { kind: classifyHttp(status, message), status, message, retryAfterMs: null }
+    return { kind: classifyHttp(status, detailedMessage), status, message: detailedMessage, retryAfterMs: null }
   },
 }
 

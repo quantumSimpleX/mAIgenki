@@ -15,6 +15,8 @@ export type ProviderRow = {
   id: string
   name: string
   specialty: string | null
+  email: string | null
+  phone: string | null
   primary_facility_id: string | null
   created_at: string
 }
@@ -141,6 +143,8 @@ export const CREATE_TABLES_SQL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     specialty TEXT,
+    email TEXT,
+    phone TEXT,
     primary_facility_id TEXT REFERENCES facilities(id),
     created_at TEXT DEFAULT (datetime('now'))
   );
@@ -261,6 +265,8 @@ export const CREATE_TABLES_SQL = `
 // SQLite has no `ADD COLUMN IF NOT EXISTS`. Each of these is run inside a
 // try/catch on init so an already-migrated DB ignores the duplicate-column error.
 export const ALTER_COLUMNS_SQL: string[] = [
+  `ALTER TABLE providers ADD COLUMN email TEXT`,
+  `ALTER TABLE providers ADD COLUMN phone TEXT`,
   `ALTER TABLE conditions ADD COLUMN evidence TEXT`,
   `ALTER TABLE conditions ADD COLUMN render_x REAL`,
   `ALTER TABLE conditions ADD COLUMN render_y REAL`,

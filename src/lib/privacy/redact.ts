@@ -10,6 +10,12 @@
 
 type Rule = { pattern: RegExp; replacement: string }
 
+export type ProviderContact = {
+  name: string | null
+  email: string | null
+  phone: string | null
+}
+
 // ── Name extraction patterns (capture group 1 = the name value) ───────────────
 
 const NAME_EXTRACT_PATTERNS: RegExp[] = [
@@ -110,4 +116,27 @@ export function redactPII(text: string): string {
   }
 
   return result
+}
+
+// Capture labeled clinician contacts locally, before the general patient-PII
+// pass removes phone numbers and email addresses from the text sent to the LLM.
+export function extractProviderContacts(text: string): ProviderContact[] {
+  const contacts: ProviderContact[] = []
+  const lines = text.split(/\r?\n/)
+  const clinicianLabel = /\b(?:doctor|physician|provider|attending|ordering|referring|author)\b/i
+  const emailPattern = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/
+  const phonePattern = /(?:\+?\d[\d\s().\-]{6,}\d)/
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!clinicianLabel.test(lines[index])) continue
+    const window = lines.slice(index, index + 3).join(' ')
+    const nameMatch = lines[index].match(/(?:doctor|physician|provider|attending|ordering|referring|author)\s*[:\-]?\s*(?:Dr\.\s*)?([^,;|]+?)(?:\s+(?:email|phone|tel|fax)\b|$)/i)
+    const email = window.match(emailPattern)?.[0] ?? null
+    const phone = window.match(phonePattern)?.[0]?.trim() ?? null
+    if (email || phone) {
+      contacts.push({ name: nameMatch?.[1]?.trim() ?? null, email, phone })
+    }
+  }
+
+  return contacts
 }

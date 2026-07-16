@@ -55,7 +55,7 @@ describe('DEFAULT_MODELS', () => {
   it('uses the Simfolio-style four-vendor fallback order', () => {
     expect(DEFAULT_MODELS).toEqual([
       'google/gemma-4-31b-it:free',
-      'openai/gpt-oss-120b:free',
+      'openai/gpt-oss-20b:free',
       'meta-llama/llama-3.3-70b-instruct:free',
       'nvidia/nemotron-3-ultra-550b-a55b:free',
     ])
