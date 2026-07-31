@@ -30,12 +30,27 @@ beforeEach(() => jest.clearAllMocks())
 // ── initDatabase ─────────────────────────────────────────────────────────────
 
 describe('initDatabase', () => {
-  it('creates all 8 tables', async () => {
+  it('creates legacy and real-world clinical relationship tables', async () => {
     await initDatabase(mockDb as any)
     const sql: string = mockDb.execAsync.mock.calls[0][0]
     const tables = [
-      'facilities', 'providers', 'health_records', 'conditions',
-      'condition_providers', 'measurements', 'medications', 'settings',
+      'facilities',
+      'providers',
+      'facility_relationships',
+      'provider_facility_roles',
+      'health_records',
+      'conditions',
+      'condition_providers',
+      'evidence_sources',
+      'clinical_events',
+      'clinical_event_providers',
+      'clinical_event_conditions',
+      'clinical_event_measurements',
+      'clinical_event_medications',
+      'clinical_event_evidence',
+      'measurements',
+      'medications',
+      'settings',
     ]
     for (const table of tables) {
       expect(sql).toContain(`CREATE TABLE IF NOT EXISTS ${table}`)

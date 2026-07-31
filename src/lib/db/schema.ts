@@ -88,6 +88,60 @@ export type ConditionCareEventRow = {
   created_at: string
 }
 
+export type FacilityRelationshipRow = {
+  parent_facility_id: string
+  child_facility_id: string
+  relationship_type: string
+  valid_from: string | null
+  valid_to: string | null
+}
+
+export type ProviderFacilityRoleRow = {
+  id: string
+  provider_id: string
+  facility_id: string
+  role: string
+  specialty: string | null
+  email: string | null
+  phone: string | null
+  valid_from: string | null
+  valid_to: string | null
+  evidence: string | null
+  created_at: string
+}
+
+export type EvidenceSourceRow = {
+  id: string
+  record_id: string
+  page_number: number | null
+  section: string | null
+  excerpt: string
+  extraction_method: string | null
+  confidence: number | null
+  created_at: string
+}
+
+export type ClinicalEventRow = {
+  id: string
+  record_id: string | null
+  parent_event_id: string | null
+  facility_id: string | null
+  event_type: string
+  status: string | null
+  occurred_from: string | null
+  occurred_to: string | null
+  title: string | null
+  notes: string | null
+  created_at: string
+}
+
+export type ClinicalEventProviderRow = {
+  event_id: string
+  provider_id: string
+  facility_id: string | null
+  role: string
+}
+
 export type MeasurementRow = {
   id: string
   record_id: string | null
@@ -145,6 +199,8 @@ export type SettingRow = {
 }
 
 export const CREATE_TABLES_SQL = `
+  PRAGMA foreign_keys = ON;
+
   CREATE TABLE IF NOT EXISTS facilities (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -227,7 +283,7 @@ export const CREATE_TABLES_SQL = `
     PRIMARY KEY (condition_id, provider_id, role)
   );
 
-  CREATE TABLE IF NOT EXISTS condition_care_events (
+CREATE TABLE IF NOT EXISTS condition_care_events (
     id TEXT PRIMARY KEY,
     condition_id TEXT NOT NULL REFERENCES conditions(id),
     provider_id TEXT NOT NULL REFERENCES providers(id),
@@ -235,10 +291,95 @@ export const CREATE_TABLES_SQL = `
     event_type TEXT NOT NULL,
     event_date TEXT NOT NULL,
     evidence TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
+  created_at TEXT DEFAULT (datetime('now'))
+);
 
-  CREATE TABLE IF NOT EXISTS measurements (
+-- Additive longitudinal model. Legacy condition/provider columns remain for
+-- compatibility; new ingestion should represent care through clinical events.
+CREATE TABLE IF NOT EXISTS facility_relationships (
+  parent_facility_id TEXT NOT NULL REFERENCES facilities(id),
+  child_facility_id TEXT NOT NULL REFERENCES facilities(id),
+  relationship_type TEXT NOT NULL,
+  valid_from TEXT,
+  valid_to TEXT,
+  PRIMARY KEY (parent_facility_id, child_facility_id, relationship_type)
+);
+
+CREATE TABLE IF NOT EXISTS provider_facility_roles (
+  id TEXT PRIMARY KEY,
+  provider_id TEXT NOT NULL REFERENCES providers(id),
+  facility_id TEXT NOT NULL REFERENCES facilities(id),
+  role TEXT NOT NULL,
+  specialty TEXT,
+  email TEXT,
+  phone TEXT,
+  valid_from TEXT,
+  valid_to TEXT,
+  evidence TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS evidence_sources (
+  id TEXT PRIMARY KEY,
+  record_id TEXT NOT NULL REFERENCES health_records(id),
+  page_number INTEGER,
+  section TEXT,
+  excerpt TEXT NOT NULL,
+  extraction_method TEXT,
+  confidence REAL CHECK (confidence IS NULL OR (confidence >= 0 AND confidence <= 1)),
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS clinical_events (
+  id TEXT PRIMARY KEY,
+  record_id TEXT REFERENCES health_records(id),
+  parent_event_id TEXT REFERENCES clinical_events(id),
+  facility_id TEXT REFERENCES facilities(id),
+  event_type TEXT NOT NULL,
+  status TEXT,
+  occurred_from TEXT,
+  occurred_to TEXT,
+  title TEXT,
+  notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS clinical_event_providers (
+  event_id TEXT NOT NULL REFERENCES clinical_events(id),
+  provider_id TEXT NOT NULL REFERENCES providers(id),
+  facility_id TEXT REFERENCES facilities(id),
+  role TEXT NOT NULL,
+  PRIMARY KEY (event_id, provider_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS clinical_event_conditions (
+  event_id TEXT NOT NULL REFERENCES clinical_events(id),
+  condition_id TEXT NOT NULL REFERENCES conditions(id),
+  relationship_type TEXT NOT NULL,
+  PRIMARY KEY (event_id, condition_id, relationship_type)
+);
+
+CREATE TABLE IF NOT EXISTS clinical_event_measurements (
+  event_id TEXT NOT NULL REFERENCES clinical_events(id),
+  measurement_id TEXT NOT NULL REFERENCES measurements(id),
+  relationship_type TEXT NOT NULL DEFAULT 'result',
+  PRIMARY KEY (event_id, measurement_id, relationship_type)
+);
+
+CREATE TABLE IF NOT EXISTS clinical_event_medications (
+  event_id TEXT NOT NULL REFERENCES clinical_events(id),
+  medication_id TEXT NOT NULL REFERENCES medications(id),
+  relationship_type TEXT NOT NULL,
+  PRIMARY KEY (event_id, medication_id, relationship_type)
+);
+
+CREATE TABLE IF NOT EXISTS clinical_event_evidence (
+  event_id TEXT NOT NULL REFERENCES clinical_events(id),
+  evidence_source_id TEXT NOT NULL REFERENCES evidence_sources(id),
+  PRIMARY KEY (event_id, evidence_source_id)
+);
+
+CREATE TABLE IF NOT EXISTS measurements (
     id TEXT PRIMARY KEY,
     record_id TEXT REFERENCES health_records(id),
     name TEXT NOT NULL,
@@ -291,10 +432,23 @@ export const CREATE_TABLES_SQL = `
     created_at TEXT DEFAULT (datetime('now'))
   );
 
-  CREATE TABLE IF NOT EXISTS settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-  );
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_clinical_events_record
+  ON clinical_events(record_id);
+CREATE INDEX IF NOT EXISTS idx_clinical_events_dates
+  ON clinical_events(occurred_from, occurred_to);
+CREATE INDEX IF NOT EXISTS idx_clinical_event_providers_provider
+  ON clinical_event_providers(provider_id);
+CREATE INDEX IF NOT EXISTS idx_clinical_event_conditions_condition
+  ON clinical_event_conditions(condition_id);
+CREATE INDEX IF NOT EXISTS idx_evidence_sources_record_page
+  ON evidence_sources(record_id, page_number);
+CREATE INDEX IF NOT EXISTS idx_provider_facility_roles_provider
+  ON provider_facility_roles(provider_id);
 `
 
 // SQLite has no `ADD COLUMN IF NOT EXISTS`. Each of these is run inside a

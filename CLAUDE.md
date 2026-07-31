@@ -90,7 +90,7 @@ PNG files follow `NN-{system}.png`, where `NN` is the legend order (`00`–`10`;
 
 These are non-negotiable — ask before changing any of them:
 
-- **No remote storage of health data.** SQLite on-device only. Raw PDFs never leave the device; only extracted plain text is sent to OpenRouter.
+- **No app-managed remote storage of health data.** The on-device SQLite database is the complete, portable source of truth. Store every structured record and binary asset required to reconstruct the body-map explorer—including embedded X-rays and other report images—in SQLite, using BLOB columns where appropriate; do not rely on app-private file paths or the OS photo library. Users may explicitly export the complete database to their computer or chosen cloud drive and later import it. Raw PDF/image bytes are never sent to an LLM; only extracted plain text is sent to OpenRouter.
 - **No cloud storage, no auth** until explicitly scoped for a later phase.
 - **Condition chat is session-only** — never persist chat history to SQLite.
 - **Chat context is scoped to one condition** — never inject the full health record into the LLM prompt.

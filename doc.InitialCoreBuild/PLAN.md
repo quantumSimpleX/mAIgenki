@@ -272,3 +272,11 @@ into `facilities`; event evidence remains on the affiliation/event row where it 
 The implementation locations are `src/lib/db/schema.ts`, `src/lib/db/queries.ts`,
 `src/lib/llm/enrich.ts`, and `src/lib/pipeline.ts`. Future migrations must preserve legacy
 rows while writing only to the revised tables and fields.
+
+### Portable database follow-up
+
+SQLite is the complete source of truth, including embedded medical-image BLOBs.
+Backup table enumeration must include every current schema table, and export/import
+must encode and restore BLOBs losslessly. A backup is complete only when it can
+reconstruct the full explorer without any path or file from the source device.
+The user may save that export to a computer or chosen cloud drive.

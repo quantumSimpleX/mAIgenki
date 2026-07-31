@@ -257,6 +257,19 @@ Context injected per session:
 
 ---
 
+## Portable Binary Storage Clarification
+
+- `expo-sqlite` stores every structured record and binary asset needed to
+  reconstruct the explorer; embedded X-rays and report images may use BLOBs.
+- SQLite is the complete portable source of truth. An app-private path or OS
+  photo-library asset cannot be the only stored copy.
+- Export/import must preserve BLOBs losslessly so a user-owned backup saved to a
+  computer or chosen cloud drive can recreate the complete explorer.
+- The app provides no managed remote database. Explicit user-owned backup is
+  allowed and is distinct from app-managed cloud storage.
+
+---
+
 ## Future Research Areas
 
 - [ ] **Auth (deferred):** Evaluate Clerk, Supabase Auth, or Expo Auth Session when auth phase begins
