@@ -259,6 +259,9 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
       dateDiagnosed: c.date_diagnosed,
       evidence: c.evidence,
     })
+    // Providers must be linked only when the condition carries direct
+    // evidence. Never attach every provider found elsewhere in the record:
+    // that creates false clinical attribution for otherwise unrelated care.
     const conditionProviders = c.provider
       ? [{
         ...c.provider,
@@ -266,7 +269,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
         phone: c.provider.phone ?? contactForProvider(c.provider.name, 0, localProviderContacts)?.phone ?? null,
         evidence: c.provider.evidence ?? contactForProvider(c.provider.name, 0, localProviderContacts)?.evidence ?? null,
       }]
-      : providers
+      : []
     const careEvents = c.care_events ?? []
     for (const event of careEvents) {
       if (!event.date || !event.provider?.name) continue

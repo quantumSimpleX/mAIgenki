@@ -23,6 +23,11 @@ jest.mock('@/lib/db/queries', () => ({
   insertHealthRecord: jest.fn(),
   insertCondition: jest.fn(),
   insertMeasurement: jest.fn(),
+  findOrCreateFacility: jest.fn(),
+  findOrCreateProvider: jest.fn(),
+  insertProviderAffiliation: jest.fn(),
+  insertConditionProvider: jest.fn(),
+  insertConditionCareEvent: jest.fn(),
   getSetting: jest.fn(),
 }))
 
@@ -31,7 +36,7 @@ import { extractTextFromImage } from '@/lib/ocr/extract'
 import { enrichFromText } from '@/lib/llm/enrich'
 import { applyInferenceRules } from '@/lib/inference/rules'
 import { getModelChain } from '@/lib/llm/client'
-import { insertHealthRecord, insertCondition, insertMeasurement, getSetting } from '@/lib/db/queries'
+import { insertHealthRecord, insertCondition, insertMeasurement, insertConditionProvider, getSetting } from '@/lib/db/queries'
 
 const mockExtractPDF   = extractTextFromPDF   as jest.MockedFunction<typeof extractTextFromPDF>
 const mockExtractImage = extractTextFromImage  as jest.MockedFunction<typeof extractTextFromImage>
@@ -41,6 +46,7 @@ const mockGetChain     = getModelChain         as jest.MockedFunction<typeof get
 const mockInsertRecord = insertHealthRecord    as jest.MockedFunction<typeof insertHealthRecord>
 const mockInsertCond   = insertCondition       as jest.MockedFunction<typeof insertCondition>
 const mockInsertMeas   = insertMeasurement     as jest.MockedFunction<typeof insertMeasurement>
+const mockInsertConditionProvider = insertConditionProvider as jest.MockedFunction<typeof insertConditionProvider>
 const mockGetSetting   = getSetting            as jest.MockedFunction<typeof getSetting>
 
 const mockDb = {} as any
@@ -228,6 +234,19 @@ describe('processHealthRecord — conditions', () => {
     expect(mockInsertCond).toHaveBeenCalledWith(mockDb, expect.objectContaining({
       recordId: 'record-id-1',
     }))
+  })
+
+  it('does not attach document-level providers to conditions without provider evidence', async () => {
+    mockExtractPDF.mockResolvedValue({ text: 'hypertension', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue({
+      conditions: [SAMPLE_CONDITION],
+      measurements: [],
+      providers: [{ name: 'Unrelated Clinician', specialty: 'cardiology', email: null, phone: null, evidence: null }],
+    })
+
+    await processHealthRecord({ uri: 'file:///docs/report.pdf', db: mockDb, apiKey: '' })
+
+    expect(mockInsertConditionProvider).not.toHaveBeenCalled()
   })
 })
 

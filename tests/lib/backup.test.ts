@@ -7,6 +7,9 @@ const mockDb = {
   runAsync: jest.fn().mockResolvedValue({ lastInsertRowId: 1, changes: 1 }),
   getAllAsync: jest.fn().mockResolvedValue([]),
   getFirstAsync: jest.fn().mockResolvedValue(null),
+  getEachAsync: jest.fn(async function* (sql: string) {
+    for (const row of await mockDb.getAllAsync(sql)) yield row
+  }),
   withTransactionAsync: jest.fn(async (fn: () => Promise<void>) => fn()),
 }
 

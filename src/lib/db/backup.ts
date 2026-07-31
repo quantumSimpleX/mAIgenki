@@ -1,6 +1,7 @@
 import type { SQLiteDatabase } from 'expo-sqlite'
 import * as DocumentPicker from 'expo-document-picker'
 import { Platform } from 'react-native'
+import { base64ToUint8Array, uint8ArrayToBase64 } from './blob'
 
 // Tables in foreign-key-safe parent → child order. buildBackup reads in this
 // order; restoreBackup deletes in reverse (children first) then inserts in this
@@ -10,6 +11,8 @@ export const BACKUP_TABLES = [
   'providers',
   'health_records',
   'conditions',
+  'condition_locations',
+  'record_images',
   'condition_providers',
   'measurements',
   'medications',
@@ -17,6 +20,28 @@ export const BACKUP_TABLES = [
   'condition_records',
   'settings',
 ] as const
+
+const BLOB_COLUMNS: Record<string, readonly string[]> = {
+  record_images: ['image_blob', 'thumbnail_blob'],
+}
+
+function encodeBlobs(table: string, row: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...row }
+  for (const column of BLOB_COLUMNS[table] ?? []) {
+    const value = result[column]
+    if (value instanceof Uint8Array) result[column] = uint8ArrayToBase64(value)
+  }
+  return result
+}
+
+function decodeBlobs(table: string, row: Record<string, unknown>): Record<string, unknown> {
+  const result = { ...row }
+  for (const column of BLOB_COLUMNS[table] ?? []) {
+    const value = result[column]
+    if (typeof value === 'string') result[column] = base64ToUint8Array(value)
+  }
+  return result
+}
 
 export type BackupFile = {
   app: 'maigenki'
@@ -61,8 +86,16 @@ function stripSecretSettings(rows: unknown[]): unknown[] {
 export async function buildBackup(db: SQLiteDatabase): Promise<BackupFile> {
   const tables: Record<string, unknown[]> = {}
   for (const t of BACKUP_TABLES) {
-    const rows = await db.getAllAsync<Record<string, unknown>>(`SELECT * FROM ${t}`)
-    tables[t] = t === 'settings' ? stripSecretSettings(rows) : rows
+    const rows: Record<string, unknown>[] = []
+    if (t === 'record_images') {
+      // Read BLOB rows one-at-a-time; multi-row BLOB reads are unreliable on
+      // the web wa-sqlite/OPFS backend.
+      for await (const row of db.getEachAsync<Record<string, unknown>>(`SELECT * FROM ${t}`)) rows.push(row)
+    } else {
+      rows.push(...await db.getAllAsync<Record<string, unknown>>(`SELECT * FROM ${t}`))
+    }
+    const encoded = rows.map((row) => encodeBlobs(t, row))
+    tables[t] = t === 'settings' ? stripSecretSettings(encoded) : encoded
   }
   return {
     app: 'maigenki',
@@ -104,7 +137,7 @@ export async function restoreBackup(db: SQLiteDatabase, backup: BackupFile): Pro
 
       for (const row of rows) {
         if (!row || typeof row !== 'object') continue
-        const r = row as Record<string, unknown>
+        const r = decodeBlobs(t, row as Record<string, unknown>)
         const cols = liveColumns.filter((c) => Object.prototype.hasOwnProperty.call(r, c))
         if (cols.length === 0) continue
         const placeholders = cols.map(() => '?').join(', ')

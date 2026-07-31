@@ -112,6 +112,11 @@ function makeFakeDb(): SQLiteDatabase {
       }
       return []
     },
+
+    async *getEachAsync(sql: string, params: any[] = []) {
+      const rows = await db.getAllAsync(sql, params)
+      for (const row of rows) yield row
+    },
   }
   return db as SQLiteDatabase
 }

@@ -192,6 +192,35 @@ export type ConditionRecordRow = {
   notes: string | null
   created_at: string
 }
+export type ConditionLocationRow = {
+  id: string
+  condition_id: string
+  anatomical_location: string | null
+  laterality: string | null
+  render_x: number | null
+  render_y: number | null
+  cx: number | null
+  cy: number | null
+  is_primary: number
+  evidence: string | null
+  created_at: string
+}
+export type RecordImageRow = {
+  id: string
+  record_id: string
+  page_number: number | null
+  source_file: string | null
+  title: string | null
+  mime_type: string
+  width: number | null
+  height: number | null
+  byte_size: number | null
+  image_blob: Uint8Array
+  thumbnail_blob: Uint8Array | null
+  date: string | null
+  notes: string | null
+  created_at: string
+}
 
 export type SettingRow = {
   key: string
@@ -417,7 +446,7 @@ CREATE TABLE IF NOT EXISTS measurements (
     PRIMARY KEY (condition_id, lang)
   );
 
-  CREATE TABLE IF NOT EXISTS condition_records (
+CREATE TABLE IF NOT EXISTS condition_records (
     id TEXT PRIMARY KEY,
     condition_id TEXT NOT NULL REFERENCES conditions(id),
     record_type TEXT NOT NULL,
@@ -436,6 +465,37 @@ CREATE TABLE IF NOT EXISTS settings (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS condition_locations (
+  id TEXT PRIMARY KEY,
+  condition_id TEXT NOT NULL REFERENCES conditions(id),
+  anatomical_location TEXT,
+  laterality TEXT,
+  render_x REAL,
+  render_y REAL,
+  cx REAL,
+  cy REAL,
+  is_primary INTEGER NOT NULL DEFAULT 0,
+  evidence TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_condition_locations_condition ON condition_locations(condition_id);
+CREATE TABLE IF NOT EXISTS record_images (
+  id TEXT PRIMARY KEY,
+  record_id TEXT NOT NULL REFERENCES health_records(id),
+  page_number INTEGER,
+  source_file TEXT,
+  title TEXT,
+  mime_type TEXT NOT NULL DEFAULT 'image/webp',
+  width INTEGER,
+  height INTEGER,
+  byte_size INTEGER,
+  image_blob BLOB NOT NULL,
+  thumbnail_blob BLOB,
+  date TEXT,
+  notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_record_images_record ON record_images(record_id);
 
 CREATE INDEX IF NOT EXISTS idx_clinical_events_record
   ON clinical_events(record_id);
@@ -463,4 +523,7 @@ export const ALTER_COLUMNS_SQL: string[] = [
   `ALTER TABLE conditions ADD COLUMN cy REAL`,
   `ALTER TABLE conditions ADD COLUMN year_frac REAL`,
   `ALTER TABLE condition_records ADD COLUMN color TEXT`,
+  `ALTER TABLE conditions ADD COLUMN inferred_fields TEXT`,
+  `ALTER TABLE measurements ADD COLUMN inferred_fields TEXT`,
+  `ALTER TABLE condition_records ADD COLUMN image_id TEXT REFERENCES record_images(id)`,
 ]

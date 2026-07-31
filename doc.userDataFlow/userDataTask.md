@@ -2,223 +2,152 @@
 
 Implements `doc.userDataFlow/userDataReq.md`. Each task is independently implementable and testable, references exact files/functions verified against the current codebase, and lists its dependencies so tasks can be picked up in order (or in parallel where no dependency is listed). Suggested use: one kanban card per task, moved through `kb1-TODO` → `kb2-CODE` → `kb3-TEST` → `kb4-DONE`.
 
+Platform: mAIgenki is a browser-only, fully responsive web app (see `CLAUDE.md`'s Platform section). Storage is IndexedDB via `src/lib/db/indexedDb.ts`. This revision replaces an earlier draft written before that pivot.
+
 Ground truth used throughout (confirmed by direct file reads, not assumed):
-- `src/lib/db/queries.ts` — `uuid()` helper, `insertCondition`/`findOrCreateProvider`/etc. signatures, `getConditions`/`getConditionRecords` read shapes.
-- `src/lib/db/backup.ts` — `BACKUP_TABLES` currently omits `condition_care_events`, `provider_affiliations`, `facility_relationships`, `provider_facility_roles`, `evidence_sources`, `clinical_events*` entirely (pre-existing gap, unrelated to this PRD but touched in Phase 2 — see Task 2.11).
-- `src/lib/db/seed.ts` — demo seeding is `INSERT OR IGNORE` keyed on fixed design ids; `clearDemoData` deletes children before parents manually (no `ON DELETE CASCADE`).
-- `src/hooks/useConditions.ts` — `useConditions()`/`useConditionRecords()` hook pattern to mirror for the new dot hook.
+- `src/lib/db/indexedDb.ts` — existing scaffold: `INDEXED_DB_NAME`/`INDEXED_DB_VERSION`, `openIndexedDb()`, `IndexedCondition`/`IndexedConditionLocation`/`IndexedConditionDot` types, `putIndexedCondition`, `putIndexedConditionLocation`, `getIndexedConditionDots` (already implements the location-fallback join logic), `seedIndexedDbDemoData`. Object stores created so far: `health_records`, `conditions`, `condition_locations`, `record_images`, `condition_records`, `settings` (all `keyPath: 'id'` except `settings`, which is `keyPath: 'key'`). Indices so far: `condition_locations.condition_id`, `condition_records.condition_id`.
+- `src/lib/db/indexedDbBackup.ts` — `INDEXED_DB_BACKUP_STORES`, `buildIndexedDbBackup`/`restoreIndexedDbBackup`. Reads/writes IndexedDB stores directly via `getAll()`/`put()` inside a single transaction — correct for IndexedDB-to-IndexedDB round-trips, but does **not** yet handle converting `Blob` values for a portable JSON file export (see Task 2.10).
+- `src/lib/db/blob.ts` — dependency-free `uint8ArrayToBase64`/`base64ToUint8Array`, already implemented and correct; needed for the JSON-export `Blob` encoding step.
+- `src/lib/db/schema.ts`/`queries.ts`/`backup.ts` — the project's original `expo-sqlite`-targeting persistence code. Still present in the repo; not the target for new work. Reference only for the data-model shape they captured correctly (field names, relationships) — do not extend their SQL.
+- `src/lib/pipeline.ts` — `processHealthRecord`; already fixed for provider attribution (Phase 1, done). Not yet wired to `indexedDb.ts` for the new locations/images work.
+- `src/hooks/useConditions.ts` — `useConditions()`/`useConditionRecords()` hook pattern (currently reads the `expo-sqlite` path via `getConditions`/`getConditionRecords` from `queries.ts`) — the pattern to mirror for a new `useConditionDots()` hook backed by `getIndexedConditionDots`, and eventually to re-point at IndexedDB entirely.
 - `src/app/bodymap.tsx` — `GhostDots` (line 527), `BodySvg` (595), `ConditionRipples` (671), `RecordsCarousel` (945), `renderRecordThumb` (222), `RecordLightbox` (~1340), chat footer button (~1255), carousel currently gated at `chatOpen` (1268).
 - `src/model/conditions.ts` — `DesignCondition`, `ConditionRecord`, `getSvgX`/`getSvgY`, `defaultConditionPosition`.
 
 ---
 
-## Phase 0 — Environment & Library Spike
+## Phase 0 — Environment Spike
 
-No schema or app-code changes. De-risks the two open decisions from the PRD (§9) before other phases depend on them.
+No schema or app-code changes. De-risks the two open items from the PRD (§9) before Phase 4 depends on them. The native-library spike from the pre-pivot draft is gone — `pdfjs-dist` already handles PDF page rendering in the browser.
 
-**Task 0.1 — Spike `react-native-pdf-jsi` page export**
-Files: throwaway spike branch/script only.
-Install `react-native-pdf-jsi` in a dev-client build, call its page-export API (`ExportManager.exportPageToImage`) against a real multi-page PDF on iOS simulator + Android emulator. Confirm: output format/quality control works as documented, install size/build impact, and whether its bundled "analytics" feature makes any network call (must confirm it doesn't, given the app's no-telemetry constraint).
+**Task 0.1 — Confirm `pdfjs-dist` page → Canvas → Blob**
+Files: throwaway spike script only.
+Load a real multi-page PDF with `pdfjs-dist`, call `page.render({canvasContext, viewport})` against an off-screen `<canvas>`, then `canvas.toBlob(callback, 'image/webp', quality)`. Confirm output quality/size is reasonable and the whole path works without a server round-trip.
 Depends on: none.
 
-**Task 0.2 — Spike `react-native-pdf-page-image`**
-Files: throwaway spike branch/script only.
-Same test as 0.1 using `react-native-pdf-page-image`'s `open`/`generate`/`close` API. Confirm autolinking works with a standard Expo config plugin (or write a minimal one if needed) and it coexists with `expo-pdf-text-extract` without native conflicts (both may touch iOS PDFKit).
-Depends on: none. Can run in parallel with 0.1.
-
-**Task 0.3 — Decide PDF-render library and add as dependency**
-Files: `package.json`, `app.json`.
-Based on 0.1/0.2 results, commit to one library, add it to `package.json`, wire its Expo config plugin entry (or hand-written plugin) into `app.json`, run `npx expo prebuild` to confirm it builds cleanly.
-Depends on: 0.1, 0.2.
-
-**Task 0.4 — Add compression/file-read dependencies**
-Files: `package.json`.
-Add `expo-image-manipulator` (compression) and `expo-file-system` (reading manipulated output back as bytes) via `npx expo install`. Confirm SDK-56-compatible versions resolve.
+**Task 0.2 — Verify IndexedDB Blob storage/retrieval**
+Files: throwaway test script (or extend `tests/lib/indexedDb.test.ts`).
+Confirm a `Blob` written via `objectStore.put()` reads back correctly via `objectStore.get()`/`getAll()` in the environment tests actually run in (`fake-indexeddb`, already a devDependency). Confirm reading multiple records with `Blob` values via `getAll()` doesn't need any special single-record-read workaround (unlike the SQLite/wa-sqlite-specific issue the pre-pivot draft was worried about — that risk doesn't apply to IndexedDB).
 Depends on: none.
 
-**Task 0.5 — Verify expo-sqlite BLOB behavior**
-Files: throwaway test script.
-Confirm the installed `expo-sqlite ~56.0.5` supports binding `Uint8Array` as a BLOB param in `runAsync`, and reproduce (or rule out) the known web-platform `getAllAsync`-corrupts-multi-row-BLOBs issue by inserting 3+ rows with distinct blob content and reading them back via both `getAllAsync` and `getEachAsync` on web. This determines whether Task 2.7/2.10's "use `getEachAsync`, not `getAllAsync`" requirement is still necessary.
-Depends on: none.
-
-**Task 0.6 — Benchmark native per-page text extraction**
-Files: throwaway test script using `expo-pdf-text-extract`.
-On a real ~100-page PDF, time a loop of `extractTextFromPage(uri, i)` calls (native bridge round-trip per page) versus the current single `extractTextWithInfo()` call. If per-page looping adds more than ~1-2s total, flag that Task 3.1 should use the length-proportional page-boundary fallback instead of true per-page extraction.
+**Task 0.3 — Benchmark per-page text extraction**
+Files: throwaway script using `pdfjs-dist`.
+On a real ~100-page PDF, time the existing per-page text-walk loop. If it's slow enough to matter (multiple seconds), flag that Task 3.1 should use a length-proportional page-boundary estimate instead of exact per-page tracking.
 Depends on: none.
 
 ---
 
 ## Phase 1 — Provider Attribution Fix
 
-Independent of every other phase — a one-line correctness fix in already-existing tables. Can ship first.
+**Status: DONE.** Storage-agnostic fix in `src/lib/pipeline.ts` — unaffected by the IndexedDB migration. Kept here for record-keeping; no remaining work.
 
-**Task 1.1 — Remove the blanket provider fallback in `pipeline.ts`**
-Files: `src/lib/pipeline.ts`.
-In the condition-persistence loop, change `const conditionProviders = c.provider ? [...] : providers` to `const conditionProviders = c.provider ? [...] : []`. The well-evidenced case is already handled by the unconditional `insertConditionCareEvent` loop directly above (gated on `event.date && event.provider?.name`); this only removes the over-attachment of every document-wide provider to conditions with neither an explicit `provider` nor a care event.
-Depends on: none.
-
-**Task 1.2 — Regression test for provider attribution**
-Files: extend `tests/lib/pipeline.test.ts` (or `__tests__/db/pipeline.test.ts`, whichever currently covers `processHealthRecord`).
-Add a case: a condition with no `c.provider` and no matching `care_events` entry, alongside a document that has other providers extracted at the top level, must produce **zero** `condition_providers` rows for that condition (was: one row per document provider). Keep the existing "condition_care_events populated correctly" tests passing.
-Depends on: 1.1.
+**Task 1.1 — Remove the blanket provider fallback in `pipeline.ts`** — done.
+**Task 1.2 — Regression test for provider attribution** — done.
 
 ---
 
-## Phase 2 — Schema & Persistence Layer
+## Phase 2 — IndexedDB Schema & Persistence Layer
 
-Foundational — purely additive, nothing writes to the new tables until Phase 3/4, so this phase is safe to ship standalone once tested.
+Foundational — extends the existing `indexedDb.ts`/`indexedDbBackup.ts` scaffold. Nothing writes to the new pieces until Phase 3/4, so this phase is safe to ship standalone once tested.
 
-**Task 2.1 — Add `condition_locations` table**
-Files: `src/lib/db/schema.ts`.
-Add to `CREATE_TABLES_SQL`:
-```sql
-CREATE TABLE IF NOT EXISTS condition_locations (
-  id TEXT PRIMARY KEY,
-  condition_id TEXT NOT NULL REFERENCES conditions(id),
-  anatomical_location TEXT,
-  laterality TEXT,
-  render_x REAL, render_y REAL,
-  cx REAL, cy REAL,
-  is_primary INTEGER NOT NULL DEFAULT 0,
-  evidence TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_condition_locations_condition ON condition_locations(condition_id);
-```
-Add a matching `ConditionLocationRow` type export next to the other row types in this file.
+**Task 2.1 — Extend `record_images` store's real shape**
+Files: `src/lib/db/indexedDb.ts`.
+The store already exists (created in `openIndexedDb`'s `onupgradeneeded`); add the `RecordImage` type (per `userDataReq.md` §6: `id, record_id, page_number, source_file, title, mime_type, width, height, byte_size, image_blob: Blob, thumbnail_blob: Blob | null, date, notes, created_at`) and confirm/add the `record_id` index (`records.createIndex('record_id', 'record_id')` alongside the existing `condition_locations`/`condition_records` index creation in the same `onupgradeneeded` block).
 Depends on: none.
 
-**Task 2.2 — Add `record_images` table**
-Files: `src/lib/db/schema.ts`.
-Add to `CREATE_TABLES_SQL`:
-```sql
-CREATE TABLE IF NOT EXISTS record_images (
-  id TEXT PRIMARY KEY,
-  record_id TEXT NOT NULL REFERENCES health_records(id),
-  page_number INTEGER,
-  source_file TEXT,
-  title TEXT,
-  mime_type TEXT NOT NULL DEFAULT 'image/webp',
-  width INTEGER, height INTEGER, byte_size INTEGER,
-  image_blob BLOB NOT NULL,
-  thumbnail_blob BLOB,
-  date TEXT,
-  notes TEXT,
-  created_at TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_record_images_record ON record_images(record_id);
-```
-Add a matching `RecordImageRow` type.
-Depends on: none. Can run in parallel with 2.1.
-
-**Task 2.3 — Additive column migrations**
-Files: `src/lib/db/schema.ts`.
-Append to `ALTER_COLUMNS_SQL` (same swallow-duplicate-column pattern as existing entries):
-```
-ALTER TABLE conditions ADD COLUMN inferred_fields TEXT
-ALTER TABLE measurements ADD COLUMN inferred_fields TEXT
-ALTER TABLE condition_records ADD COLUMN image_id TEXT REFERENCES record_images(id)
-```
-Depends on: 2.2 (the `image_id` FK target table must exist — order within `initDatabase` doesn't strictly enforce this since SQLite FK targets aren't validated at ALTER time, but keep logically dependent).
-
-**Task 2.4 — `insertConditionLocation` / `getConditionLocations`**
-Files: `src/lib/db/queries.ts`.
-```ts
-type ConditionLocationInput = {
-  conditionId: string
-  anatomicalLocation?: string | null
-  laterality?: string | null
-  cxPercent: number
-  cyPercent: number
-  isPrimary?: boolean
-  evidence?: string | null
-}
-export async function insertConditionLocation(db: SQLiteDatabase, input: ConditionLocationInput): Promise<string>
-export async function getConditionLocations(db: SQLiteDatabase, conditionId: string): Promise<ConditionLocationRow[]>
-```
-Follow the existing `uuid()` + parameterized-insert convention used by every other `insertX` function in this file.
+**Task 2.2 — `condition_records.image_id` linkage**
+Files: `src/lib/db/indexedDb.ts`.
+Add an optional `image_id: string | null` field to whatever type represents `condition_records` records (add one if not yet typed here — mirror `ConditionRecordRow`'s shape from `schema.ts` for field-name continuity: `id, condition_id, record_type, title, image_id, chart_json, table_json, color, date, source_file, notes, created_at`). No index needed — reads always go through `condition_id` (existing index), then filter for `image_id` in memory.
 Depends on: 2.1.
 
-**Task 2.5 — `getConditionDots` (bulk, render-ready)**
-Files: `src/lib/db/queries.ts`.
+**Task 2.3 — `inferred_fields` on conditions/measurements**
+Files: `src/lib/db/indexedDb.ts`.
+Add `inferred_fields: string[] | null` to `IndexedCondition` and to whatever type represents measurement records (add a `Measurement`/`IndexedMeasurement` type + `measurements` object store if not yet present — `keyPath: 'id'`, index on `record_id`). IndexedDB records are schemaless per-record, so no migration mechanics are needed — existing records simply lack the field until next written.
+Depends on: none.
+
+**Task 2.4 — `putConditionLocation` / `getConditionLocations`**
+Files: `src/lib/db/indexedDb.ts`.
 ```ts
-export async function getConditionDots(
-  db: SQLiteDatabase, mode: 'auto' | 'demo',
-): Promise<{ conditionId: string; system: SystemId; cx_percent: number; cy_percent: number; yearFrac: number }[]>
+export async function putConditionLocation(db: IDBDatabase, location: IndexedConditionLocation): Promise<void>
+export async function getConditionLocations(db: IDBDatabase, conditionId: string): Promise<IndexedConditionLocation[]>
 ```
-LEFT JOIN `conditions` ↔ `condition_locations`. For a condition with ≥1 location rows, emit one dot per row (using the location's `cx`/`cy`). For a condition with zero location rows, synthesize exactly one dot from `conditions.cx`/`cy` (mirrors the existing fallback logic already in `getConditions`, lines 528-530, for old-DB compatibility) — this keeps legacy/demo data rendering identically to today. Reuse the same `mode`-based visibility filtering (`hasUserRecords`/demo-record-id logic) already implemented in `getConditions` (lines 494-509) rather than duplicating it — consider factoring the visibility-row-selection logic into a shared helper both functions call.
+`putConditionLocation` already exists as `putIndexedConditionLocation` — this task is to add the paired read (`getConditionLocations`, `objectStore('condition_locations').index('condition_id').getAll(conditionId)`), following the promise-wrapper pattern (`requestToPromise`) already used throughout this file.
+Depends on: none.
+
+**Task 2.5 — `putRecordImage` / lazy image reads**
+Files: `src/lib/db/indexedDb.ts`.
+```ts
+export async function putRecordImage(db: IDBDatabase, image: RecordImage): Promise<void>
+export async function getRecordImageThumbnail(db: IDBDatabase, imageId: string): Promise<Blob | null>
+export async function getRecordImageBlob(db: IDBDatabase, imageId: string): Promise<{ blob: Blob; mimeType: string } | null>
+```
+Both read functions do a single `objectStore('record_images').get(imageId)` — no bulk read, so the lightbox/thumbnail path never loads more than one image's bytes at a time. Follow the existing `putIndexedCondition`/`transactionToPromise` pattern.
 Depends on: 2.1.
 
-**Task 2.6 — `insertCondition` returns computed position**
-Files: `src/lib/db/queries.ts`, `src/lib/pipeline.ts`, any test calling `insertCondition`.
-Change `insertCondition`'s return type from `Promise<string>` to `Promise<{ id: string; cxPercent: number; cyPercent: number }>`, returning the same `pos`/`input.cxPercent ?? pos.cx` values already computed inside the function (lines 172-199) instead of discarding them. Update the one production call site in `pipeline.ts` and any test call sites to destructure `{ id }` instead of using the string directly.
+**Task 2.6 — `getConditionRecords` gains `image_id`**
+Files: `src/lib/db/indexedDb.ts`.
+Add a read function `getConditionRecords(db: IDBDatabase, conditionId: string): Promise<ConditionRecordEntry[]>` (`objectStore('condition_records').index('condition_id').getAll(conditionId)`) that includes the `image_id` field from Task 2.2 in its return shape — this is a new function, not a fix to an existing one (unlike the `expo-sqlite` path's `getConditionRecords` in `queries.ts`, which has the historical SELECT-drops-columns bug noted in the pre-pivot draft — that bug doesn't carry over here since this is new code).
+Depends on: 2.2.
+
+**Task 2.7 — `putHealthRecord`/`putCondition` return computed position**
+Files: `src/lib/db/indexedDb.ts`, `src/lib/pipeline.ts` (once wired in Phase 3).
+Whatever function creates a new condition record (extend `putIndexedCondition` or add a dedicated `insertCondition` helper) should compute and return `{ id, cx, cy }` so callers can seed the matching `is_primary` `condition_locations` record without recomputing position — mirrors the intent of the original `expo-sqlite` design's `insertCondition` change, adapted to this file's existing function style.
 Depends on: none (independent of the rest of Phase 2, but needed by Task 3.6).
 
-**Task 2.7 — `insertRecordImage` / lazy image reads**
-Files: `src/lib/db/queries.ts`.
-```ts
-type RecordImageInput = {
-  recordId: string
-  pageNumber?: number | null
-  sourceFile?: string | null
-  title?: string | null
-  mimeType: string
-  width?: number | null
-  height?: number | null
-  byteSize?: number | null
-  imageBlob: Uint8Array
-  thumbnailBlob?: Uint8Array | null
-  date?: string | null
-  notes?: string | null
-}
-export async function insertRecordImage(db: SQLiteDatabase, input: RecordImageInput): Promise<string>
-export async function getRecordImageThumbnail(db: SQLiteDatabase, imageId: string): Promise<Uint8Array | null>
-export async function getRecordImageBlob(db: SQLiteDatabase, imageId: string): Promise<{ blob: Uint8Array; mimeType: string } | null>
-```
-Both read functions use single-row `getFirstAsync` (not `getAllAsync`) per Task 0.5's finding — single-row reads sidestep the web multi-row BLOB issue regardless of whether it's still present.
-Depends on: 2.2, 0.5 (confirms whether the `getFirstAsync`-only constraint is load-bearing or precautionary).
-
-**Task 2.8 — Wire images into `condition_records`**
-Files: `src/lib/db/queries.ts`.
-Extend `ConditionRecordInput` with `imageId?: string | null` and add it to `insertConditionRecord`'s INSERT column list. Fix `getConditionRecords`'s `SELECT` (currently `'SELECT id, record_type, title, color, date FROM condition_records WHERE condition_id = ? ...'`, line 460 — silently drops `image_uri`/`chart_json`/`table_json`/the new `image_id`) to also select `image_id`, and when non-null, LEFT JOIN `record_images` for `mime_type`/`width`/`height` only — never `image_blob`/`thumbnail_blob` in this listing query. Extend the mapped `ConditionRecord` return shape accordingly (paired with Task 5.1's type change).
-Depends on: 2.3, 2.7.
-
-**Task 2.9 — `src/lib/db/blob.ts` (new)**
-Files: `src/lib/db/blob.ts` (new).
-Dependency-free `uint8ArrayToBase64(bytes: Uint8Array): string` / `base64ToUint8Array(b64: string): Uint8Array`, following the no-dependency convention already used in `src/lib/lmf/`. Verify `btoa`/`atob` availability under Hermes/RN 0.85 (per Task 0.5's spike); if unreliable there, implement a manual byte-loop codec instead of adding a base64 package.
+**Task 2.8 — `src/lib/db/blob.ts` — confirm reuse for export**
+Files: `src/lib/db/blob.ts` (already exists, correct — no code change expected).
+Confirm `uint8ArrayToBase64`/`base64ToUint8Array` are the functions used by Task 2.10's export/import Blob-encoding step; no changes needed to this file itself.
 Depends on: none.
 
-**Task 2.10 — Fix `backup.ts` for BLOB columns**
-Files: `src/lib/db/backup.ts`.
-- Add `'record_images'`, `'condition_locations'` to `BACKUP_TABLES` (respecting existing parent-before-child ordering — `record_images` before anything referencing it, `condition_locations` after `conditions`).
-- Add `const BLOB_COLUMNS: Record<string, string[]> = { record_images: ['image_blob', 'thumbnail_blob'] }`.
-- `buildBackup`: for tables in `BLOB_COLUMNS`, read via `getEachAsync` instead of `getAllAsync` (per Task 0.5), and for each listed column, replace the `Uint8Array` with `uint8ArrayToBase64(...)` before it reaches the `tables[t] = rows` assignment.
-- `restoreBackup`: for the same tables/columns, `base64ToUint8Array(...)` the string back into a `Uint8Array` before the existing column-intersection (`PRAGMA table_info`) filtering runs (lines 102-116), so that logic stays untouched.
-Depends on: 2.2, 2.9, 0.5.
+**Task 2.9 — Port the full demo dataset to IndexedDB, through the real persistence path**
+Files: `src/lib/db/indexedDb.ts` (`seedIndexedDbDemoData`).
+Per `userDataReq.md` §2a (Demo Data Principle): `seedIndexedDbDemoData` must NOT write its own parallel set of `put()` calls into `conditions`/`condition_locations`/`condition_records`. Instead, it converts all 22 `CONDITIONS` entries (`src/model/conditions.ts`) plus their `CONDITION_RECORDS` into the same `ConditionInput`/`MeasurementInput` shapes `src/lib/llm/enrich.ts` produces (a mapping function, e.g. `designConditionToConditionInput(c: DesignCondition): ConditionInput`), runs that array through `applyInferenceRules` exactly as `processHealthRecord` does (even though today's hardcoded set has no underlying measurements to trigger additional inferred conditions — the point is exercising the identical code path, not that it currently changes output), and then calls `persistEnrichmentResult` (Task 2.15) — the same function `processHealthRecord` calls — rather than reimplementing persistence. Keep the bilateral-locations detail for `stones` as the multi-location example (via `ConditionInput.locations`, per Task 3.5's type extension). Also seed one placeholder `record_images` record (small embedded `Blob`) plus a `condition_records` record with `image_id` set on one condition, through the same `insertRecordImage`/`condition_records` write path Task 4.3 uses — not a demo-only shortcut — so the demo path exercises the real-image UI (Task 5.5/5.6) rather than only placeholder SVG art.
+Depends on: 2.1, 2.5, 2.6, 2.15.
 
-**Task 2.11 — [Found gap] Add missing longitudinal tables to `BACKUP_TABLES`**
-Files: `src/lib/db/backup.ts`.
-Not in the original PRD — discovered while reading `backup.ts` directly: `BACKUP_TABLES` currently omits `condition_care_events`, `provider_affiliations`, `facility_relationships`, `provider_facility_roles`, `evidence_sources`, `clinical_events`, and its join tables entirely. Since `pipeline.ts` already populates `condition_care_events`/`provider_affiliations` today, this means the app's multi-provider/multi-facility longitudinal data (the exact nuance this whole effort is built around) **silently does not survive export/import today**, independent of anything else in this task list. Recommend adding at minimum `condition_care_events` and `provider_affiliations` to `BACKUP_TABLES` in the same pass as Task 2.10, in correct parent-child order (`facilities`/`providers`/`conditions` before them). `evidence_sources`/`clinical_events*` can be deferred if not yet populated by any code path — verify before including. Flagging for an explicit decision rather than silently expanding scope.
-Depends on: 2.10 (same file, same pass).
+**Task 2.12 — IndexedDB provider hook**
+Files: `src/lib/db/indexedDbProvider.tsx` (new, mirrors `src/lib/db/provider.tsx`'s pattern for `expo-sqlite`).
+Add `useOptionalIndexedDb(): IDBDatabase | null` — opens the database via `openIndexedDb()` once (e.g. on mount / module-level promise cache) and exposes it the same way `useOptionalDatabase()` exposes the SQLite connection today, so call sites can swap one hook for the other with minimal churn.
+Depends on: none.
 
-**Task 2.12 — Extend demo seed data**
-Files: `src/lib/db/seed.ts`.
-- Add one placeholder image (small bundled/base64-literal `Uint8Array` defined in the module) via `insertRecordImage`, plus a `condition_records` row with `image_id` set on an existing demo condition, to exercise the real-image UI path in the demo — follow the existing `INSERT OR IGNORE`-with-fixed-id idempotency pattern used throughout this file.
-- Add a second `condition_locations` row on the existing `stones` (kidney stones) demo condition, with a fixed id, as the canonical bilateral multi-location example.
-- Add `condition_locations` and `record_images` rows to `clearDemoData`'s manual child-first delete cascade (currently deletes `condition_localnames` → `condition_records` → `conditions` → `health_records`, lines 119-133 — insert the two new deletes in the correct child-before-parent position).
-Depends on: 2.4, 2.7, 2.8.
+**Task 2.13 — Cut the app over from `expo-sqlite` to IndexedDB**
+Files: `src/app/analyzing.tsx`, `src/hooks/useConditions.ts`, `src/app/bodymap.tsx` (any remaining direct SQLite calls).
+This is the task that actually makes the migration real, not just present in isolated new files. Today, `analyzing.tsx` imports `useOptionalDatabase` (SQLite) and calls `seedDemoData`/`clearDemoData` (from `src/lib/db/seed.ts`) for the demo path, and passes the SQLite `db` into `processHealthRecord` for the upload path — zero real screens reference `indexedDb.ts` yet. Switch both paths to `useOptionalIndexedDb()` (2.12) and the IndexedDB seed/query functions (`seedIndexedDbDemoData`, and whatever `processHealthRecord` now expects per Task 3.6). Update `useConditions()`/`useConditionRecords()` in `useConditions.ts` to call the IndexedDB read functions (`getIndexedConditionDots`-based queries, `getConditionRecords` from 2.6) instead of `queries.ts`'s SQLite versions. After this task, the demo path and the upload path both run entirely on IndexedDB — verify by confirming zero remaining imports from `@/lib/db/queries` or `@/lib/db/seed` in `src/app`/`src/hooks`.
+Depends on: 2.9, 2.12, 3.6 (pipeline.ts must already expect an `IDBDatabase` before this task wires a real one into it — coordinate sequencing with Phase 3's Dev/QA if 2.13 lands before 3.6 completes).
 
-**Task 2.13 — Extend fake-DB test fixture**
-Files: `__tests__/db/fakeDb.ts`.
-Add `condition_locations` and `record_images` to the fixture's `SCHEMA`/`PK` maps, plus the three new columns (`inferred_fields` ×2, `image_id`), so existing fake-DB-based tests keep passing and new tests can target the new tables/columns.
-Depends on: 2.1, 2.2, 2.3.
+**Task 2.10 — Blob-aware JSON export/import**
+Files: `src/lib/db/indexedDbBackup.ts`.
+`buildIndexedDbBackup`/`restoreIndexedDbBackup` currently move `Blob` values between IndexedDB stores directly (fine — IndexedDB's structured clone handles `Blob` natively) but the user-facing **JSON file** export (wherever that's wired to a download, e.g. an `exportIndexedDbBackupToFile`-style function — add one if it doesn't exist yet) needs an explicit conversion step: for every store listed in a new `BLOB_FIELDS: Record<string, string[]>` map (`{ record_images: ['image_blob', 'thumbnail_blob'] }`), convert each `Blob` to bytes (`await blob.arrayBuffer()` → `new Uint8Array(...)`) and base64-encode via `blob.ts` before `JSON.stringify`; reverse (base64 → `Uint8Array` → `new Blob([bytes], {type: mimeType})`) on import, before the records are `put()` back into IndexedDB.
+Depends on: 2.1, 2.8.
 
-**Task 2.14 — Unit tests for Phase 2**
-Files: `src/lib/db/blob.test.ts` (new), extend `tests/lib/queries.test.ts` (or wherever `queries.ts` is tested), extend `tests/lib/backup.test.ts`.
-- `blob.test.ts`: base64 round-trip of arbitrary byte arrays, including empty and non-multiple-of-3 lengths.
-- Queries: a condition with 2 `condition_locations` rows yields 2 dots sharing one `conditionId` from `getConditionDots`; a condition with 0 location rows synthesizes exactly 1 dot from `conditions.cx/cy`.
-- Backup: insert a `record_images` row with a real `Uint8Array` blob, round-trip through `buildBackup` → `JSON.stringify`/`JSON.parse` → `restoreBackup`, assert the restored blob is byte-identical.
-Depends on: 2.4, 2.5, 2.10, 2.13.
+**Task 2.11 — Unit tests for Phase 2**
+Files: extend `tests/lib/indexedDb.test.ts`, `tests/lib/indexedDbBackup.test.ts`, `tests/lib/blob.test.ts` (all already exist).
+- A condition with 2 `condition_locations` records yields 2 dots sharing one `conditionId` from `getIndexedConditionDots` (already covered — extend with a `record_images`/`image_id` case if not present).
+- A condition with 0 location records synthesizes exactly 1 dot from the condition's own `cx`/`cy` (already covered).
+- JSON export round-trip: insert a `record_images` record with a real `Blob`, run the new export path, `JSON.parse` it back, run import, assert the restored `Blob`'s bytes are identical to the original.
+- After Task 2.9: `seedIndexedDbDemoData()` writes exactly 22 conditions (one `put()` per `CONDITIONS` entry) and the same total `condition_records` count as `CONDITION_RECORDS` sums to — a regression check that the demo port didn't silently drop conditions.
+Depends on: 2.9, 2.10.
+
+**Task 2.14 — Demo visual-parity regression test**
+Files: new or extended UI/snapshot test covering `bodymap.tsx`'s demo render, or a manual checklist item if no automated visual test exists yet.
+After Task 2.13's cutover, confirm the demo body map (all 22 conditions, all 11 systems reachable via `activeSystems` toggles, correct hotspot positions) renders identically to the pre-cutover `expo-sqlite`-backed demo. This is the concrete check that answers "does the demo data path still work" for the new architecture — don't rely on Task 2.9/2.13 "should" statements alone.
+Depends on: 2.9, 2.13.
+
+**Task 2.15 — Extract a shared persistence function so demo and real data use one path**
+Files: `src/lib/pipeline.ts`.
+Per `userDataReq.md` §2a: the "rest of the pipeline" — clinical inference rules onward — must be identical for demo and real data, not just similar. Extract `processHealthRecord`'s persistence steps (health-record write; loop over conditions writing the condition, its `condition_locations` records, provider/care-event links; loop over measurements) into a standalone exported function:
+```ts
+export type EnrichedInput = {
+  filename: string
+  pageCount: number | null
+  extractionMethod: string | null
+  conditions: ConditionInput[]
+  measurements: MeasurementInput[]
+  providers?: ProviderInput[]
+}
+export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedInput): Promise<PipelineResult>
+```
+`processHealthRecord` calls `applyInferenceRules` and then `persistEnrichmentResult` with the merged conditions/measurements — same as it does today, just factored out. This function becomes the single write path both real uploads (via the full extraction→enrichment pipeline) and demo seeding (via a hand-authored `EnrichedInput` built from `CONDITIONS`/`CONDITION_RECORDS`, Task 2.9) go through — no separate demo-only persistence logic can exist once this lands.
+Depends on: 2.4, 2.5, 2.6, 2.7 (needs the IndexedDB write functions this wraps).
 
 ---
 
@@ -226,10 +155,8 @@ Depends on: 2.4, 2.5, 2.10, 2.13.
 
 **Task 3.1 — Page boundaries in text extraction**
 Files: `src/lib/pdf/extract.ts`.
-Add `pageBreaks: number[]` (character offsets where each page begins) to the extraction result type.
-- Web path: the existing per-page `pdfjs-dist` loop already has a running offset before each `parts.push(pageText)` — just record it.
-- Native path: per Task 0.6's benchmark, either switch to a loop of `extractTextFromPage(uri, i)` (1-indexed, confirmed present in `expo-pdf-text-extract`'s type defs) + `getPageCount(uri)`, tracking real offsets, or — if that benchmark showed unacceptable latency — compute a length-proportional estimate (`pageCount` even splits of `text.length`) instead. Document which path was chosen and why in a code comment.
-Depends on: 0.6.
+Add `pageBreaks: number[]` (character offsets where each page begins) to the extraction result type. The existing per-page `pdfjs-dist` loop already has a running offset before each page's text is appended — just record it. If Task 0.3's benchmark showed unacceptable latency for very large PDFs, compute a length-proportional estimate (`pageCount` even splits of `text.length`) instead. Document which approach was chosen and why in a code comment.
+Depends on: 0.3.
 
 **Task 3.2 — Structure-analysis module**
 Files: `src/lib/llm/structure.ts` (new).
@@ -278,18 +205,18 @@ New `enrichFromText` orchestration:
 1. `structure = await analyzeRecordStructure(...)` (3.2's fallback applies on failure).
 2. `chunks = chunkRecordBySections(text, structure)` (3.3).
 3. `settled = await runWithConcurrency(chunks, POOL_SIZE=2 or 3, extractConditionsFromChunk)` (3.4).
-4. Merge succeeded results: group conditions by normalized `name_medical` + organ/location across chunks into one entry per distinct condition; earliest date wins on conflict; evidence/care_events concatenate.
+4. Merge succeeded results: group conditions by normalized `name_medical` + organ/location across chunks into one entry each; earliest date wins on conflict; evidence/care_events concatenate.
 5. `succeeded.length === 0` → throw `EnrichmentFailedError` (the only remaining all-or-nothing case).
 6. Otherwise return `{conditions, measurements, providers, partialFailures}`.
 `onChunkProgress?: (completed, total)` replaces `onConditionProgress` with the same call shape as today, so `pipeline.ts`'s `report(1, 0.4 + 0.35*completed/total)` math and `analyzing.tsx` need zero changes.
 Depends on: 3.2, 3.3, 3.4.
 
-**Task 3.6 — Wire chunk output into `pipeline.ts`**
+**Task 3.6 — Wire chunk output into `pipeline.ts` via IndexedDB**
 Files: `src/lib/pipeline.ts`.
-- Persist `inferred_fields` (`JSON.stringify(c.inferred_from_structure ?? [])` or `null`) alongside the existing condition/measurement inserts.
-- After `insertCondition` (now returning `{id, cxPercent, cyPercent}` per Task 2.6), insert one `is_primary=1` `condition_locations` row mirroring that computed position, then loop any additional `c.locations` entries via `insertConditionLocation`.
+- Persist `inferred_fields` alongside condition/measurement writes via the Phase 2 IndexedDB functions (not the `expo-sqlite` `queries.ts` path).
+- After creating a condition (now returning `{id, cx, cy}` per Task 2.7), write one `is_primary: true` `condition_locations` record mirroring that computed position, then loop any additional `c.locations` entries via `putConditionLocation`.
 - Trace `enrichment.partialFailures` via the existing `trace()` helper for diagnostics visibility.
-Depends on: 2.4, 2.6, 3.5.
+Depends on: 2.4, 2.7, 3.5.
 
 **Task 3.7 — Unit tests for Phase 3**
 Files: `src/lib/llm/pool.test.ts`, `src/lib/llm/chunk.test.ts` (new), extend `tests/lib/enrich.test.ts`.
@@ -302,30 +229,32 @@ Depends on: 3.2, 3.3, 3.4, 3.5.
 
 ## Phase 4 — Image Capture Pipeline
 
-**Task 4.1 — Page-render wrapper**
+No new native or third-party rendering dependency needed — `pdfjs-dist` (already a dependency, already used for text extraction) renders pages to Canvas directly in the browser.
+
+**Task 4.1 — Page-render helper**
 Files: `src/lib/pdf/renderPage.ts` (new).
 ```ts
-export async function renderPageToImage(uri: string, pageNumber: number): Promise<{ uri: string; width: number; height: number }>
+export async function renderPageToBlob(uri: string, pageNumber: number, mimeType: string, quality: number): Promise<{ blob: Blob; width: number; height: number }>
 ```
-Thin wrapper around whichever library Task 0.3 selected — isolates the rest of the app from that library's exact API shape.
-Depends on: 0.3.
+Uses `pdfjs-dist`: load the document, get the page, render to an off-screen `<canvas>` via `page.render({canvasContext, viewport})`, then `canvas.toBlob(...)` wrapped in a Promise.
+Depends on: 0.1.
 
-**Task 4.2 — Compression module**
+**Task 4.2 — Compression loop**
 Files: `src/lib/media/compress.ts` (new).
 ```ts
-export async function compressImageToTarget(uri: string, maxBytes: number): Promise<{ blob: Uint8Array; width: number; height: number; mimeType: string; byteSize: number }>
+export async function compressToTarget(canvas: HTMLCanvasElement, maxBytes: number): Promise<{ blob: Blob; byteSize: number }>
 ```
-Uses `expo-image-manipulator` (Task 0.4) with an iterative loop stepping down quality/dimensions until under `maxBytes` (compression output size varies meaningfully by platform per known `expo-image-manipulator` behavior — a single fixed `compress` value isn't reliable). Reads the manipulated file back as bytes via `expo-file-system`.
-Depends on: 0.4.
+Iteratively lowers `canvas.toBlob`'s `quality` argument (and/or downscales the canvas) until the resulting `Blob.size` is under `maxBytes` — `toBlob` output size varies with image content, so a single fixed quality value isn't reliable.
+Depends on: 0.1.
 
 **Task 4.3 — Image-capture step in the pipeline**
 Files: `src/lib/pipeline.ts`.
-After structure analysis (Task 3.2's output is available in the pipeline by this point via Task 3.6's wiring), for each section flagged `imageWorthy` with a resolved page range: call `renderPageToImage` (4.1) for each page in range, `compressImageToTarget` (4.2), then `insertRecordImage` (2.7) and `insertConditionRecord({..., imageId})` (2.8) linked to whichever condition(s) that section's chunk extraction associated with it. A rendering/compression failure for a given page is caught and skipped (per PRD §8) — never fails the whole record.
-Depends on: 4.1, 4.2, 2.7, 2.8, 3.6.
+For each section flagged `imageWorthy` with a resolved page range (available via Task 3.6's wiring): call `renderPageToBlob` (4.1), `compressToTarget` (4.2), then `putRecordImage` (2.5) and a `condition_records` write with `image_id` set (2.2/2.6), linked to whichever condition(s) that section's chunk extraction associated with it. A rendering/compression failure for a given page is caught and skipped (per PRD §8) — never fails the whole record.
+Depends on: 4.1, 4.2, 2.5, 2.6, 3.6.
 
 **Task 4.4 — Manual verification**
 No new files — verification task.
-On iOS simulator + Android emulator dev-client builds, upload a record with real imaging-style pages; confirm images render in the (not-yet-built, see Phase 5) carousel once that lands, and separately confirm via direct SQLite inspection that stored blob sizes are proportionate (hundreds of KB, not multi-MB) and that non-`imageWorthy` pages produced zero rows.
+Upload a record with real imaging-style pages in a browser; confirm images render in the (not-yet-built, see Phase 5) carousel once that lands, and separately confirm via browser devtools' IndexedDB inspector that stored blob sizes are proportionate (hundreds of KB, not multi-MB) and that non-`imageWorthy` pages produced zero records.
 Depends on: 4.3.
 
 ---
@@ -335,19 +264,19 @@ Depends on: 4.3.
 **Task 5.1 — Extend `ConditionRecord` type**
 Files: `src/model/conditions.ts`.
 Add `imageId?: string | null` and `mimeType?: string | null` to `ConditionRecord` (lazy reference only — never raw bytes inline in this type).
-Depends on: none (paired with 2.8's return-shape change).
+Depends on: none (paired with 2.6's return-shape change).
 
 **Task 5.2 — `useConditionDots` hook**
 Files: `src/hooks/useConditions.ts`.
 ```ts
-export function useConditionDots(sourceOverride?: ConditionSource): { conditionId: string; system: SystemId; cx_percent: number; cy_percent: number; yearFrac: number }[]
+export function useConditionDots(sourceOverride?: ConditionSource): IndexedConditionDot[]
 ```
-Mirrors the existing `useConditions()` pattern in this same file (state seeded with a safe fallback, `useOptionalDatabase()` + `getConditionDots` in a `useEffect`, `useAppStore`'s `conditionSource` for the default source) — do not introduce a different loading pattern.
-Depends on: 2.5.
+Mirrors the existing `useConditions()` pattern in this same file (state seeded with a safe fallback, a DB-access hook + `getIndexedConditionDots` in a `useEffect`) — do not introduce a different loading pattern. Requires whatever this file's IndexedDB-access hook is (add one analogous to `useOptionalDatabase()` if `bodymap.tsx`'s DB access hasn't already moved to IndexedDB by this point).
+Depends on: 2.4.
 
 **Task 5.3 — Refactor dot-rendering components**
 Files: `src/app/bodymap.tsx`.
-`GhostDots` (line 527), `BodySvg` (595), and `ConditionRipples` (671) currently take `conditions: DesignCondition[]` and read `c.cx_percent`/`c.cy_percent` directly. Change all three to accept the flattened dot list from `useConditionDots()` (5.2) instead — each item already carries `system`/`yearFrac` needed for the existing `activeSystems`/date filtering logic in each component, so the filter predicates need minimal changes (swap `c.system`/`c.yearFrac` reads to the dot's own fields). `pressNearest` (538) resolves a tapped dot's `conditionId` back to the full `DesignCondition` via the existing `useConditions()`-sourced array (still needed for name/date/evidence display) — two parallel lists joined by id at press time, not merged into one. Relocation (`onRelocationPlace`, `updateConditionPositionLocally`) continues to operate on the primary location only this phase — no changes needed to the relocation gesture itself, only to how the resulting position is looked up/written (still via `conditions.cx/cy` for the primary; editing non-primary locations is out of scope per the PRD).
+`GhostDots` (line 527), `BodySvg` (595), and `ConditionRipples` (671) currently take `conditions: DesignCondition[]` and read `c.cx_percent`/`c.cy_percent` directly. Change all three to accept the flattened dot list from `useConditionDots()` (5.2) instead — each item already carries `system`/`yearFrac` needed for the existing `activeSystems`/date filtering logic in each component, so the filter predicates need minimal changes (swap `c.system`/`c.yearFrac` reads to the dot's own fields). `pressNearest` (538) resolves a tapped dot's `conditionId` back to the full `DesignCondition` via the existing `useConditions()`-sourced array (still needed for name/date/evidence display) — two parallel lists joined by id at press time, not merged into one. Relocation (`onRelocationPlace`, `updateConditionPositionLocally`) continues to operate on the primary location only this phase — no changes needed to the relocation gesture itself, only to how the resulting position is looked up/written; editing non-primary locations is out of scope per the PRD.
 Depends on: 5.2.
 
 **Task 5.4 — Make the image/chart timeline persistent**
@@ -357,34 +286,34 @@ Depends on: none directly, but only meaningful to test once 5.5 shows real image
 
 **Task 5.5 — Real image thumbnails**
 Files: `src/app/bodymap.tsx`.
-`renderRecordThumb` (line 222) gets an early branch: when `rec.imageId` is set, a small inline component lazily fetches `getRecordImageThumbnail(db, rec.imageId)` (2.7) in a `useEffect` keyed on `imageId`, converts the returned `Uint8Array` to a base64 `data:` URI (via `blob.ts`'s `uint8ArrayToBase64`, Task 2.9), and renders it through `expo-image` (already imported elsewhere in this file, e.g. for `BodyLayers`) with `contentFit="cover"`. Falls back to the existing SVG placeholder art while loading or on fetch error — no layout flash.
-Depends on: 2.7, 2.9, 5.1.
+`renderRecordThumb` (line 222) gets an early branch: when `rec.imageId` is set, a small inline component lazily fetches `getRecordImageThumbnail(db, rec.imageId)` (2.5) in a `useEffect` keyed on `imageId`, converts the returned `Blob` to an object URL (`URL.createObjectURL(blob)`, revoked on cleanup) or renders it directly via `expo-image`'s `Blob`/URI support, with `contentFit="cover"`. Falls back to the existing SVG placeholder art while loading or on fetch error — no layout flash.
+Depends on: 2.5, 5.1.
 
 **Task 5.6 — Real images in the lightbox**
 Files: `src/app/bodymap.tsx`.
-`RecordLightbox` (~line 1340) gets the same lazy-fetch pattern as 5.5, but calling `getRecordImageBlob` (2.7, full resolution) only when `lightboxRecord` changes to a record with an `imageId`.
-Depends on: 2.7, 2.9, 5.1.
+`RecordLightbox` (~line 1340) gets the same lazy-fetch pattern as 5.5, but calling `getRecordImageBlob` (2.5, full resolution) only when `lightboxRecord` changes to a record with an `imageId`.
+Depends on: 2.5, 5.1.
 
 **Task 5.7 — Manual UI regression pass**
 No new files — verification task.
-Confirm: demo-data flow (`seedDemoData` output) renders visually identical to today (dots in the same positions, carousel showing the same placeholder cards where no real image exists); the seeded bilateral kidney-stones demo condition (Task 2.12) renders two dots that both open the same condition sheet; a condition with a real stored image (from Phase 4 or the demo placeholder) shows a real thumbnail instead of SVG art.
-Depends on: 5.3, 5.4, 5.5, 5.6, 2.12.
+Confirm: demo-data flow (`seedIndexedDbDemoData` output) renders visually identical to today (dots in the same positions, carousel showing the same placeholder cards where no real image exists); the seeded bilateral kidney-stones demo condition (Task 2.9) renders two dots that both open the same condition sheet; a condition with a real stored image (from Phase 4 or the demo placeholder) shows a real thumbnail instead of SVG art.
+Depends on: 5.3, 5.4, 5.5, 5.6, 2.9.
 
 ---
 
 ## Phase 6 — Full Verification Pass
 
 **Task 6.1 — Automated suite**
-Run `npm run typecheck`, `npx expo lint`, `npm test` (80% coverage target on `src/lib`, `src/model`, `src/store` per `jest.config.js`). All Phase 1–5 unit tests (1.2, 2.14, 3.7) must be green; extend coverage for any new file that falls short.
+Run `npm run typecheck`, `npx expo lint`, `npm test` (80% coverage target on `src/lib`, `src/model`, `src/store` per `jest.config.js`). All Phase 1–5 unit tests must be green; extend coverage for any new file that falls short.
 Depends on: all prior phases.
 
 **Task 6.2 — Large-record manual test**
-Build/obtain a synthetic ~80-100 page PDF (chronological visit notes + problem list + a few chart/lab-style pages, fake PII only). On iOS simulator + Android emulator dev-client builds: confirm via `pipeline.ts`'s existing `trace()` logs that LLM attempt count scales with chunk count, not condition count; confirm the progress bar advances smoothly across chunk boundaries with no changes needed in `analyzing.tsx`; force a mid-run 429 (temporarily misconfigure one model in the chain) and confirm the record still completes with partial results instead of a hard failure.
+Build/obtain a synthetic ~80-100 page PDF (chronological visit notes + problem list + a few chart/lab-style pages, fake PII only). In a browser: confirm via `pipeline.ts`'s existing `trace()` logs that LLM attempt count scales with chunk count, not condition count; confirm the progress bar advances smoothly across chunk boundaries with no changes needed in `analyzing.tsx`; force a mid-run 429 (temporarily misconfigure one model in the chain) and confirm the record still completes with partial results instead of a hard failure.
 Depends on: 3.5, 3.6, 6.1.
 
 **Task 6.3 — Export/import round trip with real data**
-Export the DB (web) after uploading a record that produced real images and multi-location conditions; reimport into a fresh profile; confirm images render correctly, condition locations are preserved, and (per Task 2.11) care-event/provider-affiliation data survives if that gap was addressed.
-Depends on: 2.10, 2.11, 4.3, 6.1.
+Export the DB (JSON, per Task 2.10) after uploading a record that produced real images and multi-location conditions; reimport into a fresh browser profile; confirm images render correctly and condition locations are preserved.
+Depends on: 2.10, 4.3, 6.1.
 
 **Task 6.4 — Final acceptance pass**
 Walk every bullet in `userDataReq.md` §10 (Acceptance Criteria) explicitly and confirm pass/fail; file follow-up tasks for anything not met rather than silently deferring.

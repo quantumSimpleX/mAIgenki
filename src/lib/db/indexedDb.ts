@@ -1,0 +1,341 @@
+import {
+  CONDITIONS, CONDITION_RECORDS, defaultConditionPosition, normalizeSystemId,
+  type DesignCondition, type SupportedLang,
+} from '@/model/conditions'
+
+/** Browser-only persistence adapter for the web architecture. */
+export const INDEXED_DB_NAME = 'maigenki'
+// v2 adds the `measurements` store and the `record_images.record_id` index —
+// bumped so onupgradeneeded re-fires for databases already created at v1.
+export const INDEXED_DB_VERSION = 2
+
+export const DEMO_RECORD_ID = 'demo-record'
+const DEMO_IMAGE_ID = 'demo-image-stones-kub'
+
+export type IndexedHealthRecord = {
+  id: string
+  filename: string
+  record_type: string | null
+}
+
+export type IndexedCondition = {
+  id: string
+  record_id: string | null
+  name_medical: string
+  name_common: string | null
+  system: string
+  cx: number
+  cy: number
+  year_frac: number
+  date: string | null
+  note: string | null
+  evidence: string | null
+  local_names: Partial<Record<SupportedLang, string>> | null
+  inferred_fields: string[] | null
+}
+
+// putIndexedCondition accepts cx/cy as optional so callers that don't already
+// know a position can let it compute one (Task 2.7) — the stored/returned
+// shape always has concrete numbers.
+export type PutIndexedConditionInput = Omit<IndexedCondition, 'cx' | 'cy'> & { cx?: number; cy?: number }
+
+export type IndexedConditionLocation = {
+  id: string
+  condition_id: string
+  cx: number
+  cy: number
+  is_primary: boolean
+}
+
+export type IndexedConditionDot = {
+  conditionId: string
+  system: string
+  cx_percent: number
+  cy_percent: number
+  yearFrac: number
+}
+
+export type RecordImage = {
+  id: string
+  record_id: string
+  page_number: number | null
+  source_file: string | null
+  title: string | null
+  mime_type: string
+  width: number | null
+  height: number | null
+  byte_size: number | null
+  image_blob: Blob
+  thumbnail_blob: Blob | null
+  date: string | null
+  notes: string | null
+  created_at: string
+}
+
+export type ConditionRecordEntry = {
+  id: string
+  condition_id: string
+  record_type: string
+  title: string | null
+  image_id: string | null
+  chart_json: string | null
+  table_json: string | null
+  color: string | null
+  date: string | null
+  source_file: string | null
+  notes: string | null
+  created_at: string
+}
+
+export type IndexedMeasurement = {
+  id: string
+  record_id: string | null
+  name: string
+  value_numeric: number | null
+  unit: string | null
+  date: string
+  inferred_fields: string[] | null
+}
+
+function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    request.onsuccess = () => resolve(request.result)
+    request.onerror = () => reject(request.error ?? new Error('IndexedDB request failed'))
+  })
+}
+
+function transactionToPromise(transaction: IDBTransaction): Promise<void> {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve()
+    transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed'))
+    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'))
+  })
+}
+
+export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase> {
+  if (typeof indexedDB === 'undefined') throw new Error('IndexedDB is unavailable in this runtime')
+  const request = indexedDB.open(name, INDEXED_DB_VERSION)
+  request.onupgradeneeded = () => {
+    const database = request.result
+    const stores: Array<[string, IDBObjectStoreParameters]> = [
+      ['health_records', { keyPath: 'id' }],
+      ['conditions', { keyPath: 'id' }],
+      ['condition_locations', { keyPath: 'id' }],
+      ['record_images', { keyPath: 'id' }],
+      ['condition_records', { keyPath: 'id' }],
+      ['measurements', { keyPath: 'id' }],
+      ['settings', { keyPath: 'key' }],
+    ]
+    for (const [storeName, options] of stores) {
+      if (!database.objectStoreNames.contains(storeName)) database.createObjectStore(storeName, options)
+    }
+    const locations = request.transaction?.objectStore('condition_locations')
+    if (locations && !locations.indexNames.contains('condition_id')) locations.createIndex('condition_id', 'condition_id')
+    const conditionRecords = request.transaction?.objectStore('condition_records')
+    if (conditionRecords && !conditionRecords.indexNames.contains('condition_id')) conditionRecords.createIndex('condition_id', 'condition_id')
+    const images = request.transaction?.objectStore('record_images')
+    if (images && !images.indexNames.contains('record_id')) images.createIndex('record_id', 'record_id')
+    const measurements = request.transaction?.objectStore('measurements')
+    if (measurements && !measurements.indexNames.contains('record_id')) measurements.createIndex('record_id', 'record_id')
+  }
+  return requestToPromise(request)
+}
+
+// Computes a position when the caller doesn't already have one (e.g. a fresh
+// LLM-extracted condition), so callers can seed the matching `is_primary`
+// condition_locations record without recomputing it themselves (Task 2.7).
+export async function putIndexedCondition(
+  db: IDBDatabase,
+  input: PutIndexedConditionInput,
+): Promise<{ id: string; cx: number; cy: number }> {
+  const system = normalizeSystemId(input.system)
+  const pos = defaultConditionPosition(system, `${input.name_medical}:${input.system}`)
+  const cx = input.cx ?? pos.cx
+  const cy = input.cy ?? pos.cy
+  const condition: IndexedCondition = { ...input, cx, cy }
+  const transaction = db.transaction('conditions', 'readwrite')
+  transaction.objectStore('conditions').put(condition)
+  await transactionToPromise(transaction)
+  return { id: input.id, cx, cy }
+}
+
+export async function putIndexedConditionLocation(db: IDBDatabase, location: IndexedConditionLocation): Promise<void> {
+  const transaction = db.transaction('condition_locations', 'readwrite')
+  transaction.objectStore('condition_locations').put(location)
+  await transactionToPromise(transaction)
+}
+
+export async function getConditionLocations(db: IDBDatabase, conditionId: string): Promise<IndexedConditionLocation[]> {
+  const transaction = db.transaction('condition_locations', 'readonly')
+  const rows = await requestToPromise(
+    transaction.objectStore('condition_locations').index('condition_id').getAll(conditionId),
+  ) as IndexedConditionLocation[]
+  await transactionToPromise(transaction)
+  return rows
+}
+
+export async function putRecordImage(db: IDBDatabase, image: RecordImage): Promise<void> {
+  const transaction = db.transaction('record_images', 'readwrite')
+  transaction.objectStore('record_images').put(image)
+  await transactionToPromise(transaction)
+}
+
+export async function getRecordImageThumbnail(db: IDBDatabase, imageId: string): Promise<Blob | null> {
+  const transaction = db.transaction('record_images', 'readonly')
+  const row = await requestToPromise(transaction.objectStore('record_images').get(imageId)) as RecordImage | undefined
+  await transactionToPromise(transaction)
+  return row?.thumbnail_blob ?? row?.image_blob ?? null
+}
+
+export async function getRecordImageBlob(db: IDBDatabase, imageId: string): Promise<{ blob: Blob; mimeType: string } | null> {
+  const transaction = db.transaction('record_images', 'readonly')
+  const row = await requestToPromise(transaction.objectStore('record_images').get(imageId)) as RecordImage | undefined
+  await transactionToPromise(transaction)
+  return row ? { blob: row.image_blob, mimeType: row.mime_type } : null
+}
+
+export async function getConditionRecords(db: IDBDatabase, conditionId: string): Promise<ConditionRecordEntry[]> {
+  const transaction = db.transaction('condition_records', 'readonly')
+  const rows = await requestToPromise(
+    transaction.objectStore('condition_records').index('condition_id').getAll(conditionId),
+  ) as ConditionRecordEntry[]
+  await transactionToPromise(transaction)
+  return rows
+}
+
+type ConditionQueryMode = 'auto' | 'demo'
+
+// Design-layer read: maps stored conditions onto the DesignCondition shape the
+// body map renders. Mirrors queries.ts's SQLite getConditions() visibility
+// rule — in auto mode, user-upload rows hide demo rows; in demo mode, only
+// demo rows are shown.
+export async function getIndexedConditions(db: IDBDatabase, mode: ConditionQueryMode = 'auto'): Promise<DesignCondition[]> {
+  const transaction = db.transaction(['health_records', 'conditions'], 'readonly')
+  const healthRecords = await requestToPromise(transaction.objectStore('health_records').getAll()) as IndexedHealthRecord[]
+  const conditions = await requestToPromise(transaction.objectStore('conditions').getAll()) as IndexedCondition[]
+  await transactionToPromise(transaction)
+  const demoRecordIds = new Set(healthRecords.filter((r) => r.record_type === 'demo').map((r) => r.id))
+  const hasUserRecords = healthRecords.some((r) => r.record_type !== 'demo')
+  const visible = mode === 'demo'
+    ? conditions.filter((c) => c.record_id && demoRecordIds.has(c.record_id))
+    : hasUserRecords
+      ? conditions.filter((c) => !c.record_id || !demoRecordIds.has(c.record_id))
+      : conditions
+  return visible
+    .slice()
+    .sort((a, b) => a.year_frac - b.year_frac)
+    .map((c) => ({
+      id: c.id,
+      system: normalizeSystemId(c.system),
+      label: c.name_common ?? c.name_medical,
+      medName: c.name_medical,
+      localNames: c.local_names ?? {},
+      date: c.date ?? '',
+      yearFrac: c.year_frac,
+      cx_percent: c.cx,
+      cy_percent: c.cy,
+      note: c.note ?? '',
+      evidence: c.evidence ?? '',
+    }))
+}
+
+export async function getIndexedConditionDots(db: IDBDatabase): Promise<IndexedConditionDot[]> {
+  const transaction = db.transaction(['conditions', 'condition_locations'], 'readonly')
+  const conditions = await requestToPromise(transaction.objectStore('conditions').getAll()) as IndexedCondition[]
+  const locations = await requestToPromise(transaction.objectStore('condition_locations').getAll()) as IndexedConditionLocation[]
+  await transactionToPromise(transaction)
+  const byCondition = new Map<string, IndexedConditionLocation[]>()
+  for (const location of locations) byCondition.set(location.condition_id, [...(byCondition.get(location.condition_id) ?? []), location])
+  return conditions.flatMap((condition) => {
+    const conditionLocations = byCondition.get(condition.id) ?? []
+    const points = conditionLocations.length > 0 ? conditionLocations : [{ cx: condition.cx, cy: condition.cy }]
+    return points.map((point) => ({ conditionId: condition.id, system: condition.system, cx_percent: point.cx, cy_percent: point.cy, yearFrac: condition.year_frac }))
+  })
+}
+
+// Ports the full hardcoded demo dataset (all 22 CONDITIONS + their
+// CONDITION_RECORDS, per model/conditions.ts) so the IndexedDB-backed demo
+// experience is visually identical to the expo-sqlite one (see seed.ts's
+// seedDemoData, the equivalent this replaces). `put()` is already an upsert
+// on a fixed id, so this is safe to call idempotently on every demo load.
+export async function seedIndexedDbDemoData(db: IDBDatabase): Promise<void> {
+  const transaction = db.transaction(
+    ['health_records', 'conditions', 'condition_locations', 'condition_records', 'record_images'],
+    'readwrite',
+  )
+  const healthRecords = transaction.objectStore('health_records')
+  const conditions = transaction.objectStore('conditions')
+  const locations = transaction.objectStore('condition_locations')
+  const records = transaction.objectStore('condition_records')
+  const images = transaction.objectStore('record_images')
+
+  healthRecords.put({ id: DEMO_RECORD_ID, filename: 'Demo Patient — Sample Health History', record_type: 'demo' })
+
+  // Placeholder embedded image (a few PNG-signature bytes) so the demo path
+  // exercises the real-image record UI (Task 5.5/5.6) rather than only
+  // placeholder SVG art.
+  images.put({
+    id: DEMO_IMAGE_ID,
+    record_id: DEMO_RECORD_ID,
+    page_number: 1,
+    source_file: 'demo-kub-xray.png',
+    title: 'KUB X-ray',
+    mime_type: 'image/png',
+    width: 4,
+    height: 1,
+    byte_size: 4,
+    image_blob: new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }),
+    thumbnail_blob: null,
+    date: '2021-SEP',
+    notes: null,
+    created_at: new Date().toISOString(),
+  })
+
+  for (const c of CONDITIONS) {
+    const condition: IndexedCondition = {
+      id: c.id,
+      record_id: DEMO_RECORD_ID,
+      name_medical: c.medName,
+      name_common: c.label,
+      system: c.system,
+      cx: c.cx_percent,
+      cy: c.cy_percent,
+      year_frac: c.yearFrac,
+      date: c.date,
+      note: c.note,
+      evidence: c.evidence,
+      local_names: c.localNames,
+      inferred_fields: null,
+    }
+    conditions.put(condition)
+    locations.put({ id: `${c.id}-primary`, condition_id: c.id, cx: c.cx_percent, cy: c.cy_percent, is_primary: true })
+    for (const r of CONDITION_RECORDS[c.id] ?? []) {
+      records.put({
+        id: r.id,
+        condition_id: c.id,
+        record_type: r.type,
+        title: r.label,
+        image_id: r.id === 'r-stone-1' ? DEMO_IMAGE_ID : null,
+        chart_json: null,
+        table_json: null,
+        color: r.color,
+        date: r.date,
+        source_file: null,
+        notes: null,
+        created_at: new Date().toISOString(),
+      })
+    }
+  }
+
+  // Bilateral kidney-stones example: two locations sharing one condition,
+  // straddling the condition's own cx/cy — kept as the multi-location example
+  // within the full port (replaces the single primary location above).
+  const stones = CONDITIONS.find((c) => c.id === 'stones')
+  if (stones) {
+    locations.delete('stones-primary')
+    locations.put({ id: 'stones-left', condition_id: 'stones', cx: stones.cx_percent - 4, cy: stones.cy_percent, is_primary: true })
+    locations.put({ id: 'stones-right', condition_id: 'stones', cx: stones.cx_percent + 4, cy: stones.cy_percent, is_primary: false })
+  }
+
+  await transactionToPromise(transaction)
+}

@@ -134,7 +134,7 @@ and return the complete phase for QA retest.
 6. After fixes, retest defects and the complete phase — not only the changed assertion.
 7. Approve only when all criteria and required tests pass.
 
-Classify an unavailable dev-client build, simulator, or emulator as a blocker, not a pass. State
+Classify an untested browser/viewport combination as a blocker, not a pass. State
 what was and was not proven.
 
 ## Dependencies and Parallel Work
@@ -155,14 +155,14 @@ before assignment.
 
 ## Architecture Constraints
 
-- SQLite remains the complete on-device source of truth; no app-managed remote storage.
+- IndexedDB remains the complete on-device source of truth; no app-managed remote storage.
 - Raw PDF/image bytes are never sent to an LLM — only extracted, redacted text.
-- Condition chat stays session-only and is never persisted to SQLite.
-- Schema changes are additive/backward-compatible (`ALTER_COLUMNS_SQL` pattern); existing demo
-  data and UI must render unchanged after migration.
+- Condition chat stays session-only and is never persisted to IndexedDB.
+- Schema changes are additive/backward-compatible (IndexedDB versioned `onupgradeneeded`
+  migrations); existing demo data and UI must render unchanged after migration.
 - No whole-original-PDF storage — extracted, compressed images only (`userDataReq.md` §5.7).
-- Phase 4 (image capture) and Phase 6's manual tests require an Expo dev-client build; Expo Go
-  will not work.
+- Phase 4 (image capture) and Phase 6's manual tests run in a browser — no separate native build
+  step applies.
 
 ## Validation and Completion
 
@@ -174,8 +174,8 @@ npx expo lint
 npm test
 ```
 
-Dev-client verification (Phase 4, Phase 6) is evidence-gated; an unavailable simulator/emulator
-is a blocker, not a pass.
+Browser verification (Phase 4, Phase 6) is evidence-gated; an untested browser/viewport
+combination is a blocker, not a pass.
 
 The build is complete only when all seven phase files are in `kb4-DONE`, every task in
 `userDataTask.md` is marked `**Status: DONE**`, all required validation is green, no blocker is

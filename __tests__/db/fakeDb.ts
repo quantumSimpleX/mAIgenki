@@ -89,6 +89,11 @@ export function makeFakeDb(): SQLiteDatabase {
       return rows[0] ?? null
     },
 
+    async *getEachAsync(sql: string, params: any[] = []) {
+      const rows = await db.getAllAsync(sql, params)
+      for (const row of rows) yield row
+    },
+
     async getAllAsync(sql: string, params: any[] = []) {
       const pragma = /PRAGMA table_info\((\w+)\)/i.exec(sql)
       if (pragma) return (SCHEMA[pragma[1]] ?? []).map((name) => ({ name }))
