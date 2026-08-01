@@ -385,19 +385,19 @@ export async function enrichFromText(
 
   settled.forEach((outcome, index) => {
     const chunk = chunks[index]
+    if (chunk.imageWorthy && chunk.pageStart != null && chunk.pageEnd != null) {
+      imageSections.push({
+        heading: chunk.sectionHeading,
+        pageStart: chunk.pageStart,
+        pageEnd: chunk.pageEnd,
+        inferredDate: chunk.inferredDate,
+        conditionKeys: outcome.status === 'fulfilled' ? outcome.value.conditions.map(conditionKey) : [],
+      })
+    }
     if (outcome.status === 'fulfilled') {
       succeededCount += 1
       conditions.push(...outcome.value.conditions)
       measurements.push(...outcome.value.measurements)
-      if (chunk.imageWorthy && chunk.pageStart != null && chunk.pageEnd != null) {
-        imageSections.push({
-          heading: chunk.sectionHeading,
-          pageStart: chunk.pageStart,
-          pageEnd: chunk.pageEnd,
-          inferredDate: chunk.inferredDate,
-          conditionKeys: outcome.value.conditions.map(conditionKey),
-        })
-      }
     } else {
       const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)
       partialFailures.push({ section: chunk.sectionHeading || `chunk ${index + 1}`, reason })

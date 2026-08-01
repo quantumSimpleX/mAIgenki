@@ -78,6 +78,19 @@ function uuid(): string {
 
 // "Hundreds of KB, not multi-MB" per the card's acceptance criteria.
 const MAX_IMAGE_BYTES = 500_000
+const MAX_THUMBNAIL_DIMENSION = 320
+
+function createThumbnailBlob(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  if (typeof document === 'undefined') return Promise.resolve(null)
+  const scale = Math.min(1, MAX_THUMBNAIL_DIMENSION / Math.max(canvas.width, canvas.height))
+  const thumbnail = document.createElement('canvas')
+  thumbnail.width = Math.max(1, Math.round(canvas.width * scale))
+  thumbnail.height = Math.max(1, Math.round(canvas.height * scale))
+  const context = thumbnail.getContext('2d')
+  if (!context) return Promise.resolve(null)
+  context.drawImage(canvas, 0, 0, thumbnail.width, thumbnail.height)
+  return new Promise((resolve) => thumbnail.toBlob(resolve, 'image/jpeg', 0.7))
+}
 
 function contactForProvider(
   name: string,
@@ -146,14 +159,16 @@ async function captureRecordImages(
   }
 
   const pageNumbers = [...pages.keys()].sort((a, b) => a - b)
-  await renderPagesToCanvas(
-    uri,
-    pageNumbers,
-    async (pageNumber, canvas) => {
+  try {
+    await renderPagesToCanvas(
+      uri,
+      pageNumbers,
+      async (pageNumber, canvas) => {
       const capture = pages.get(pageNumber)
       if (!capture) return
       try {
         const { blob, byteSize } = await compressToTarget(canvas, MAX_IMAGE_BYTES)
+        const thumbnailBlob = await createThumbnailBlob(canvas)
         const imageId = uuid()
         const createdAt = new Date().toISOString()
         await putRecordImage(idb, {
@@ -167,7 +182,7 @@ async function captureRecordImages(
           height: canvas.height,
           byte_size: byteSize,
           image_blob: blob,
-          thumbnail_blob: null,
+          thumbnail_blob: thumbnailBlob,
           date: capture.inferredDate,
           notes: null,
           created_at: createdAt,
@@ -196,11 +211,17 @@ async function captureRecordImages(
           page: pageNumber, section: capture.heading, error: err instanceof Error ? err.message : String(err),
         })
       }
-    },
-    (pageNumber, err) => trace('image-capture-failed', {
-      page: pageNumber, error: err instanceof Error ? err.message : String(err),
-    }),
-  )
+      },
+      (pageNumber, err) => trace('image-capture-failed', {
+        page: pageNumber, error: err instanceof Error ? err.message : String(err),
+      }),
+    )
+  } catch (err) {
+    trace('image-capture-failed', {
+      pages: pageNumbers,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  }
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────

@@ -19,7 +19,7 @@ Anyone with accumulated medical records — especially elderly, busy professiona
 - **Upload** a PDF (or scanned image) of a medical record.
 - **Extraction** — text is pulled on-device (native PDF/OCR libraries); nothing raw ever leaves the device.
 - **Enrichment** — the extracted plain text (PII redacted first) is sent to an LLM via OpenRouter, which identifies conditions and measurements; clinical threshold rules add further inferred conditions (e.g. persistent high blood pressure → hypertension).
-- **Storage** — the on-device SQLite database contains every structured record and binary asset needed to reconstruct the explorer. Users can export that complete database to a computer or chosen cloud drive and import it later.
+- **Storage** — browser-local IndexedDB contains every structured record and binary asset needed to reconstruct the explorer. Users can export that complete database to a computer or chosen cloud drive and import it later.
 - **Visualization** — `bodymap.tsx` renders the result as stacked, toggleable anatomical layers with a scrollable time rail and a per-condition drill-down.
 
 Built with Expo (React Native), TypeScript, NativeWind, and OpenRouter. See `CLAUDE.md` for architecture, and `doc.InitialCoreBuild/SPEC.md` for the full requirements spec.
