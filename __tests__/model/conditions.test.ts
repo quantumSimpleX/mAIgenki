@@ -38,8 +38,8 @@ describe('LLM condition mapping', () => {
 })
 
 describe('CONDITIONS data', () => {
-  it('has 22 conditions', () => {
-    expect(CONDITIONS.length).toBe(22)
+  it('has the complete demo condition set', () => {
+    expect(CONDITIONS.length).toBe(23)
   })
   it('every system id is valid', () => {
     for (const c of CONDITIONS) expect(ALL_SYSTEMS).toContain(c.system)
@@ -73,7 +73,7 @@ describe('getLocalName', () => {
 
 describe('CONDITION_RECORDS', () => {
   const VALID = new Set(['TREND', 'ECG', 'IMAGING', 'LABS', 'SPIRO', 'SCAN'])
-  it('has an entry for all 22 condition ids', () => {
+  it('has an entry for all condition ids', () => {
     for (const c of CONDITIONS) expect(CONDITION_RECORDS[c.id]).toBeDefined()
   })
   it('every record type is valid', () => {

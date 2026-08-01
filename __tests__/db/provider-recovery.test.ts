@@ -77,7 +77,7 @@ describe('openDatabaseWithRecovery — restore-on-heal', () => {
     expect(db).not.toBeNull()
     expect(restoreSpy).not.toHaveBeenCalled()
     const conds = await getConditions(db!)
-    expect(conds.length).toBe(22) // reseeded demo data
+    expect(conds.length).toBe(23) // reseeded demo data
   })
 
   it('CANTOPEN, snapshot present, restore throws → usable seeded DB', async () => {
@@ -92,7 +92,7 @@ describe('openDatabaseWithRecovery — restore-on-heal', () => {
 
     expect(db).not.toBeNull()
     const conds = await getConditions(db!)
-    expect(conds.length).toBe(22) // seeded state survives the failed restore
+    expect(conds.length).toBe(23) // seeded state survives the failed restore
     expect(conds.find((c) => c.id === 'htn')!.cx_percent).not.toBeCloseTo(42.5, 2)
     expect(warn).toHaveBeenCalledWith(
       '[SQLite] snapshot restore failed, continuing with seeded data:', 'restore boom',
@@ -192,7 +192,7 @@ describe('openDatabaseWithRecovery — restore-on-boot guard (B-P8-3)', () => {
     expect(db).not.toBeNull()
     expect(restoreSpy).not.toHaveBeenCalled()
     const conds = await getConditions(db!)
-    expect(conds.length).toBe(22) // seeded demo
+    expect(conds.length).toBe(23) // seeded demo
   })
 
   it('guard restore throws → still returns a usable seeded DB', async () => {
@@ -205,7 +205,7 @@ describe('openDatabaseWithRecovery — restore-on-boot guard (B-P8-3)', () => {
 
     expect(db).not.toBeNull()
     const conds = await getConditions(db!)
-    expect(conds.length).toBe(22) // seeded state survives the failed guard
+    expect(conds.length).toBe(23) // seeded state survives the failed guard
     expect(warn).toHaveBeenCalledWith(
       '[SQLite] restore-on-boot failed, continuing with live data:', 'boot boom',
     )

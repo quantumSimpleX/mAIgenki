@@ -136,7 +136,7 @@ describe('backup / restore', () => {
     expect(backup.formatVersion).toBe(1)
     expect(typeof backup.exportedAt).toBe('string')
     expect(Object.keys(backup.tables).sort()).toEqual([...BACKUP_TABLES].sort())
-    expect(backup.tables.conditions.length).toBe(22)
+    expect(backup.tables.conditions.length).toBe(23)
   })
 
   it('round-trips: mutate then restore returns original values and row counts', async () => {
@@ -155,7 +155,7 @@ describe('backup / restore', () => {
     // Restore should overwrite the mutation.
     await restoreBackup(db, backup)
     conds = await getConditions(db)
-    expect(conds.length).toBe(22)
+    expect(conds.length).toBe(23)
     expect(conds.find((c) => c.id === 'htn')!.cx_percent).toBeCloseTo(origCx, 2)
 
     // Row counts per table match the backup exactly.
@@ -187,7 +187,7 @@ describe('backup / restore', () => {
       expect(after.tables[t].length).toBe(before.tables[t].length)
     }
     const conds = await getConditions(db)
-    expect(conds.length).toBe(22)
+    expect(conds.length).toBe(23)
   })
 
   it('tolerates schema drift: unknown columns in a backup row are skipped', async () => {
@@ -200,7 +200,7 @@ describe('backup / restore', () => {
     await expect(restoreBackup(db, backup)).resolves.toBeUndefined()
 
     const conds = await getConditions(db)
-    expect(conds.length).toBe(22)
+    expect(conds.length).toBe(23)
     // The known columns still restored correctly.
     expect(conds.find((c) => c.id === 'htn')).toBeDefined()
   })

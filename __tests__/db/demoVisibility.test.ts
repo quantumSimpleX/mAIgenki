@@ -13,7 +13,7 @@ async function freshSeededDb(): Promise<SQLiteDatabase> {
 describe('demo condition visibility', () => {
   it('keeps demo rows stored but hides them after user data exists', async () => {
     const db = await freshSeededDb()
-    expect((await getConditions(db)).length).toBe(22)
+    expect((await getConditions(db)).length).toBe(23)
 
     const recordId = await insertHealthRecord(db, {
       filename: 'user-lab.pdf',
@@ -30,7 +30,7 @@ describe('demo condition visibility', () => {
 
     const storedRows = await db.getAllAsync('SELECT * FROM conditions')
     const visible = await getConditions(db)
-    expect(storedRows.length).toBe(23)
+    expect(storedRows.length).toBe(24) // 23 demo conditions + 1 uploaded user condition
     expect(visible).toHaveLength(1)
     expect(visible[0].system).toBe('cardiovascular')
   })
@@ -52,8 +52,8 @@ describe('demo condition visibility', () => {
 
     const demoVisible = await getConditions(db, 'demo')
     const storedRows = await db.getAllAsync('SELECT * FROM conditions')
-    expect(storedRows.length).toBe(23)
-    expect(demoVisible).toHaveLength(22)
+    expect(storedRows.length).toBe(24) // 23 demo conditions + 1 uploaded user condition
+    expect(demoVisible).toHaveLength(23)
     expect(demoVisible.some((c) => c.id === 'htn')).toBe(true)
   })
 })

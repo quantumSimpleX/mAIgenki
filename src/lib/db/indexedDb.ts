@@ -394,6 +394,12 @@ export function designConditionToConditionInput(c: DesignCondition): ConditionIn
     local_names: c.localNames,
     cx: c.cx_percent,
     cy: c.cy_percent,
+    locations: c.locations?.map((location) => ({
+      cx: location.cx_percent,
+      cy: location.cy_percent,
+      anatomical_location: location.anatomical_location,
+      laterality: location.laterality,
+    })),
   }
 }
 
@@ -447,7 +453,7 @@ export async function getIndexedConditionDots(db: IDBDatabase): Promise<IndexedC
   })
 }
 
-// Ports the full hardcoded demo dataset (all 22 CONDITIONS + their
+// Ports the full hardcoded demo dataset (all CONDITIONS + their
 // CONDITION_RECORDS, per model/conditions.ts) so the IndexedDB-backed demo
 // experience is visually identical to the expo-sqlite one (see seed.ts's
 // seedDemoData, the equivalent this replaces). `put()` is already an upsert

@@ -14,7 +14,7 @@ describe('IndexedDB backup adapter', () => {
     await restoreIndexedDbBackup(db, backup)
 
     const dots = await getIndexedConditionDots(db)
-    expect(dots).toHaveLength(CONDITIONS.length + 1) // +1 for the bilateral 'stones' condition's second location
+    expect(dots).toHaveLength(CONDITIONS.length + 5) // stones +1, rotator +1, fractures +3 secondary locations
     const stonesDots = dots.filter((d) => d.conditionId === 'stones')
     expect(stonesDots).toEqual([
       expect.objectContaining({ conditionId: 'stones', cx_percent: 40.32, cy_percent: 37.12 }),

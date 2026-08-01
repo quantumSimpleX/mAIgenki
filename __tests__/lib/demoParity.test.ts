@@ -10,7 +10,7 @@
 // What's compared: `getConditions` (SQLite, the function bodymap.tsx's
 // useConditions() hook called before Task 2.13) vs `getIndexedConditions`
 // (IndexedDB, what it calls now) — id, system, label, medName, date, yearFrac,
-// cx_percent, cy_percent for every one of the 22 demo conditions. This is
+// cx_percent, cy_percent for every demo condition. This is
 // exactly the data useConditions() feeds into GhostDots/BodySvg/ConditionRipples
 // today (per-condition dots; the bilateral 'stones' second location is a
 // condition_locations-only detail not yet consumed by rendering — see
@@ -24,7 +24,7 @@ import { openIndexedDb, seedIndexedDbDemoData, getIndexedConditions } from '@/li
 import { CONDITIONS, ALL_SYSTEMS } from '@/model/conditions'
 
 describe('Demo visual parity — SQLite (pre-cutover) vs IndexedDB (post-cutover)', () => {
-  it('renders the same 22 condition dots, in the same positions, on both backends', async () => {
+  it('renders the same demo conditions, in the same positions, on both backends', async () => {
     const sqliteDb = makeFakeDb()
     await initDatabase(sqliteDb)
     await seedDemoData(sqliteDb)

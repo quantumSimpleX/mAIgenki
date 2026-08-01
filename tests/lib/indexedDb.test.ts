@@ -7,12 +7,14 @@ describe('IndexedDB vertical slice', () => {
     const db = await openIndexedDb(`maigenki-test-${Date.now()}`)
     await seedIndexedDbDemoData(db)
     const dots = await getIndexedConditionDots(db)
-    expect(dots).toHaveLength(CONDITIONS.length + 1) // +1 for the bilateral 'stones' condition's second location
+    expect(dots).toHaveLength(CONDITIONS.length + 5) // stones +1, rotator +1, fractures +3 secondary locations
     const stonesDots = dots.filter((d) => d.conditionId === 'stones')
     expect(stonesDots).toEqual([
       expect.objectContaining({ conditionId: 'stones', cx_percent: 40.32, cy_percent: 37.12 }),
       expect.objectContaining({ conditionId: 'stones', cx_percent: 48.32, cy_percent: 37.12 }),
     ])
+    expect(dots.filter((d) => d.conditionId === 'rotator')).toHaveLength(2)
+    expect(dots.filter((d) => d.conditionId === 'fractures')).toHaveLength(4)
     db.close()
   })
 
