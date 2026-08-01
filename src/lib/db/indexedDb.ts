@@ -372,7 +372,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
   })
 
   for (const c of input.conditions) {
-    const dateForTimeline = c.date_diagnosed ?? c.date_onset ?? new Date().toISOString().slice(0, 10)
+    const dateForTimeline = c.date_diagnosed ?? c.date_onset
     const { id: conditionId, cx, cy } = await putIndexedCondition(db, {
       id: c.id ?? uuid(),
       record_id: recordId,
@@ -382,7 +382,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
       status: c.status,
       cx: c.cx ?? undefined,
       cy: c.cy ?? undefined,
-      year_frac: parseDateFrac(dateForTimeline),
+      year_frac: dateForTimeline ? parseDateFrac(dateForTimeline) : 0,
       date: dateForTimeline,
       note: c.notes ?? null,
       evidence: c.evidence,
@@ -605,13 +605,4 @@ export async function seedIndexedDbDemoData(db: IDBDatabase): Promise<void> {
     }
   }
 
-  // Bilateral kidney-stones example: two locations sharing one condition,
-  // straddling the condition's own cx/cy — kept as the multi-location example
-  // within the full port (replaces the single primary location persistEnrichmentResult wrote).
-  const stones = CONDITIONS.find((c) => c.id === 'stones')
-  if (stones) {
-    await deleteConditionLocation(db, 'stones-primary')
-    await putIndexedConditionLocation(db, { id: 'stones-left', condition_id: 'stones', cx: stones.cx_percent - 4, cy: stones.cy_percent, is_primary: true })
-    await putIndexedConditionLocation(db, { id: 'stones-right', condition_id: 'stones', cx: stones.cx_percent + 4, cy: stones.cy_percent, is_primary: false })
-  }
 }

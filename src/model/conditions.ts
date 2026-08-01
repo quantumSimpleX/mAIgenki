@@ -323,6 +323,10 @@ export const CONDITIONS: DesignCondition[] = [
     date: '2016-SEP-05', yearFrac: parseDateFrac('2016-SEP-05'), cx_percent: 44.32, cy_percent: 37.12,
     note: '4mm left ureteral calculus — calcium oxalate. Passed spontaneously. Low-oxalate diet commenced.',
     evidence: 'Dr. Kevin Williams · Northwestern Memorial Hospital · Chicago, IL, US',
+    locations: [
+      { cx_percent: 40.32, cy_percent: 37.12, anatomical_location: 'left kidney', laterality: 'left' },
+      { cx_percent: 48.32, cy_percent: 37.12, anatomical_location: 'right kidney', laterality: 'right' },
+    ],
   },
   {
     id: 'uti', system: 'renal',

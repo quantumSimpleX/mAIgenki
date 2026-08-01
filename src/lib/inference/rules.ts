@@ -58,6 +58,21 @@ function inferred(
   }
 }
 
+function attachSupportingMeasurementDate(condition: ConditionInput, measurements: MeasurementInput[]): ConditionInput {
+  if (condition.date_diagnosed || condition.date_onset) return condition
+  const supportingMeasurement = measurements.find((measurement) => {
+    const value = String(measurement.value_numeric)
+    return Boolean(condition.evidence?.includes(value)) &&
+      (!measurement.unit || Boolean(condition.evidence?.includes(measurement.unit)))
+  })
+  if (!supportingMeasurement?.date) return condition
+  return {
+    ...condition,
+    date_onset: supportingMeasurement.date,
+    date_diagnosed: supportingMeasurement.date,
+  }
+}
+
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export function applyInferenceRules(
@@ -205,5 +220,5 @@ export function applyInferenceRules(
     }
   }
 
-  return results
+  return results.map((condition) => attachSupportingMeasurementDate(condition, measurements))
 }

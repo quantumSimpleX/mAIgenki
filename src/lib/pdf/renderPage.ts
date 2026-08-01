@@ -55,7 +55,12 @@ export async function renderPageToCanvas(uri: string, pageNumber: number): Promi
 
 // Render several pages from one parsed PDF document. Reopening and reparsing
 // the entire file for every page can make large medical PDFs appear hung.
-export async function renderPagesToCanvas(uri: string, pageNumbers: number[]): Promise<Map<number, HTMLCanvasElement>> {
+export async function renderPagesToCanvas(
+ uri: string,
+ pageNumbers: number[],
+ onPage?: (pageNumber: number, canvas: HTMLCanvasElement) => Promise<void> | void,
+ onPageError?: (pageNumber: number, error: unknown) => void,
+): Promise<Map<number, HTMLCanvasElement>> {
  if (typeof document === 'undefined') {
  throw new Error('renderPagesToCanvas requires browser environment (document/HTMLCanvasElement)')
  }
@@ -66,7 +71,7 @@ export async function renderPagesToCanvas(uri: string, pageNumbers: number[]): P
  const bytes = new Uint8Array(await (await fetch(uri)).arrayBuffer())
  const loadingTask = pdfjs.getDocument({ data: bytes })
  const doc = await loadingTask.promise
- const canvases = new Map<number, HTMLCanvasElement>()
+ const canvases = onPage ? null : new Map<number, HTMLCanvasElement>()
  try {
    for (const pageNumber of pageNumbers) {
      try {
@@ -78,12 +83,14 @@ export async function renderPagesToCanvas(uri: string, pageNumbers: number[]): P
        const canvasContext = canvas.getContext('2d')
        if (!canvasContext) throw new Error('Canvas 2D context unavailable')
        await page.render({ canvas, canvasContext, viewport }).promise
-       canvases.set(pageNumber, canvas)
-     } catch {
+       if (onPage) await onPage(pageNumber, canvas)
+       else canvases?.set(pageNumber, canvas)
+     } catch (error) {
+       onPageError?.(pageNumber, error)
        // Keep rendering the remaining pages if one page is malformed.
      }
    }
-   return canvases
+   return canvases ?? new Map<number, HTMLCanvasElement>()
  } finally {
    await loadingTask.destroy()
  }

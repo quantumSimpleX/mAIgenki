@@ -146,25 +146,13 @@ async function captureRecordImages(
   }
 
   const pageNumbers = [...pages.keys()].sort((a, b) => a - b)
-  let canvases: Map<number, HTMLCanvasElement>
-  try {
-    canvases = await renderPagesToCanvas(uri, pageNumbers)
-  } catch (err) {
-    trace('image-capture-failed', {
-      pages: pageNumbers,
-      error: err instanceof Error ? err.message : String(err),
-    })
-    return
-  }
-
-  for (const pageNumber of pageNumbers) {
-    const capture = pages.get(pageNumber)
-    const canvas = canvases.get(pageNumber)
-    if (!capture || !canvas) {
-      trace('image-capture-failed', { page: pageNumber, error: 'page rendering failed' })
-      continue
-    }
-    try {
+  await renderPagesToCanvas(
+    uri,
+    pageNumbers,
+    async (pageNumber, canvas) => {
+      const capture = pages.get(pageNumber)
+      if (!capture) return
+      try {
         const { blob, byteSize } = await compressToTarget(canvas, MAX_IMAGE_BYTES)
         const imageId = uuid()
         const createdAt = new Date().toISOString()
@@ -208,7 +196,11 @@ async function captureRecordImages(
           page: pageNumber, section: capture.heading, error: err instanceof Error ? err.message : String(err),
         })
       }
-  }
+    },
+    (pageNumber, err) => trace('image-capture-failed', {
+      page: pageNumber, error: err instanceof Error ? err.message : String(err),
+    }),
+  )
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
