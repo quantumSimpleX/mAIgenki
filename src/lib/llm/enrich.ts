@@ -276,6 +276,16 @@ function latestConditionStatus(a: ConditionInput, b: ConditionInput): ConditionI
   return b.status
 }
 
+function latestStatusFromOccurrences(occurrences: ConditionInput[]): ConditionInput['status'] {
+  let latest = occurrences[0]
+  for (const occurrence of occurrences.slice(1)) {
+    const latestDate = latest.date_diagnosed ?? latest.date_onset
+    const occurrenceDate = occurrence.date_diagnosed ?? occurrence.date_onset
+    if (!latestDate || (occurrenceDate && occurrenceDate >= latestDate)) latest = occurrence
+  }
+  return latest.status
+}
+
 // Merges two occurrences of "the same" condition found in different chunks:
 // earliest date wins, evidence/care_events/locations concatenate, other
 // scalar fields prefer whichever occurrence already has a non-null value.
@@ -305,13 +315,15 @@ function mergeTwoConditions(a: ConditionInput, b: ConditionInput): ConditionInpu
 }
 
 function mergeConditions(items: ConditionInput[]): ConditionInput[] {
-  const byKey = new Map<string, ConditionInput>()
+  const byKey = new Map<string, ConditionInput[]>()
   for (const item of items) {
     const key = conditionKey(item)
-    const existing = byKey.get(key)
-    byKey.set(key, existing ? mergeTwoConditions(existing, item) : item)
+    byKey.set(key, [...(byKey.get(key) ?? []), item])
   }
-  return Array.from(byKey.values())
+  return Array.from(byKey.values()).map((occurrences) => {
+    const merged = occurrences.slice(1).reduce(mergeTwoConditions, occurrences[0])
+    return { ...merged, status: latestStatusFromOccurrences(occurrences) }
+  })
 }
 
 function mergeMeasurements(items: MeasurementInput[]): MeasurementInput[] {
