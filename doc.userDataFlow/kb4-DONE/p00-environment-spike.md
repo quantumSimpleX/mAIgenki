@@ -44,6 +44,8 @@ Full-suite regression check (`npx jest --no-coverage`, no source files changed b
 
 ## Implementation Record
 
+> **Removal note (2026-07-31):** The temporary `_spike` probe files used for this phase were removed after their findings were recorded. Their conclusions are preserved below: Jest cannot exercise the browser Canvas/PDF.js path; Jest's cross-VM `structuredClone` does not preserve IndexedDB `Blob` values; and the available PDF fixture was single-page, so multi-page extraction scaling remains unproven.
+
 Spike files added (throwaway, per card scope — no schema/app-code changes):
 - `tests/lib/_spike01-pdfjs-canvas-blob.test.ts`
 - `tests/lib/_spike02-indexeddb-blob.test.ts`

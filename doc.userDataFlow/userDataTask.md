@@ -20,18 +20,18 @@ Ground truth used throughout (confirmed by direct file reads, not assumed):
 
 **Status: DONE** (2026-07-31, QA-approved, `doc.userDataFlow/kb4-DONE/p00-environment-spike.md`). No schema or app-code changes. De-risks the two open items from the PRD (§9) before Phase 4 depends on them. The native-library spike from the pre-pivot draft is gone — `pdfjs-dist` already handles PDF page rendering in the browser.
 
-**Task 0.1 — Confirm `pdfjs-dist` page → Canvas → Blob** — **BLOCKED, documented.**
-Files: throwaway spike script only (`tests/lib/_spike01-pdfjs-canvas-blob.test.ts`).
+**Task 0.1 — Confirm `pdfjs-dist` page → Canvas → Blob** — **BLOCKED, documented in `kb4-DONE/p00-environment-spike.md`; the temporary probe was removed after its findings were recorded.**
+The temporary probe was removed after its findings were recorded in `kb4-DONE/p00-environment-spike.md`.
 This project's Jest `testEnvironment` (jest-expo → `@react-native/jest-preset`'s `react-native-env.js`, extending `jest-environment-node`) is not jsdom: no `document`/`HTMLCanvasElement`, and `node-canvas` isn't installed — no `<canvas>` is obtainable in Jest at all. Separately, `pdfjs-dist` ^6.1.200 ships only `.mjs` builds that fail to import under this project's Jest transform config (`import.meta` error outside a real ES module). **Conclusion for Phase 4**: `renderPageToBlob` (Task 4.1) cannot be unit-tested in Jest and must be verified in a real browser (manual or Playwright) instead.
 Depends on: none.
 
-**Task 0.2 — Verify IndexedDB Blob storage/retrieval** — **BLOCKED, documented.**
-Files: throwaway test script (`tests/lib/_spike02-indexeddb-blob.test.ts`).
+**Task 0.2 — Verify IndexedDB Blob storage/retrieval** — **BLOCKED, documented in `kb4-DONE/p00-environment-spike.md`; the temporary probe was removed after its findings were recorded.**
+The temporary probe was removed after its findings were recorded in `kb4-DONE/p00-environment-spike.md`.
 A `Blob` written via `objectStore.put()` under `fake-indexeddb` does **not** read back as a `Blob` via `get()`/`getAll()` in this project's specific Jest environment — it comes back as an empty `{}`. Root cause: `fake-indexeddb` clones inserted values via the global `structuredClone()`, and Node's `structuredClone()` fails to clone a `Blob` across this Jest environment's per-file VM context isolation. Reproduces independent of `fake-indexeddb` (`structuredClone(new Blob([...]))` alone fails the same way); does not reproduce outside Jest (plain `node -e`); expected to work correctly in a real browser. **Conclusion for Phase 2/4**: any Jest test asserting Blob fidelity via direct `put()`/`get()` will spuriously fail — the only Jest-provable Blob-fidelity path is the base64 JSON export/import round trip (`blob.ts`/`indexedDbBackup.ts`'s `encodeBlobFields`/`decodeBlobFields`), already exercised by Task 2.11. Direct-storage Blob correctness can only be verified in a real browser.
 Depends on: none.
 
-**Task 0.3 — Benchmark per-page text extraction** — **Done, with caveat.**
-Files: throwaway script using `pdfjs-dist` (`tests/lib/_spike03-pdf-text-timing.test.ts`, `.mjs`).
+**Task 0.3 — Benchmark per-page text extraction** — **Done, with caveat; the temporary timing probe was removed after its findings were recorded in `kb4-DONE/p00-environment-spike.md`.**
+The temporary timing probe was removed after its findings were recorded in `kb4-DONE/p00-environment-spike.md`.
 Both repo PDF fixtures (`.playwright-mcp/maigenki-fixture-multi.pdf`, `maigenki-fixture-scanned.pdf`) are actually single-page despite their names (1265 and 581 bytes) — no true multi-page timing data exists in the repo. Measured single-page extraction time ~26.65ms, dominated by fixed load/parse overhead, not meaningfully extrapolable to per-page cost at scale. Task 3.1 should treat per-page timing as unproven at scale and prefer the length-proportional estimate unless a real multi-page fixture is added later.
 Depends on: none.
 
