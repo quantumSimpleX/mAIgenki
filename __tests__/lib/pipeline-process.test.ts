@@ -140,7 +140,12 @@ describe('processHealthRecord — persistence (real fake DB)', () => {
     await upsertSetting(db, 'openrouter_api_key', 'sk-or-stored')
     await processHealthRecord({ uri: 'file:///r.pdf', db, idb })
 
-    expect(mockEnrich).toHaveBeenCalledWith(expect.any(String), 'sk-or-stored', expect.any(Array))
+    // enrichFromText also receives routing options (db/profile/onTrace/pageBreaks)
+    // and an onChunkProgress callback once a resolved profile exists (pipeline.ts) —
+    // match the full argument list rather than the first 3.
+    expect(mockEnrich).toHaveBeenCalledWith(
+      expect.any(String), 'sk-or-stored', expect.any(Array), expect.any(Object), expect.any(Function),
+    )
     idb.close()
   })
 
@@ -152,7 +157,9 @@ describe('processHealthRecord — persistence (real fake DB)', () => {
     const idb = await freshIdb()
     await processHealthRecord({ uri: 'file:///r.pdf', db, idb })
 
-    expect(mockEnrich).toHaveBeenCalledWith(expect.any(String), '', expect.any(Array))
+    expect(mockEnrich).toHaveBeenCalledWith(
+      expect.any(String), '', expect.any(Array), expect.any(Object), expect.any(Function),
+    )
     idb.close()
   })
 })

@@ -148,7 +148,11 @@ describe('openDatabaseWithRecovery — restore-on-boot guard (B-P8-3)', () => {
     expect(db).not.toBeNull()
     const recs = await db!.getAllAsync<{ id: string }>('SELECT * FROM health_records')
     expect(recs.some((r) => r.id === 'user-rec-1')).toBe(true)
-    const conds = await getConditions(db!)
+    // 'demo' mode, not the default 'auto' — getConditions('auto') now hides
+    // demo conditions once a user record exists (queries.ts's visibility
+    // rule), so 'htn' (demo-seeded) is correctly absent from 'auto' here.
+    // This test only cares whether the snapshot's position data survived.
+    const conds = await getConditions(db!, 'demo')
     expect(conds.find((c) => c.id === 'htn')!.cx_percent).toBeCloseTo(42.5, 2)
   })
 
