@@ -396,8 +396,13 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     // demo data reloaded) upserts each secondary location in place instead of
     // accumulating a fresh duplicate row per run.
     for (const [index, loc] of (c.locations ?? []).entries()) {
+      const locationPosition = defaultConditionPosition(
+        normalizeSystemId(c.system),
+        `${c.name_medical}:${loc.anatomical_location ?? ''}:${loc.laterality ?? ''}:${index}`,
+      )
       await putIndexedConditionLocation(db, {
-        id: `${conditionId}-loc-${index}`, condition_id: conditionId, cx: loc.cx ?? cx, cy: loc.cy ?? cy, is_primary: false,
+        id: `${conditionId}-loc-${index}`, condition_id: conditionId,
+        cx: loc.cx ?? locationPosition.cx, cy: loc.cy ?? locationPosition.cy, is_primary: false,
         anatomical_location: loc.anatomical_location ?? null,
         laterality: loc.laterality ?? null,
         evidence: loc.evidence ?? null,

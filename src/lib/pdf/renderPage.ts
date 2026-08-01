@@ -53,6 +53,42 @@ export async function renderPageToCanvas(uri: string, pageNumber: number): Promi
   }
 }
 
+// Render several pages from one parsed PDF document. Reopening and reparsing
+// the entire file for every page can make large medical PDFs appear hung.
+export async function renderPagesToCanvas(uri: string, pageNumbers: number[]): Promise<Map<number, HTMLCanvasElement>> {
+ if (typeof document === 'undefined') {
+ throw new Error('renderPagesToCanvas requires browser environment (document/HTMLCanvasElement)')
+ }
+
+ const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+ const workerMod = await import('pdfjs-dist/legacy/build/pdf.worker.mjs')
+ ;(globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker = workerMod
+ const bytes = new Uint8Array(await (await fetch(uri)).arrayBuffer())
+ const loadingTask = pdfjs.getDocument({ data: bytes })
+ const doc = await loadingTask.promise
+ const canvases = new Map<number, HTMLCanvasElement>()
+ try {
+   for (const pageNumber of pageNumbers) {
+     try {
+       const page = await doc.getPage(pageNumber)
+       const viewport = page.getViewport({ scale: RENDER_SCALE })
+       const canvas = document.createElement('canvas')
+       canvas.width = viewport.width
+       canvas.height = viewport.height
+       const canvasContext = canvas.getContext('2d')
+       if (!canvasContext) throw new Error('Canvas 2D context unavailable')
+       await page.render({ canvas, canvasContext, viewport }).promise
+       canvases.set(pageNumber, canvas)
+     } catch {
+       // Keep rendering the remaining pages if one page is malformed.
+     }
+   }
+   return canvases
+ } finally {
+   await loadingTask.destroy()
+ }
+}
+
 function canvasToBlob(canvas: HTMLCanvasElement, mimeType: string, quality: number): Promise<Blob | null> {
   return new Promise((resolve) => canvas.toBlob(resolve, mimeType, quality))
 }

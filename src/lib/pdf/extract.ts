@@ -23,6 +23,9 @@ export type ExtractionResult = {
   // callers that need it (src/lib/pipeline.ts) treat a missing value the same
   // as an empty array.
   pageBreaks?: number[]
+  // Pages with no embedded text must still be retained when a mixed PDF also
+  // contains enough text overall to proceed through the normal pipeline.
+  imageOnlyPages?: number[]
 }
 
 // Even split of `textLength` across `pageCount` pages — used where the
@@ -33,10 +36,16 @@ function estimatePageBreaks(textLength: number, pageCount: number): number[] {
 }
 
 // Shared density check: too few characters per page ⇒ scanned/image-only PDF.
-function classify(text: string, pageCount: number, pageBreaks: number[]): ExtractionResult {
+function classify(text: string, pageCount: number, pageBreaks: number[], pageCharCounts?: number[]): ExtractionResult {
   const charsPerPage = pageCount > 0 ? text.length / pageCount : 0
   const method: 'text' | 'ocr' = charsPerPage >= MIN_CHARS_PER_PAGE ? 'text' : 'ocr'
-  return { text, pageCount, method, pageBreaks }
+  const imageOnlyPages = pageCharCounts
+    ?.map((count, index) => count === 0 ? index + 1 : null)
+    .filter((page): page is number => page != null)
+  return {
+    text, pageCount, method, pageBreaks,
+    ...(imageOnlyPages && imageOnlyPages.length > 0 ? { imageOnlyPages } : {}),
+  }
 }
 
 export async function extractTextFromPDF(uri: string): Promise<ExtractionResult> {
@@ -78,6 +87,7 @@ async function extractOnWeb(uri: string): Promise<ExtractionResult> {
   // each page's real starting offset (rather than an estimate) costs nothing
   // extra — just note the running length before each page is appended.
   const parts: string[] = []
+  const pageCharCounts: number[] = []
   const pageBreaks: number[] = []
   let offset = 0
   const pageCount = doc.numPages
@@ -87,11 +97,12 @@ async function extractOnWeb(uri: string): Promise<ExtractionResult> {
     const pageText = content.items
       .map((item) => ('str' in item ? item.str : ''))
       .join(' ')
+    pageCharCounts.push(pageText.trim().length)
     pageBreaks.push(offset)
     parts.push(pageText)
     offset += pageText.length + 1 // +1 for the '\n' join separator below
   }
   await loadingTask.destroy()
 
-  return classify(parts.join('\n').trim(), pageCount, pageBreaks)
+  return classify(parts.join('\n').trim(), pageCount, pageBreaks, pageCharCounts)
 }

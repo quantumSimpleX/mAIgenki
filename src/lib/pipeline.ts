@@ -10,7 +10,7 @@ import {
   type EnrichedInput, type PersistEnrichmentResult,
 } from './db/indexedDb'
 import { redactPIIWithOffsetMap, extractProviderContacts } from './privacy/redact'
-import { renderPageToCanvas } from './pdf/renderPage'
+import { renderPagesToCanvas } from './pdf/renderPage'
 import { compressToTarget } from './media/compress'
 
 export type { EnrichedInput }
@@ -104,19 +104,67 @@ async function captureRecordImages(
   recordId: string,
   filename: string,
   imageSections: import('./llm/enrich').ImageWorthySection[] | undefined,
+  imageOnlyPages: number[] | undefined,
   conditionsWithKeys: { id: string; key: string }[],
   trace: (event: string, details?: Record<string, unknown>) => void,
 ): Promise<void> {
-  if (!imageSections || imageSections.length === 0) return
+  if ((!imageSections || imageSections.length === 0) && (!imageOnlyPages || imageOnlyPages.length === 0)) return
 
-  for (const section of imageSections) {
+  type PageCapture = {
+    pageNumber: number
+    heading: string | null
+    inferredDate: string | null
+    conditionIds: Set<string>
+  }
+  const pages = new Map<number, PageCapture>()
+  for (const section of imageSections ?? []) {
     const matchedConditionIds = conditionsWithKeys
       .filter((c) => section.conditionKeys.includes(c.key))
       .map((c) => c.id)
-
     for (let pageNumber = section.pageStart; pageNumber <= section.pageEnd; pageNumber += 1) {
-      try {
-        const canvas = await renderPageToCanvas(uri, pageNumber)
+      const existing = pages.get(pageNumber) ?? {
+        pageNumber,
+        heading: section.heading || null,
+        inferredDate: section.inferredDate,
+        conditionIds: new Set<string>(),
+      }
+      for (const conditionId of matchedConditionIds) existing.conditionIds.add(conditionId)
+      if (!existing.heading && section.heading) existing.heading = section.heading
+      if (!existing.inferredDate) existing.inferredDate = section.inferredDate
+      pages.set(pageNumber, existing)
+    }
+  }
+  for (const pageNumber of imageOnlyPages ?? []) {
+    if (!pages.has(pageNumber)) {
+      pages.set(pageNumber, {
+        pageNumber,
+        heading: 'Image-only page',
+        inferredDate: null,
+        conditionIds: new Set<string>(),
+      })
+    }
+  }
+
+  const pageNumbers = [...pages.keys()].sort((a, b) => a - b)
+  let canvases: Map<number, HTMLCanvasElement>
+  try {
+    canvases = await renderPagesToCanvas(uri, pageNumbers)
+  } catch (err) {
+    trace('image-capture-failed', {
+      pages: pageNumbers,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    return
+  }
+
+  for (const pageNumber of pageNumbers) {
+    const capture = pages.get(pageNumber)
+    const canvas = canvases.get(pageNumber)
+    if (!capture || !canvas) {
+      trace('image-capture-failed', { page: pageNumber, error: 'page rendering failed' })
+      continue
+    }
+    try {
         const { blob, byteSize } = await compressToTarget(canvas, MAX_IMAGE_BYTES)
         const imageId = uuid()
         const createdAt = new Date().toISOString()
@@ -125,42 +173,41 @@ async function captureRecordImages(
           record_id: recordId,
           page_number: pageNumber,
           source_file: filename,
-          title: section.heading || null,
+          title: capture.heading,
           mime_type: 'image/jpeg',
           width: canvas.width,
           height: canvas.height,
           byte_size: byteSize,
           image_blob: blob,
           thumbnail_blob: null,
-          date: section.inferredDate,
+          date: capture.inferredDate,
           notes: null,
           created_at: createdAt,
         })
-        for (const conditionId of matchedConditionIds) {
+        for (const conditionId of capture.conditionIds) {
           await putConditionRecord(idb, {
             id: uuid(),
             condition_id: conditionId,
             record_type: 'image',
-            title: section.heading || null,
+            title: capture.heading,
             image_id: imageId,
             chart_json: null,
             table_json: null,
             color: null,
-            date: section.inferredDate,
+            date: capture.inferredDate,
             source_file: filename,
             notes: null,
             created_at: createdAt,
           })
         }
         trace('image-captured', {
-          page: pageNumber, section: section.heading, byteSize, linkedConditions: matchedConditionIds.length,
+          page: pageNumber, section: capture.heading, byteSize, linkedConditions: capture.conditionIds.size,
         })
       } catch (err) {
         trace('image-capture-failed', {
-          page: pageNumber, section: section.heading, error: err instanceof Error ? err.message : String(err),
+          page: pageNumber, section: capture.heading, error: err instanceof Error ? err.message : String(err),
         })
       }
-    }
   }
 }
 
@@ -222,6 +269,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   // image/OCR path has no page structure to report); undefined here just
   // means analyzeRecordStructure falls back to page-less sections.
   let pageBreaks: number[] | undefined
+  let imageOnlyPages: number[] | undefined
 
   report(0, 0.05)
   const extractionStartedAt = Date.now()
@@ -236,6 +284,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
     text = extracted.text
     pageCount = extracted.pageCount
     pageBreaks = extracted.pageBreaks
+    imageOnlyPages = extracted.imageOnlyPages
     extractionMethod = 'text'
   } else {
     text = await extractTextFromImage(uri)
@@ -376,10 +425,10 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   // condition_records can reference the same condition ids just written;
   // failures for individual pages are caught inside captureRecordImages and
   // never surface here — this step must never fail the overall record.
-  if (enrichment.imageSections && enrichment.imageSections.length > 0) {
+  if ((enrichment.imageSections && enrichment.imageSections.length > 0) || (imageOnlyPages && imageOnlyPages.length > 0)) {
     const conditionsWithKeys = llmConditionsWithIds.map((c) => ({ id: c.id as string, key: conditionKey(c) }))
     await captureRecordImages(
-      idb, uri, result.recordId, filenameFromUri(uri), enrichment.imageSections, conditionsWithKeys, trace,
+      idb, uri, result.recordId, filenameFromUri(uri), enrichment.imageSections, imageOnlyPages, conditionsWithKeys, trace,
     )
   }
 

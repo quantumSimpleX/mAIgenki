@@ -46,7 +46,9 @@ function reanchorSections(text: string, sections: RecordSection[], pageBreaks: n
     const found = section.heading ? text.indexOf(section.heading, cursor) : -1
     const start = found >= 0 ? found : Math.min(Math.max(section.startOffset, cursor), text.length)
     anchored.push({ ...section, startOffset: start, endOffset: start })
-    cursor = start
+    cursor = found >= 0
+      ? Math.min(text.length, found + Math.max(1, section.heading.length))
+      : Math.min(text.length, start + 1)
   }
 
   for (let i = 0; i < anchored.length; i += 1) {
@@ -80,16 +82,38 @@ function mergeTinySections(sections: AnchoredSection[], minChars: number): Ancho
     const length = section.endOffset - section.startOffset
     const isLast = i === sections.length - 1
     if (length < minChars && !isLast) {
-      sections[i + 1] = { ...sections[i + 1], startOffset: section.startOffset }
+      sections[i + 1] = mergeSectionMetadata(section, {
+        ...sections[i + 1],
+        startOffset: section.startOffset,
+      })
       continue
     }
     if (length < minChars && isLast && merged.length > 0) {
-      merged[merged.length - 1] = { ...merged[merged.length - 1], endOffset: section.endOffset }
+      merged[merged.length - 1] = mergeSectionMetadata(merged[merged.length - 1], {
+        ...section,
+        endOffset: section.endOffset,
+      })
       continue
     }
     merged.push(section)
   }
   return merged
+}
+
+function mergeSectionMetadata(first: AnchoredSection, second: AnchoredSection): AnchoredSection {
+  const headings = [first.heading, second.heading]
+    .filter((heading, index, all) => heading && all.indexOf(heading) === index)
+  const pageStarts = [first.pageStart, second.pageStart].filter((page): page is number => page != null)
+  const pageEnds = [first.pageEnd, second.pageEnd].filter((page): page is number => page != null)
+  return {
+    ...second,
+    heading: headings.join(' / '),
+    sectionType: first.sectionType !== 'other' ? first.sectionType : second.sectionType,
+    inferredDate: first.inferredDate ?? second.inferredDate,
+    imageWorthy: first.imageWorthy || second.imageWorthy,
+    pageStart: pageStarts.length > 0 ? Math.min(...pageStarts) : null,
+    pageEnd: pageEnds.length > 0 ? Math.max(...pageEnds) : null,
+  }
 }
 
 function toChunk(section: AnchoredSection, sliceText: string): TextChunk {

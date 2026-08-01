@@ -40,7 +40,7 @@ jest.mock('@/lib/db/indexedDb', () => ({
 // without a real <canvas>/pdfjs-dist, which this project's Jest environment
 // cannot provide (Task 0.1's spike).
 jest.mock('@/lib/pdf/renderPage', () => ({
-  renderPageToCanvas: jest.fn(),
+  renderPagesToCanvas: jest.fn(),
 }))
 jest.mock('@/lib/media/compress', () => ({
   compressToTarget: jest.fn(),
@@ -52,7 +52,7 @@ import { enrichFromText } from '@/lib/llm/enrich'
 import { applyInferenceRules } from '@/lib/inference/rules'
 import { getModelChain } from '@/lib/llm/client'
 import { persistEnrichmentResult, putRecordImage, putConditionRecord, getIndexedSetting } from '@/lib/db/indexedDb'
-import { renderPageToCanvas } from '@/lib/pdf/renderPage'
+import { renderPagesToCanvas } from '@/lib/pdf/renderPage'
 import { compressToTarget } from '@/lib/media/compress'
 
 const mockExtractPDF   = extractTextFromPDF   as jest.MockedFunction<typeof extractTextFromPDF>
@@ -64,7 +64,7 @@ const mockGetSetting   = getIndexedSetting     as jest.MockedFunction<typeof get
 const mockPersist      = persistEnrichmentResult as jest.MockedFunction<typeof persistEnrichmentResult>
 const mockPutImage     = putRecordImage        as jest.MockedFunction<typeof putRecordImage>
 const mockPutConditionRecord = putConditionRecord as jest.MockedFunction<typeof putConditionRecord>
-const mockRenderPage   = renderPageToCanvas    as jest.MockedFunction<typeof renderPageToCanvas>
+const mockRenderPages  = renderPagesToCanvas   as jest.MockedFunction<typeof renderPagesToCanvas>
 const mockCompress     = compressToTarget      as jest.MockedFunction<typeof compressToTarget>
 
 const mockIdb = {} as any
@@ -337,7 +337,7 @@ describe('processHealthRecord — image capture', () => {
     mockEnrich.mockResolvedValue({ conditions: [SAMPLE_CONDITION], measurements: [] })
 
     await processHealthRecord({ uri: 'file:///docs/report.pdf', idb: mockIdb, apiKey: '' })
-    expect(mockRenderPage).not.toHaveBeenCalled()
+    expect(mockRenderPages).not.toHaveBeenCalled()
     expect(mockPutImage).not.toHaveBeenCalled()
   })
 
@@ -351,14 +351,12 @@ describe('processHealthRecord — image capture', () => {
         conditionKeys: ['essential hypertension|heart|'],
       }],
     })
-    mockRenderPage.mockResolvedValue(FAKE_CANVAS)
+    mockRenderPages.mockResolvedValue(new Map([[2, FAKE_CANVAS], [3, FAKE_CANVAS]]))
     mockCompress.mockResolvedValue({ blob: { size: 123 } as any, byteSize: 123 })
 
     await processHealthRecord({ uri: 'file:///docs/report.pdf', idb: mockIdb, apiKey: '' })
 
-    expect(mockRenderPage).toHaveBeenCalledTimes(2)
-    expect(mockRenderPage).toHaveBeenNthCalledWith(1, 'file:///docs/report.pdf', 2)
-    expect(mockRenderPage).toHaveBeenNthCalledWith(2, 'file:///docs/report.pdf', 3)
+    expect(mockRenderPages).toHaveBeenCalledWith('file:///docs/report.pdf', [2, 3])
     expect(mockPutImage).toHaveBeenCalledTimes(2)
     expect(mockPutImage).toHaveBeenCalledWith(mockIdb, expect.objectContaining({
       record_id: 'record-id-1', page_number: 2, byte_size: 123,
@@ -375,7 +373,7 @@ describe('processHealthRecord — image capture', () => {
         conditionKeys: ['essential hypertension|heart|'],
       }],
     })
-    mockRenderPage.mockResolvedValue(FAKE_CANVAS)
+    mockRenderPages.mockResolvedValue(new Map([[1, FAKE_CANVAS]]))
     mockCompress.mockResolvedValue({ blob: { size: 50 } as any, byteSize: 50 })
 
     await processHealthRecord({ uri: 'file:///docs/report.pdf', idb: mockIdb, apiKey: '' })
@@ -400,7 +398,7 @@ describe('processHealthRecord — image capture', () => {
         conditionKeys: ['some other condition|liver|'],
       }],
     })
-    mockRenderPage.mockResolvedValue(FAKE_CANVAS)
+    mockRenderPages.mockResolvedValue(new Map([[1, FAKE_CANVAS]]))
     mockCompress.mockResolvedValue({ blob: { size: 50 } as any, byteSize: 50 })
 
     await processHealthRecord({ uri: 'file:///docs/report.pdf', idb: mockIdb, apiKey: '' })
@@ -419,16 +417,14 @@ describe('processHealthRecord — image capture', () => {
         conditionKeys: [],
       }],
     })
-    mockRenderPage
-      .mockRejectedValueOnce(new Error('pdfjs render failed'))
-      .mockResolvedValueOnce(FAKE_CANVAS)
+    mockRenderPages.mockResolvedValue(new Map([[2, FAKE_CANVAS]]))
     mockCompress.mockResolvedValue({ blob: { size: 50 } as any, byteSize: 50 })
 
     const result = await processHealthRecord({ uri: 'file:///docs/report.pdf', idb: mockIdb, apiKey: '' })
 
     // The whole record still completes successfully despite one page failing.
     expect(result.recordId).toBe('record-id-1')
-    expect(mockRenderPage).toHaveBeenCalledTimes(2)
+    expect(mockRenderPages).toHaveBeenCalledWith('file:///docs/report.pdf', [1, 2])
     expect(mockPutImage).toHaveBeenCalledTimes(1) // only the second (successful) page
   })
 
@@ -442,7 +438,7 @@ describe('processHealthRecord — image capture', () => {
         conditionKeys: [],
       }],
     })
-    mockRenderPage.mockResolvedValue(FAKE_CANVAS)
+    mockRenderPages.mockResolvedValue(new Map([[1, FAKE_CANVAS]]))
     mockCompress.mockRejectedValue(new Error('compression failed'))
 
     const result = await processHealthRecord({ uri: 'file:///docs/report.pdf', idb: mockIdb, apiKey: '' })
