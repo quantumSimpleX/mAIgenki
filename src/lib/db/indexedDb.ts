@@ -1,7 +1,9 @@
 import {
-  CONDITIONS, CONDITION_RECORDS, defaultConditionPosition, normalizeSystemId,
+  CONDITIONS, CONDITION_RECORDS, defaultConditionPosition, normalizeSystemId, parseDateFrac,
   type DesignCondition, type SupportedLang,
 } from '@/model/conditions'
+import { applyInferenceRules } from '@/lib/inference/rules'
+import type { ConditionInput, MeasurementInput, ProviderInput } from '@/lib/llm/enrich'
 
 /** Browser-only persistence adapter for the web architecture. */
 export const INDEXED_DB_NAME = 'maigenki'
@@ -16,6 +18,8 @@ export type IndexedHealthRecord = {
   id: string
   filename: string
   record_type: string | null
+  page_count?: number | null
+  extraction_method?: string | null
 }
 
 export type IndexedCondition = {
@@ -95,6 +99,13 @@ export type IndexedMeasurement = {
   unit: string | null
   date: string
   inferred_fields: string[] | null
+}
+
+function uuid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
 }
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -203,6 +214,189 @@ export async function getConditionRecords(db: IDBDatabase, conditionId: string):
   return rows
 }
 
+export async function putConditionRecord(db: IDBDatabase, entry: ConditionRecordEntry): Promise<void> {
+  const transaction = db.transaction('condition_records', 'readwrite')
+  transaction.objectStore('condition_records').put(entry)
+  await transactionToPromise(transaction)
+}
+
+export async function deleteConditionLocation(db: IDBDatabase, locationId: string): Promise<void> {
+  const transaction = db.transaction('condition_locations', 'readwrite')
+  transaction.objectStore('condition_locations').delete(locationId)
+  await transactionToPromise(transaction)
+}
+
+export type PutIndexedHealthRecordInput = {
+  id?: string
+  filename: string
+  record_type?: string | null
+  page_count?: number | null
+  extraction_method?: string | null
+}
+
+export async function putIndexedHealthRecord(db: IDBDatabase, input: PutIndexedHealthRecordInput): Promise<string> {
+  const id = input.id ?? uuid()
+  const record: IndexedHealthRecord = {
+    id,
+    filename: input.filename,
+    record_type: input.record_type ?? null,
+    page_count: input.page_count ?? null,
+    extraction_method: input.extraction_method ?? null,
+  }
+  const transaction = db.transaction('health_records', 'readwrite')
+  transaction.objectStore('health_records').put(record)
+  await transactionToPromise(transaction)
+  return id
+}
+
+export async function putIndexedMeasurement(db: IDBDatabase, measurement: IndexedMeasurement): Promise<void> {
+  const transaction = db.transaction('measurements', 'readwrite')
+  transaction.objectStore('measurements').put(measurement)
+  await transactionToPromise(transaction)
+}
+
+// Updates a condition's own position and its primary condition_locations
+// record together, so getIndexedConditionDots (which prefers stored locations
+// over the condition's own cx/cy once any location exists) reflects the move.
+// Non-primary locations (e.g. a bilateral condition's second dot) are left
+// untouched — relocating those is out of scope (see userDataTask.md Task 5.3).
+export async function updateIndexedConditionPosition(
+  db: IDBDatabase, conditionId: string, cx: number, cy: number,
+): Promise<void> {
+  const transaction = db.transaction(['conditions', 'condition_locations'], 'readwrite')
+  const conditions = transaction.objectStore('conditions')
+  const locations = transaction.objectStore('condition_locations')
+  const condition = await requestToPromise(conditions.get(conditionId)) as IndexedCondition | undefined
+  if (condition) conditions.put({ ...condition, cx, cy })
+  const existingLocations = await requestToPromise(
+    locations.index('condition_id').getAll(conditionId),
+  ) as IndexedConditionLocation[]
+  const primary = existingLocations.find((l) => l.is_primary) ?? existingLocations[0]
+  if (primary) {
+    locations.put({ ...primary, cx, cy })
+  } else {
+    locations.put({ id: `${conditionId}-primary`, condition_id: conditionId, cx, cy, is_primary: true })
+  }
+  await transactionToPromise(transaction)
+}
+
+// ── Generic settings KV (Task 2.13 support) ────────────────────────────────────
+// Backs app-level settings that don't belong to the SQLite-backed LMF provider
+// profile/model-chain (src/lib/llm/profile.ts) — that subsystem is out of
+// Phase 2's scope and remains on its existing storage.
+
+export async function getIndexedSetting(db: IDBDatabase, key: string): Promise<string | null> {
+  const transaction = db.transaction('settings', 'readonly')
+  const row = await requestToPromise(transaction.objectStore('settings').get(key)) as { key: string; value: string } | undefined
+  await transactionToPromise(transaction)
+  return row?.value ?? null
+}
+
+export async function putIndexedSetting(db: IDBDatabase, key: string, value: string): Promise<void> {
+  const transaction = db.transaction('settings', 'readwrite')
+  transaction.objectStore('settings').put({ key, value })
+  await transactionToPromise(transaction)
+}
+
+// ── Shared persistence path (Task 2.15) ─────────────────────────────────────────
+// Single write path for both real uploads (pipeline.ts, via full
+// extraction→enrichment) and demo seeding (seedIndexedDbDemoData, below) — per
+// userDataReq.md §2a, everything from inference rules onward must be identical
+// for demo and real data, not just similar.
+//
+// Known gap: IndexedDB has no facilities/providers/condition_care_events
+// stores yet (Phase 2's task list never defines them), so `providers` is
+// accepted for shape-compatibility but not persisted. Real (non-demo) uploads
+// will not retain structured provider/facility/care-event data until a later
+// phase adds those stores — tracked as a follow-up, not silently patched over.
+export type EnrichedInput = {
+  filename: string
+  pageCount: number | null
+  extractionMethod: string | null
+  conditions: ConditionInput[]
+  measurements: MeasurementInput[]
+  providers?: ProviderInput[]
+  recordId?: string
+  recordType?: string | null
+}
+
+export type PersistEnrichmentResult = { recordId: string; conditionCount: number; measurementCount: number }
+
+export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedInput): Promise<PersistEnrichmentResult> {
+  const recordId = await putIndexedHealthRecord(db, {
+    id: input.recordId,
+    filename: input.filename,
+    record_type: input.recordType ?? null,
+    page_count: input.pageCount,
+    extraction_method: input.extractionMethod,
+  })
+
+  for (const c of input.conditions) {
+    const dateForTimeline = c.date_diagnosed ?? c.date_onset ?? new Date().toISOString().slice(0, 10)
+    const { id: conditionId, cx, cy } = await putIndexedCondition(db, {
+      id: c.id ?? uuid(),
+      record_id: recordId,
+      name_medical: c.name_medical,
+      name_common: c.name_common,
+      system: c.system,
+      cx: c.cx ?? undefined,
+      cy: c.cy ?? undefined,
+      year_frac: parseDateFrac(dateForTimeline),
+      date: dateForTimeline,
+      note: c.notes ?? null,
+      evidence: c.evidence,
+      local_names: (c.local_names as Partial<Record<SupportedLang, string>> | null | undefined) ?? null,
+      inferred_fields: c.inferred_from_structure && c.inferred_from_structure.length > 0 ? c.inferred_from_structure : null,
+    })
+    await putIndexedConditionLocation(db, {
+      id: `${conditionId}-primary`, condition_id: conditionId, cx, cy, is_primary: true,
+    })
+    for (const loc of c.locations ?? []) {
+      await putIndexedConditionLocation(db, {
+        id: uuid(), condition_id: conditionId, cx: loc.cx ?? cx, cy: loc.cy ?? cy, is_primary: false,
+      })
+    }
+  }
+
+  for (const m of input.measurements) {
+    await putIndexedMeasurement(db, {
+      id: uuid(),
+      record_id: recordId,
+      name: m.name,
+      value_numeric: m.value_numeric,
+      unit: m.unit,
+      date: m.date ?? new Date().toISOString().slice(0, 10),
+      inferred_fields: m.inferred_from_structure && m.inferred_from_structure.length > 0 ? m.inferred_from_structure : null,
+    })
+  }
+
+  return { recordId, conditionCount: input.conditions.length, measurementCount: input.measurements.length }
+}
+
+// Maps a hardcoded demo DesignCondition (src/model/conditions.ts) onto the same
+// ConditionInput shape real LLM extraction produces, so seedIndexedDbDemoData
+// can run it through the identical persistEnrichmentResult path (Task 2.9).
+export function designConditionToConditionInput(c: DesignCondition): ConditionInput {
+  return {
+    id: c.id,
+    name_medical: c.medName,
+    name_common: c.label,
+    system: c.system,
+    organ: null,
+    anatomical_location: null,
+    status: 'documented',
+    severity: null,
+    certainty: 'confirmed',
+    date_onset: c.date,
+    date_diagnosed: c.date,
+    evidence: c.evidence,
+    notes: c.note,
+    local_names: c.localNames,
+    cx: c.cx_percent,
+    cy: c.cy_percent,
+  }
+}
+
 type ConditionQueryMode = 'auto' | 'demo'
 
 // Design-layer read: maps stored conditions onto the DesignCondition shape the
@@ -259,22 +453,30 @@ export async function getIndexedConditionDots(db: IDBDatabase): Promise<IndexedC
 // seedDemoData, the equivalent this replaces). `put()` is already an upsert
 // on a fixed id, so this is safe to call idempotently on every demo load.
 export async function seedIndexedDbDemoData(db: IDBDatabase): Promise<void> {
-  const transaction = db.transaction(
-    ['health_records', 'conditions', 'condition_locations', 'condition_records', 'record_images'],
-    'readwrite',
-  )
-  const healthRecords = transaction.objectStore('health_records')
-  const conditions = transaction.objectStore('conditions')
-  const locations = transaction.objectStore('condition_locations')
-  const records = transaction.objectStore('condition_records')
-  const images = transaction.objectStore('record_images')
+  // Per userDataReq.md §2a (Demo Data Principle): convert the hardcoded design
+  // dataset into the same ConditionInput/MeasurementInput shapes real
+  // extraction produces, run it through the identical inference-rules step,
+  // then persist through persistEnrichmentResult — the same function real
+  // uploads use. No parallel put() calls into conditions/condition_locations
+  // here (Task 2.9).
+  const conditionInputs: ConditionInput[] = CONDITIONS.map(designConditionToConditionInput)
+  const inferredConditions = applyInferenceRules([], conditionInputs)
 
-  healthRecords.put({ id: DEMO_RECORD_ID, filename: 'Demo Patient — Sample Health History', record_type: 'demo' })
+  await persistEnrichmentResult(db, {
+    filename: 'Demo Patient — Sample Health History',
+    pageCount: null,
+    extractionMethod: null,
+    conditions: [...conditionInputs, ...inferredConditions],
+    measurements: [],
+    recordId: DEMO_RECORD_ID,
+    recordType: 'demo',
+  })
 
   // Placeholder embedded image (a few PNG-signature bytes) so the demo path
   // exercises the real-image record UI (Task 5.5/5.6) rather than only
-  // placeholder SVG art.
-  images.put({
+  // placeholder SVG art — through the same putRecordImage/condition_records
+  // write path Task 4.3 will use for real uploads, not a demo-only shortcut.
+  await putRecordImage(db, {
     id: DEMO_IMAGE_ID,
     record_id: DEMO_RECORD_ID,
     page_number: 1,
@@ -292,25 +494,8 @@ export async function seedIndexedDbDemoData(db: IDBDatabase): Promise<void> {
   })
 
   for (const c of CONDITIONS) {
-    const condition: IndexedCondition = {
-      id: c.id,
-      record_id: DEMO_RECORD_ID,
-      name_medical: c.medName,
-      name_common: c.label,
-      system: c.system,
-      cx: c.cx_percent,
-      cy: c.cy_percent,
-      year_frac: c.yearFrac,
-      date: c.date,
-      note: c.note,
-      evidence: c.evidence,
-      local_names: c.localNames,
-      inferred_fields: null,
-    }
-    conditions.put(condition)
-    locations.put({ id: `${c.id}-primary`, condition_id: c.id, cx: c.cx_percent, cy: c.cy_percent, is_primary: true })
     for (const r of CONDITION_RECORDS[c.id] ?? []) {
-      records.put({
+      await putConditionRecord(db, {
         id: r.id,
         condition_id: c.id,
         record_type: r.type,
@@ -329,13 +514,11 @@ export async function seedIndexedDbDemoData(db: IDBDatabase): Promise<void> {
 
   // Bilateral kidney-stones example: two locations sharing one condition,
   // straddling the condition's own cx/cy — kept as the multi-location example
-  // within the full port (replaces the single primary location above).
+  // within the full port (replaces the single primary location persistEnrichmentResult wrote).
   const stones = CONDITIONS.find((c) => c.id === 'stones')
   if (stones) {
-    locations.delete('stones-primary')
-    locations.put({ id: 'stones-left', condition_id: 'stones', cx: stones.cx_percent - 4, cy: stones.cy_percent, is_primary: true })
-    locations.put({ id: 'stones-right', condition_id: 'stones', cx: stones.cx_percent + 4, cy: stones.cy_percent, is_primary: false })
+    await deleteConditionLocation(db, 'stones-primary')
+    await putIndexedConditionLocation(db, { id: 'stones-left', condition_id: 'stones', cx: stones.cx_percent - 4, cy: stones.cy_percent, is_primary: true })
+    await putIndexedConditionLocation(db, { id: 'stones-right', condition_id: 'stones', cx: stones.cx_percent + 4, cy: stones.cy_percent, is_primary: false })
   }
-
-  await transactionToPromise(transaction)
 }

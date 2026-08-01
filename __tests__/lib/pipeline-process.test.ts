@@ -1,7 +1,13 @@
-// Pipeline integration tests (Phase 9.8.1). The extract + LLM boundaries are
-// mocked, but persistence runs the REAL queries against the shared in-memory
-// fake DB, so this validates that rows actually land and that onProgress fires
-// the expected phase/progress sequence.
+// Pipeline integration tests (Phase 9.8.1, updated for Task 2.15's IndexedDB
+// cutover). The extract + LLM boundaries are mocked, but persistence runs the
+// REAL persistEnrichmentResult against a real (fake-indexeddb-backed) IndexedDB
+// database, so this validates that rows actually land and that onProgress fires
+// the expected phase/progress sequence. `db` (SQLite, via the shared fake DB)
+// is still passed through — it's still used for the LLM provider config/apiKey
+// fallback, which hasn't moved off SQLite (see pipeline.ts's PipelineOptions
+// comment).
+
+import 'fake-indexeddb/auto'
 
 jest.mock('@/lib/pdf/extract', () => ({ extractTextFromPDF: jest.fn() }))
 jest.mock('@/lib/ocr/extract', () => ({ extractTextFromImage: jest.fn() }))
@@ -13,6 +19,7 @@ jest.mock('@/lib/llm/enrich', () => ({
 import type { SQLiteDatabase } from 'expo-sqlite'
 import { processHealthRecord, OcrRequiredError, type ProgressPhase } from '@/lib/pipeline'
 import { initDatabase, upsertSetting } from '@/lib/db/queries'
+import { openIndexedDb } from '@/lib/db/indexedDb'
 import { makeFakeDb } from '../db/fakeDb'
 import { extractTextFromPDF } from '@/lib/pdf/extract'
 import { extractTextFromImage } from '@/lib/ocr/extract'
@@ -56,9 +63,16 @@ async function freshDb(): Promise<SQLiteDatabase> {
   return db
 }
 
-async function countRows(db: SQLiteDatabase, table: string): Promise<number> {
-  const rows = await db.getAllAsync(`SELECT * FROM ${table}`)
-  return rows.length
+async function freshIdb(): Promise<IDBDatabase> {
+  return openIndexedDb(`maigenki-pipeline-${Date.now()}-${Math.random()}`)
+}
+
+function countIndexedRows(idb: IDBDatabase, store: string): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const request = idb.transaction(store, 'readonly').objectStore(store).getAll()
+    request.onsuccess = () => resolve(request.result.length)
+    request.onerror = () => reject(request.error)
+  })
 }
 
 beforeEach(() => jest.clearAllMocks())
@@ -69,13 +83,15 @@ describe('processHealthRecord — persistence (real fake DB)', () => {
     mockEnrich.mockResolvedValue({ conditions: [CONDITION], measurements: [MEASUREMENT] })
 
     const db = await freshDb()
-    const result = await processHealthRecord({ uri: 'file:///r.pdf', db, apiKey: 'sk-test' })
+    const idb = await freshIdb()
+    const result = await processHealthRecord({ uri: 'file:///r.pdf', db, idb, apiKey: 'sk-test' })
 
-    expect(await countRows(db, 'health_records')).toBe(1)
-    expect(await countRows(db, 'conditions')).toBe(result.conditionCount)
-    expect(await countRows(db, 'measurements')).toBe(1)
+    expect(await countIndexedRows(idb, 'health_records')).toBe(1)
+    expect(await countIndexedRows(idb, 'conditions')).toBe(result.conditionCount)
+    expect(await countIndexedRows(idb, 'measurements')).toBe(1)
     expect(result.conditionCount).toBeGreaterThanOrEqual(1)
     expect(result.measurementCount).toBe(1)
+    idb.close()
   })
 
   it('fires onProgress with a monotonic phase/progress sequence', async () => {
@@ -83,9 +99,10 @@ describe('processHealthRecord — persistence (real fake DB)', () => {
     mockEnrich.mockResolvedValue(EMPTY)
 
     const db = await freshDb()
+    const idb = await freshIdb()
     const calls: [ProgressPhase, number][] = []
     await processHealthRecord({
-      uri: 'file:///r.pdf', db, apiKey: '',
+      uri: 'file:///r.pdf', db, idb, apiKey: '',
       onProgress: (phase, progress) => calls.push([phase, progress]),
     })
 
@@ -97,6 +114,7 @@ describe('processHealthRecord — persistence (real fake DB)', () => {
       expect(progresses[i]).toBeGreaterThanOrEqual(progresses[i - 1])
     }
     expect(progresses[progresses.length - 1]).toBe(1)
+    idb.close()
   })
 
   it('empty enrichment yields a 0-condition record', async () => {
@@ -104,11 +122,13 @@ describe('processHealthRecord — persistence (real fake DB)', () => {
     mockEnrich.mockResolvedValue(EMPTY)
 
     const db = await freshDb()
-    const result = await processHealthRecord({ uri: 'file:///r.pdf', db, apiKey: '' })
+    const idb = await freshIdb()
+    const result = await processHealthRecord({ uri: 'file:///r.pdf', db, idb, apiKey: '' })
 
     expect(result.conditionCount).toBe(0)
-    expect(await countRows(db, 'health_records')).toBe(1)
-    expect(await countRows(db, 'conditions')).toBe(0)
+    expect(await countIndexedRows(idb, 'health_records')).toBe(1)
+    expect(await countIndexedRows(idb, 'conditions')).toBe(0)
+    idb.close()
   })
 
   it('resolves the stored openrouter_api_key setting when apiKey is omitted', async () => {
@@ -116,10 +136,12 @@ describe('processHealthRecord — persistence (real fake DB)', () => {
     mockEnrich.mockResolvedValue(EMPTY)
 
     const db = await freshDb()
+    const idb = await freshIdb()
     await upsertSetting(db, 'openrouter_api_key', 'sk-or-stored')
-    await processHealthRecord({ uri: 'file:///r.pdf', db })
+    await processHealthRecord({ uri: 'file:///r.pdf', db, idb })
 
     expect(mockEnrich).toHaveBeenCalledWith(expect.any(String), 'sk-or-stored', expect.any(Array))
+    idb.close()
   })
 
   it('falls back to an empty key when apiKey is omitted and no setting is stored', async () => {
@@ -127,9 +149,11 @@ describe('processHealthRecord — persistence (real fake DB)', () => {
     mockEnrich.mockResolvedValue(EMPTY)
 
     const db = await freshDb()
-    await processHealthRecord({ uri: 'file:///r.pdf', db })
+    const idb = await freshIdb()
+    await processHealthRecord({ uri: 'file:///r.pdf', db, idb })
 
     expect(mockEnrich).toHaveBeenCalledWith(expect.any(String), '', expect.any(Array))
+    idb.close()
   })
 })
 
@@ -140,13 +164,15 @@ describe('processHealthRecord — hard constraint: redact before enrich', () => 
     mockEnrich.mockResolvedValue(EMPTY)
 
     const db = await freshDb()
-    await processHealthRecord({ uri: 'file:///r.pdf', db, apiKey: '' })
+    const idb = await freshIdb()
+    await processHealthRecord({ uri: 'file:///r.pdf', db, idb, apiKey: '' })
 
     const sentText = mockEnrich.mock.calls[0][0]
     // The exact string handed to enrich must be the redacted form...
     expect(sentText).toBe(redactPII(raw))
     // ...and the raw SSN must never reach the network boundary.
     expect(sentText).not.toContain('123-45-6789')
+    idb.close()
   })
 })
 
@@ -155,9 +181,11 @@ describe('processHealthRecord — input routing', () => {
     mockPdf.mockResolvedValue({ text: 'x', pageCount: 3, method: 'ocr' })
 
     const db = await freshDb()
-    await expect(processHealthRecord({ uri: 'file:///scan.pdf', db, apiKey: '' }))
+    const idb = await freshIdb()
+    await expect(processHealthRecord({ uri: 'file:///scan.pdf', db, idb, apiKey: '' }))
       .rejects.toThrow(OcrRequiredError)
-    expect(await countRows(db, 'health_records')).toBe(0)
+    expect(await countIndexedRows(idb, 'health_records')).toBe(0)
+    idb.close()
   })
 
   it('propagates EnrichmentFailedError from a total LLM failure (no rows persisted)', async () => {
@@ -165,9 +193,11 @@ describe('processHealthRecord — input routing', () => {
     mockEnrich.mockRejectedValue(new EnrichmentFailedError(['model-a:free: network error']))
 
     const db = await freshDb()
-    await expect(processHealthRecord({ uri: 'file:///r.pdf', db, apiKey: '' }))
+    const idb = await freshIdb()
+    await expect(processHealthRecord({ uri: 'file:///r.pdf', db, idb, apiKey: '' }))
       .rejects.toThrow(EnrichmentFailedError)
-    expect(await countRows(db, 'health_records')).toBe(0)
+    expect(await countIndexedRows(idb, 'health_records')).toBe(0)
+    idb.close()
   })
 
   it('routes image input through OCR extraction', async () => {
@@ -175,9 +205,11 @@ describe('processHealthRecord — input routing', () => {
     mockEnrich.mockResolvedValue(EMPTY)
 
     const db = await freshDb()
-    await processHealthRecord({ uri: 'file:///lab.jpg', db, apiKey: '' })
+    const idb = await freshIdb()
+    await processHealthRecord({ uri: 'file:///lab.jpg', db, idb, apiKey: '' })
     expect(mockImage).toHaveBeenCalledWith('file:///lab.jpg')
     expect(mockPdf).not.toHaveBeenCalled()
+    idb.close()
   })
 
   it('honours an explicit kind override for a suffixless web blob URI', async () => {
@@ -185,8 +217,10 @@ describe('processHealthRecord — input routing', () => {
     mockEnrich.mockResolvedValue(EMPTY)
 
     const db = await freshDb()
-    await processHealthRecord({ uri: 'blob:https://app/abc-123', db, apiKey: '', kind: 'pdf' })
+    const idb = await freshIdb()
+    await processHealthRecord({ uri: 'blob:https://app/abc-123', db, idb, apiKey: '', kind: 'pdf' })
     expect(mockPdf).toHaveBeenCalledWith('blob:https://app/abc-123')
     expect(mockImage).not.toHaveBeenCalled()
+    idb.close()
   })
 })

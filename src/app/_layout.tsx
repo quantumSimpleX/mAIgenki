@@ -4,6 +4,7 @@ import { useFonts } from 'expo-font'
 import { StatusBar } from 'expo-status-bar'
 import { View } from 'react-native'
 import { DatabaseProvider } from '@/lib/db/provider'
+import { IndexedDbProvider } from '@/lib/db/indexedDbProvider'
 import { SettingsHydrator } from '@/hooks/useSettingsPersistence'
 
 export default function RootLayout() {
@@ -23,13 +24,15 @@ export default function RootLayout() {
 
   return (
     <DatabaseProvider>
-      <SettingsHydrator />
-      <StatusBar style="light" />
-      <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="analyzing" />
-        <Stack.Screen name="bodymap" />
-      </Stack>
+      <IndexedDbProvider>
+        <SettingsHydrator />
+        <StatusBar style="light" />
+        <Stack screenOptions={{ headerShown: false, animation: 'fade' }}>
+          <Stack.Screen name="index" />
+          <Stack.Screen name="analyzing" />
+          <Stack.Screen name="bodymap" />
+        </Stack>
+      </IndexedDbProvider>
     </DatabaseProvider>
   )
 }

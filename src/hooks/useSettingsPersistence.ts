@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useOptionalDatabase } from '@/lib/db/provider'
-import { getSetting, upsertSetting } from '@/lib/db/queries'
-import { scheduleSnapshot } from '@/lib/db/snapshot'
+import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
+import { getIndexedSetting as getSetting, putIndexedSetting as upsertSetting } from '@/lib/db/indexedDb'
 import { useAppStore } from '@/store/useAppStore'
 import { useConditions } from '@/hooks/useConditions'
 import { SupportedLang } from '@/model/conditions'
@@ -10,12 +9,12 @@ import { inferBodyType } from '@/lib/inference/bodyType'
 const LANGS: SupportedLang[] = ['en', 'zh-TW', 'ja', 'es']
 const CONDITION_SOURCES = ['auto', 'demo'] as const
 
-// Loads user settings (preferred language + date of birth) from the SQLite
-// settings table on startup and writes them back whenever they change, so they
+// Loads user settings (preferred language + date of birth) from the IndexedDB
+// settings store on startup and writes them back whenever they change, so they
 // persist across sessions. On web, when the DB is unavailable, this is a no-op
 // and the store keeps its in-memory defaults.
 export function useSettingsPersistence(): void {
-  const db = useOptionalDatabase()
+  const db = useOptionalIndexedDb()
   const [conditions] = useConditions()
   const preferredLanguage = useAppStore((s) => s.preferredLanguage)
   const birthYear = useAppStore((s) => s.birthYear)
@@ -78,35 +77,30 @@ export function useSettingsPersistence(): void {
   useEffect(() => {
     if (db && hydrated) {
       upsertSetting(db, 'preferred_language', preferredLanguage).catch(() => {})
-      scheduleSnapshot(db)
     }
   }, [db, hydrated, preferredLanguage])
 
   useEffect(() => {
     if (db && hydrated) {
       upsertSetting(db, 'birth_year', String(birthYear)).catch(() => {})
-      scheduleSnapshot(db)
     }
   }, [db, hydrated, birthYear])
 
   useEffect(() => {
     if (db && hydrated) {
       upsertSetting(db, 'birth_month', birthMonth).catch(() => {})
-      scheduleSnapshot(db)
     }
   }, [db, hydrated, birthMonth])
 
   useEffect(() => {
     if (db && hydrated) {
       upsertSetting(db, 'gender', gender).catch(() => {})
-      scheduleSnapshot(db)
     }
   }, [db, hydrated, gender])
 
   useEffect(() => {
     if (db && hydrated) {
       upsertSetting(db, 'condition_source', conditionSource).catch(() => {})
-      scheduleSnapshot(db)
     }
   }, [db, hydrated, conditionSource])
 }

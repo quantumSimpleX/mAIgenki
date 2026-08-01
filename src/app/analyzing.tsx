@@ -11,11 +11,10 @@ import { Image } from 'expo-image'
 import { useAppStore } from '@/store/useAppStore'
 import { ALL_SYSTEMS, CONDITIONS, type SystemId } from '@/model/conditions'
 import { useOptionalDatabase } from '@/lib/db/provider'
-import { upsertSetting } from '@/lib/db/queries'
+import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
+import { seedIndexedDbDemoData } from '@/lib/db/indexedDb'
 import { processHealthRecord } from '@/lib/pipeline'
 import { EnrichmentFailedError } from '@/lib/llm/enrich'
-import { clearDemoData, seedDemoData } from '@/lib/db/seed'
-import { scheduleSnapshot } from '@/lib/db/snapshot'
 
 // The native animation driver is absent on web; using it there only warns.
 const IS_WEB = Platform.OS === 'web'
@@ -336,6 +335,7 @@ export default function AnalyzingScreen() {
   const setPipelineError = useAppStore((s) => s.setPipelineError)
   const gender = useAppStore((s) => s.gender)
   const db = useOptionalDatabase()
+  const idb = useOptionalIndexedDb()
   const { width: viewportW } = useWindowDimensions()
   const fontScale = fontScaleForWidth(viewportW)
   const bottomGap = progressGap(fontScale)
@@ -373,8 +373,8 @@ export default function AnalyzingScreen() {
     return () => clearInterval(tick)
   }, [pendingUpload, pendingDemo, routeDemo, setAnalyzeProgress, setAnalyzePhase, setScreen])
 
-  // Demo path: populate/repopulate sample rows through SQLite during analysis,
-  // then continue to bodymap with all anatomical systems visible.
+  // Demo path: populate/repopulate sample rows through IndexedDB during
+  // analysis, then continue to bodymap with all anatomical systems visible.
   useEffect(() => {
     if ((!pendingDemo && !routeDemo) || startedRef.current) return
 
@@ -383,7 +383,7 @@ export default function AnalyzingScreen() {
     setActiveSystems([...ALL_SYSTEMS])
     setCurrentYear(2024)
 
-    if (!db) {
+    if (!idb) {
       let progress = 0
       const tick = setInterval(() => {
         progress = Math.min(0.88, progress + 0.01)
@@ -423,14 +423,9 @@ export default function AnalyzingScreen() {
     void (async () => {
       try {
         await Promise.all([
-          (async () => {
-            await clearDemoData(db)
-            await seedDemoData(db)
-            await upsertSetting(db, 'condition_source', 'demo')
-          })(),
+          seedIndexedDbDemoData(idb),
           delay(DEMO_ANALYSIS_MIN_MS),
         ])
-        scheduleSnapshot(db)
         clearInterval(tick)
         if (!mountedRef.current) return
         setAnalyzeProgress(1)
@@ -454,18 +449,20 @@ export default function AnalyzingScreen() {
 
     return () => clearInterval(tick)
   }, [
-    pendingDemo, routeDemo, db,
+    pendingDemo, routeDemo, idb,
     setAnalyzeProgress, setAnalyzePhase, setScreen,
     setActiveSystems, setCurrentYear, setConditionSource,
     setPendingDemo, setLastUploadResult, setPipelineError,
   ])
 
   // Upload path: run extraction/enrichment/inference/persistence, then route to
-  // bodymap when SQLite has the uploaded conditions.
+  // bodymap when IndexedDB has the uploaded conditions. `db` (SQLite) is still
+  // required alongside `idb` (IndexedDB) — the LLM provider profile/model-chain
+  // subsystem (src/lib/llm/profile.ts, client.ts) hasn't moved off SQLite.
   useEffect(() => {
     if (!pendingUpload || startedRef.current) return
 
-    if (!db) {
+    if (!db || !idb) {
       const timer = setTimeout(() => {
         if (startedRef.current || !mountedRef.current) return
         startedRef.current = true
@@ -503,6 +500,7 @@ export default function AnalyzingScreen() {
         const result = await processHealthRecord({
           uri: upload.uri,
           db,
+          idb,
           kind: upload.kind,
           sex: gender,
           onProgress: (phase, progress) => {
@@ -523,8 +521,6 @@ export default function AnalyzingScreen() {
           conditionCount: result.conditionCount,
           measurementCount: result.measurementCount,
         })
-        await upsertSetting(db, 'condition_source', 'auto')
-        scheduleSnapshot(db)
         setPipelineError(null)
         setScreen('bodymap')
         setTimeout(() => replaceBodymap('auto', result.conditionCount), 400)
@@ -558,7 +554,7 @@ export default function AnalyzingScreen() {
 
     return () => clearInterval(smooth)
   }, [
-    pendingUpload, db, gender,
+    pendingUpload, db, idb, gender,
     setAnalyzeProgress, setAnalyzePhase, setScreen,
     setPendingUpload, setLastUploadResult, setConditionSource, setPipelineError,
   ])

@@ -44,6 +44,10 @@ export type ConditionRecord = {
   label: string
   date: string
   color: string
+  // Lazy reference to a stored record_images row — never raw bytes inline here.
+  // Fetched on demand via getRecordImageThumbnail/getRecordImageBlob (Task 5.5/5.6).
+  imageId?: string | null
+  mimeType?: string | null
 }
 
 export const ALL_SYSTEMS: SystemId[] = [

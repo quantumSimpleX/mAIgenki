@@ -1,0 +1,174 @@
+# P6: Full Verification Pass
+
+## Scope
+Tasks 6.1–6.4 in `doc.userDataFlow/userDataTask.md`, Phase 6 — automated suite, large-record manual test, export/import round trip, final acceptance walkthrough.
+
+## Out of Scope
+New feature work — this phase verifies, it doesn't implement.
+
+## Dependencies
+All prior phases (0–5) in `kb4-DONE`.
+
+## Assigned Agents
+- ArchAgent:
+- DevAgent:
+- QAAgent: executed this card end to end (no separate Dev/QA split — verification-only card).
+
+## Allowed Files/Directories
+Test files only; this card. No application code changes expected except fixes for defects found here. **No application code changes were made this session** — all findings below are reporting-only, no code was touched.
+
+## Implementation Checklist
+
+- [x] P06-01 **Task 6.1 — Automated suite** — ran `npm run typecheck`, `npx expo lint`, `npm test --coverage` from a clean shell. See QA Record.
+- [x] P06-02 **Task 6.2 — Large-record manual test** — **not performed**; no 80–100 page synthetic PDF fixture exists in the repo and no PDF-generation library (`pdf-lib`/`pdfkit`/`jspdf`) is installed to build one in this session. Documented as an unverified gap, not fabricated. Partial coverage via Phase 3's mocked-LLM unit tests (chunk-scaling, partial-failure, dedup) — see QA Record.
+- [x] P06-03 **Task 6.3 — Export/import round trip with real data** — performed against demo data in a real browser (Playwright via `uiux-auditor` subagent). Found and confirmed a **new, sharper defect** beyond the previously-documented gap — see Defects and Retests.
+- [x] P06-04 **Task 6.4 — Final acceptance pass** — walked all 6 bullets of `userDataReq.md` §10. See QA Record.
+- [x] P06-05 **D-P06-01 fix (DevAgent, 2026-07-31)** — rewired `SettingsSheet`'s Export/Import handlers in `src/app/bodymap.tsx` from the legacy `expo-sqlite` backup path (`useOptionalDatabase()` + `src/lib/db/backup.ts`) to the IndexedDB-native path (`useOptionalIndexedDb()` + `src/lib/db/indexedDbBackup.ts`'s `exportIndexedDbBackupToJson`/`importIndexedDbBackupFromJson`). See Implementation Record below. Pending QA re-verification.
+
+## Acceptance Criteria
+Every bullet in `userDataReq.md` §10 is confirmed passing or has an explicit, user-acknowledged follow-up. No blocker is represented as passed.
+
+**Not fully met** — one bullet (stored-image export/import fidelity) fails against the real UI, and one bullet (80–100 page upload with forced mid-run failure) is unverified live (no fixture/tooling available), covered only by unit tests. See QA Record for the full breakdown and recommendation.
+
+## Required Validation
+- `npm run typecheck`, `npx expo lint`, `npm test` — all run, actual output recorded below.
+- Manual: 80–100 page synthetic record upload, forced mid-run 429 — **not performed**, see Task 6.2.
+- Manual: export→reimport round trip — performed against demo data; import not clicked (native OS file-picker dialog, not reliably drivable via Playwright, and the export was already conclusively proven to read the wrong database — see below).
+
+## Developer Verification
+N/A for the original QA-only session (Tasks 6.1–6.4) — no code changes were made then. See Implementation Record below for the D-P06-01 fix pass.
+
+## Implementation Record
+
+### 2026-07-31 — DevAgent: D-P06-01 fix (Settings-sheet Export/Import rewired to IndexedDB)
+
+**What changed**: `src/app/bodymap.tsx`'s `SettingsSheet` component (the Backup Export/Import buttons and their availability/error messaging):
+- Replaced `const db = useOptionalDatabase()` with `const idb = useOptionalIndexedDb()` (the hook was already imported in this file for other components; `useOptionalDatabase` is still imported and still used elsewhere in `bodymap.tsx`, at the top-level chat handler, for `lmfChat`'s unrelated `db` config param — not touched).
+- `backupAvailable` now gates on `!!idb` instead of `!!db`; the "Storage unavailable — backup disabled" hint now checks `!idb`.
+- `handleExport()` now calls `exportIndexedDbBackupToJson(idb)` (from `src/lib/db/indexedDbBackup.ts`) instead of `exportBackupToFile(db)` (from `src/lib/db/backup.ts`, legacy SQLite). Since `exportIndexedDbBackupToJson` returns a JSON string rather than triggering a download itself, the browser-download logic (`Blob` → `URL.createObjectURL` → temporary `<a download>` click → `URL.revokeObjectURL`) that previously lived inside `backup.ts`'s `exportBackupToFile` was inlined directly in the handler — same filename pattern (`maigenki-backup-YYYY-MM-DD.json`), same UI/UX (button placement, label, disabled state, error handling all unchanged).
+- `handleImport()` now calls `DocumentPicker.getDocumentAsync({ type: 'application/json', ... })` directly (using the `expo-document-picker` import already present in `bodymap.tsx` for the record-upload picker) followed by `importIndexedDbBackupFromJson(idb, json)`, instead of `pickAndReadBackup()` + `restoreBackup(db, backup)` from `backup.ts`. Same cancel/confirm UI flow, same page reload on success (`window.location.reload()` on web), same error surfacing to `backupError`.
+- Removed the `saveSnapshotNow(db)` call that previously ran after a successful import: that function snapshots the **legacy SQLite** database into a separate IndexedDB meta-store for crash recovery (`src/lib/db/snapshot.ts`) — it is unrelated to the real IndexedDB data store now being restored, and calling it here would have snapshotted a stale/untouched SQLite DB. `saveSnapshotNow`/`scheduleSnapshot` remain wired elsewhere (`src/lib/db/provider.tsx`, `src/lib/llm/refresh.ts`) for their original legacy-SQLite-recovery purpose — not touched.
+- Removed now-unused imports: `exportBackupToFile, pickAndReadBackup, restoreBackup` from `@/lib/db/backup`, and `saveSnapshotNow` from `@/lib/db/snapshot`. Added import of `exportIndexedDbBackupToJson, importIndexedDbBackupFromJson` from `@/lib/db/indexedDbBackup`. `useOptionalDatabase` import retained (still used elsewhere in the file).
+- No changes to `src/lib/db/indexedDbBackup.ts` — it was already correct and unit-tested (Task 2.10); this was purely a UI call-site rewire, per the card's own recommendation.
+- No changes to any other part of `bodymap.tsx`'s UI beyond this Backup section, per this session's standing constraint not to disrupt other already-tuned UI.
+
+**Why**: fixes D-P06-01 — Export previously read a disconnected, auto-reseeded legacy SQLite database (never the real user's IndexedDB conditions/images) and silently dropped all `condition_locations` rows even for demo data. See Defects and Retests below for the retest outcome.
+
+**Verification commands run from a clean shell, actual output**:
+- `npm run typecheck` — same 15 pre-existing errors as Task 6.1's QA Record (all in `tests/lib/_spike01-pdfjs-canvas-blob.test.ts`, `tests/lib/_spike03-pdf-text-timing.test.ts`, `tests/lib/backup.test.ts`, `tests/lib/lmf/oauthPkce.test.ts`); zero errors in `bodymap.tsx` or any file touched by this fix.
+- `npx expo lint` — same 2 pre-existing errors (`react-hooks/set-state-in-effect` in `bodymap.tsx` — now at line 1701 due to the line shift from this edit, same unrelated `useEffect` block — and `ProviderSettings.tsx:182`) and 10 pre-existing warnings; no new lint errors/warnings introduced.
+- `npx jest tests/lib/indexedDbBackup.test.ts __tests__/screens/bodymap.test.tsx` — **2 suites passed, 20/20 tests passed**. (No existing test in `__tests__/screens/bodymap.test.tsx` covers the Settings-sheet backup buttons, so nothing there asserted on the old call targets — no test updates were needed.)
+- `npm test -- --coverage` (full suite) — **59/61 suites passed, 559/562 tests passed**, the same 3 pre-existing failures as Task 6.1's QA Record (`__tests__/lib/pipeline-process.test.ts` ×2, `__tests__/db/provider-recovery.test.ts` ×1) — no new failures. Coverage: **88.59% lines** globally (gate: 80%) — identical to the prior session's figure, gate passes.
+- Real-browser check: dispatched a `uiux-auditor` Playwright subagent (`npx expo start --web --port 8099`) to load demo data and trigger Export. **PASS.** Loaded `/bodymap?source=demo&added=22`, confirmed 22 conditions rendered, opened Settings → Backup → Export, and captured the real downloaded file `maigenki-backup-2026-08-01.json`. Its envelope is `{app:'maigenki', formatVersion:1, database:'maigenki', exportedAt, stores:{...}}` — the `stores` key (IndexedDB shape), not the old SQLite `tables` key. Row counts, cross-checked against IndexedDB ground truth: `stores.conditions` = 22, **`stores.condition_locations` = 23** (the exact figure D-P06-01 flagged as silently empty `[]` before this fix — 22 primary + 1 secondary bilateral kidney-stones location), `stores.health_records` = 1, `stores.record_images` = 1 (base64-encoded blob present), `stores.condition_records` = 45, `stores.settings` = 5. No application console errors (only pre-existing, unrelated Expo dev-plugin HMR websocket noise). Import was **not** exercised live — driving Chromium's native file-picker dialog reliably via this Playwright session risked a hung session, and Export (the actual defect) was already conclusively verified against ground truth; `restoreIndexedDbBackup`'s logic is already covered by `tests/lib/indexedDbBackup.test.ts`'s existing unit tests. Recommend a dedicated Playwright script with an explicit `page.on('filechooser')` handler as a future follow-up if a full live round-trip is wanted.
+
+## QA Test Plan
+1. Run the three automated-suite commands from a clean shell; diff actual failure/coverage output against the 3 pre-existing failures documented across every prior phase card.
+2. For the two lint errors surfaced, `git blame` the exact flagged lines to confirm they predate this branch's work rather than assuming the "pre-existing" label.
+3. For 6.2, check for a large PDF fixture and PDF-generation tooling before attempting; if absent, fall back to confirming the exact behaviors the acceptance criteria ask about via Phase 3's existing mocked-LLM unit tests (`tests/lib/pool.test.ts`, `tests/lib/chunk.test.ts`, `tests/lib/enrich.test.ts`) and via static code read of `pipeline.ts`'s `report()`/`trace()` calls.
+4. For 6.3, load demo data in a real browser, inspect IndexedDB directly via devtools to get ground truth, trigger Export, inspect the downloaded JSON file's actual contents against that ground truth, and read `bodymap.tsx`/`backup.ts`/`indexedDbBackup.ts` source to root-cause any mismatch rather than treating the file's shape as sufficient evidence.
+5. Walk `userDataReq.md` §10 bullet by bullet; for each, state pass/fail/known-gap-with-reference, and flag anything not already on record in a `kb4-DONE` card's Blockers section as a new finding.
+
+## QA Record
+
+### Task 6.1 — Automated suite (freshly run, this session)
+
+**`npm run typecheck`** — 15 errors, all outside this phase's/branch's scope:
+- `tests/lib/_spike01-pdfjs-canvas-blob.test.ts` (4 errors), `tests/lib/_spike03-pdf-text-timing.test.ts` (3 errors) — Phase 0's throwaway spike scripts (`node`-global/`__dirname` typing gaps only; these were never meant to be production-typed, per `kb4-DONE/p00-environment-spike.md`).
+- `tests/lib/backup.test.ts` (5 errors) — legacy `expo-sqlite` backup test, unmodified by this branch (confirmed no `M` in `git status` for this file); same file flagged as a known, unrelated issue in `kb4-DONE/p02-schema-Phase-persistence-layer.md`'s QA Record (`getEachAsync is not a function` failure, informational).
+- `tests/lib/lmf/oauthPkce.test.ts` (3 errors) — LLM-fallback/BYOK subsystem test, unrelated to `userDataTask.md`'s scope entirely (confirmed via `doc.lmFallbackBuild/lmfPlan.md`).
+None of these 15 errors are in any file touched by Phases 1–6 of `userDataTask.md`.
+
+**`npx expo lint`** — 2 errors, 10 warnings. Both errors are `react-hooks/set-state-in-effect` (`setState` called synchronously inside a `useEffect`):
+- `src/app/bodymap.tsx:1685` (`setOpenDropdown(null)` inside a `useEffect`) — `git blame` confirms this exact line was last touched 2026-07-07, and the surrounding `useEffect` block is untouched by `git diff main -- src/app/bodymap.tsx` (the branch's 223-line diff doesn't include this hunk). Pre-existing.
+- `src/components/ProviderSettings.tsx:182` (`setValidation({status:'idle'})`) — `git diff --stat main` shows zero changes to this file on this branch at all. Pre-existing.
+Neither error is a regression introduced by `userDataTask.md`'s work; both predate it. Not fixed (out of this card's scope — this card fixes only defects found in Phase 6 verification, not unrelated pre-existing lint debt).
+
+**`npm test --coverage`** — **61 suites (59 passed / 2 failed), 562 tests (559 passed / 3 failed)**. The 3 failures are exactly the 3 documented pre-existing failures, confirmed byte-identical to prior cards' records:
+- `__tests__/lib/pipeline-process.test.ts` — 2 failures (`toHaveBeenCalledWith` mismatch: mock receives `"Some records with text."` as the first arg where the test expects `expect.any(String)` to match differently — actually a pre-existing assertion-shape mismatch, not a new regression; same failure text as recorded in `kb4-DONE/p04` and `p05`).
+- `__tests__/db/provider-recovery.test.ts` — 1 failure (`Cannot read properties of undefined (reading 'cx_percent')` at line 152) — same as previously documented.
+
+**Coverage**: `collectCoverageFrom` in `jest.config.js` is scoped to exactly `src/lib/**`, `src/model/**`, `src/store/**` (confirmed by reading the config, not assumed), and `coverageThreshold.global.lines` is `80`. Actual result: **88.59% lines** across that collected set — **gate passes**. Per-directory lines: `lib` 86.61%, `lib/db` 79.32%, `lib/inference` 100%, `lib/llm` 96.16%, `lib/lmf` 96.48%, `lib/lmf/adapters` 99%, `lib/lmf/oauth` 94.59%, `lib/media` 100%, `lib/ocr` 100%, `lib/pdf` 59.32%, `lib/privacy` 97.43%, `model` 93.33%, `store` 85.5%. The two low-coverage files dragging down `lib/db` and `lib/pdf` are `indexedDbProvider.tsx` (5.88%) and `renderPage.ts` (3.57%) — both are the documented real-browser-only paths (Canvas/`pdfjs-dist` rendering, DB-provider mount lifecycle) that cannot be exercised in this project's Jest environment per `kb4-DONE/p00-environment-spike.md`'s Blocker #1. Since the threshold is `global` (aggregate across the whole collected set, not per-file/per-directory), these low-coverage files don't fail the gate — worth flagging as a known coverage-gate blind spot for future readers, not a defect.
+
+**Verdict: Task 6.1 PASS.** All three commands run with real, current output; failures/errors are confirmed pre-existing and out of scope, not silently waved through.
+
+### Task 6.2 — Large-record manual test — **NOT PERFORMED, documented gap (new)**
+
+Checked for a usable 80–100 page synthetic PDF fixture and PDF-generation tooling before attempting: no such fixture exists (`kb4-DONE/p00-environment-spike.md`'s Blocker #3 already documents that both repo PDF fixtures are single-page despite their filenames), and `node_modules` has no `pdf-lib`, `pdfkit`, or `jspdf` installed. Building a valid multi-page PDF by hand-writing raw PDF byte syntax was judged not realistic to do reliably in this session — per this card's own instruction ("if you cannot realistically create or source one in this session, say so explicitly... rather than fabricating results"), this is reported as an honest gap.
+
+What **was** verified as a substitute, per the task's own fallback guidance:
+- `tests/lib/pool.test.ts` (6 tests) — bounded-concurrency pool never exceeds its limit, processes every item exactly once, one rejection doesn't block/skip others. Directly backs the "attempt count scales with chunk count" requirement's mechanics.
+- `tests/lib/chunk.test.ts` (9 tests) — chunk offsets are exact substrings, oversized sections split, tiny sections merge — the chunking half of "scales with chunk count, not condition count."
+- `tests/lib/enrich.test.ts` — specifically `'one failing chunk among several still returns partial results without throwing'` (asserts `partialFailures` populated, non-throwing) and `'all chunks failing still throws EnrichmentFailedError'` — directly cover the "forced mid-run 429 → partial-but-usable result" acceptance bullet's logic, with mocked LLM calls rather than a live OpenRouter call.
+- Static code read of `src/lib/pipeline.ts`: `report(1, 0.4 + 0.35*completed/total)` and `trace('condition-enrichment-progress', {completed, total})` are driven by `onChunkProgress`'s `completed`/`total` (chunk counts per Task 3.5's contract, confirmed by reading `enrich.ts`'s orchestration) — confirms by inspection, not live trace log, that the progress math is chunk-scaled, not condition-scaled.
+
+This is real signal but is **not equivalent to Task 6.2's own bar** (a live 80–100 page upload, real trace log inspection, a live forced-429). Recommend as follow-up: add one true multi-page fixture to the repo (even 10–20 pages would materially de-risk this) before this bullet can be marked genuinely done — same recommendation `p00`'s Blocker #3 already made and still unaddressed.
+
+### Task 6.3 — Export/import round trip — **performed (demo data); found a defect, sharper than previously documented**
+
+Ran in a real browser (`npx expo start --web --port 8099`, driven via a Playwright-capable `uiux-auditor` subagent — same approach used for `p05`'s QA pass).
+
+**Demo load — PASS.** `/bodymap?source=demo&added=22` renders all 22 conditions across all 11 organ systems. Verified directly against IndexedDB via devtools: `conditions` = 22 rows, `condition_locations` = 23 rows (22 + 1 extra — the bilateral kidney-stones second dot), `health_records` = 1. Confirms the dot data actually exists in IndexedDB before testing export.
+
+**Export — triggers a download, but reads the wrong database, and the miss is worse than "not yet wired up":**
+- Clicking Export in the Settings sheet downloads `maigenki-backup-....json` immediately. Its contents were inspected directly: 22 `conditions` rows are present (looking superficially plausible), but **`condition_locations` is an empty `[]`** even though IndexedDB genuinely holds 23 rows there — the bilateral dot data is silently dropped from every export.
+- Root cause, confirmed by reading source (not inferred from the file alone): `src/app/bodymap.tsx:1636` calls `exportBackupToFile(db)` where `db = useOptionalDatabase()` (`src/lib/db/provider.tsx`) — the **legacy expo-sqlite** connection, not `useOptionalIndexedDb()`. `src/lib/db/backup.ts`'s `buildBackup()` reads via `SELECT * FROM <table>` against that SQLite database, entirely unrelated to IndexedDB.
+- Further: `src/lib/db/provider.tsx`'s `DatabaseProvider` auto-opens **and auto-seeds** this legacy SQLite database on every app boot (`seedDemoData(database)`), independently of the IndexedDB demo seed (`seedIndexedDbDemoData(idb)`, called separately in `src/app/analyzing.tsx`). The 22 "conditions" in the export file are **not the same 22 rows the bodymap is rendering** — they're a second, independently auto-reseeded copy that happens to look similar because both derive from the same `CONDITIONS` source array.
+- Confirmed via `src/lib/pipeline.ts`: for a **real (non-demo) uploaded record**, the legacy `db` is used only to read LLM provider settings (`getModelChain`, `getSetting(db, 'openrouter_api_key')`) — all condition/image persistence goes exclusively through `idb` (IndexedDB, via `persistEnrichmentResult`). This means for a real user session, **Export would never contain the user's actual uploaded conditions or images at all** — only the legacy database's own auto-reseeded demo rows, silently, with no error or warning to the user.
+- A correct implementation already exists and is unit-tested but has **zero UI callers**: `src/lib/db/indexedDbBackup.ts`'s `exportIndexedDbBackupToJson()` (Task 2.10) reads the real `condition_locations`/`record_images` (with proper Blob→base64 encoding) — confirmed via `Grep` that nothing in `src/app/**` imports it.
+
+**Import — not exercised** (native OS file-picker via `expo-document-picker`, not reliably drivable in Playwright without risking a hung session; and since Export is confirmed to read the disconnected legacy DB, a round trip would only prove data moves within that legacy silo, not that it does anything useful for the app's real IndexedDB state — so it wasn't worth the risk to force it).
+
+**Console**: 0 real application errors during the whole flow. Noise present (Expo dev-tooling websocket disconnects, a pre-existing require-cycle warning, and 3 transient `bodymap-load-skipped {reason: database-unavailable}` logs during initial IndexedDB-provider mount before demo data loads) — all traced to non-functional causes, none are regressions.
+
+**Verdict: Task 6.3's underlying acceptance bullet FAILS against the real product UI.** This is not a new "root cause" (the destination — legacy SQLite backup path — was already flagged in `kb4-DONE/p02-schema-Phase-persistence-layer.md`'s Blocker #3), but the **severity is sharper than that card's framing implied**: it isn't simply "hasn't been rewired yet" — it silently exports/imports a stale, disconnected database that would never contain a real user's actual data, and drops per-location dot data even for the demo set it does reach. See Defects and Retests.
+
+### Task 6.4 — Final acceptance pass (`userDataReq.md` §10, walked bullet by bullet)
+
+1. **"Uploading an 80–100 page synthetic record... completes without hitting `EnrichmentFailedError`... and produces a partial-but-usable result when a mid-run rate-limit is forced."** — **UNVERIFIED (known gap, new this session)**. No live E2E run performed (see Task 6.2). Unit-test coverage of the exact underlying logic (chunking, pooling, partial-failure merge, `EnrichmentFailedError` only on total failure) is strong and passing, but that is not the same as confirming it holds under a real 80–100 page document and real network conditions. Recommend: add a genuine multi-page PDF fixture and re-run this bullet live before calling the overall plan done.
+
+2. **"LLM attempt count in pipeline traces scales with section-chunk count, not condition count."** — **PASS by code inspection + unit test**, not by live trace log. `enrich.ts`'s `onChunkProgress` and `pipeline.ts`'s `report()`/`trace()` calls are chunk-indexed per Task 3.5's contract (confirmed by reading both files); `pool.test.ts`/`chunk.test.ts` back the mechanics. Same caveat as bullet 1 — a live confirmation is still recommended but the design is verifiably correct.
+
+3. **"A condition with no explicit provider and no care event produces zero `condition_providers` records... already covered by Phase 1."** — **PASS, carried forward.** `kb4-DONE/p01-provider-Phase-attribution-fix.md` records 21/21 passing on independent QA re-verification; this session's full suite run shows no failures related to provider attribution (the 3 failures present are the unrelated, already-documented ones). Not re-litigated as new.
+
+4. **"A bilateral/multi-point condition renders multiple hotspot dots, all opening the same condition sheet."** — **PASS, carried forward + freshly re-confirmed this session.** `kb4-DONE/p05-bodymap-ui-wiring.md` already verified this live; this session's Task 6.3 browser pass independently re-confirmed it too (IndexedDB `condition_locations` = 23 rows including the bilateral kidney-stones second location, both dots render).
+
+5. **"A stored image survives export → reimport with byte-identical content."** — **FAIL.** At the unit level, `tests/lib/indexedDbBackup.test.ts` only covers non-Blob fields round-tripping through JSON export/import (Blob-byte fidelity is untestable in this project's Jest environment per `kb4-DONE/p00-environment-spike.md`'s Blocker #2 — a documented, accepted limitation, not new). But at the **product level**, this session's Task 6.3 finding is a new, more severe fact: the Settings-sheet Export button doesn't even reach the IndexedDB `record_images` store at all — it reads a disconnected legacy SQLite database. For any real (non-demo) uploaded record with a stored image, Export today captures **zero** of that user's actual data. This is a genuine FAIL against the acceptance bar, not a known-gap-with-reference to an already-adequately-scoped blocker — see Defects and Retests for severity.
+
+6. **"Demo-data flow (unchanged inputs) renders visually identical to today post-migration."** — **PASS, carried forward.** `kb4-DONE/p02-schema-Phase-persistence-layer.md`'s automated `demoParity.test.ts` (in `npm test`'s green 559) asserts identical id/system/label/date/position output between the pre- and post-cutover demo paths; `p05`'s and this session's live browser checks both confirm visual rendering matches (22 conditions, 11 systems, correct dot positions).
+
+**Net: 4 of 6 acceptance bullets PASS (2 carried forward + re-confirmed, 1 code-verified, 1 carried forward), 1 bullet UNVERIFIED (no live large-record test performed), 1 bullet FAILS against the live product UI.**
+
+## Defects and Retests
+
+- **D-P06-01 (found this session; fixed 2026-07-31) — Severity: High.** Settings-sheet Backup Export in `src/app/bodymap.tsx` read/wrote the legacy `expo-sqlite` database (`useOptionalDatabase()`), not IndexedDB. **Impact**: for any real user who has uploaded actual health records (the app's core purpose), clicking Export produced a JSON file containing stale, auto-reseeded demo-shaped rows from a disconnected database — not the user's real conditions, locations, or images — with no error, warning, or indication to the user that this happened. For the demo dataset specifically, export additionally silently dropped all `condition_locations` rows (bilateral/multi-point dot data). **Likelihood**: certain — this was the only Export/Import entry point in the product; any user who tried it hit this path every time. **Repro (as found)**: `src/app/bodymap.tsx:1611` (`db = useOptionalDatabase()`), `:1636` (`exportBackupToFile(db)`); `src/lib/db/backup.ts`'s `buildBackup()` reads via SQL against that connection.
+  - **Fix status: FIXED, pending QA re-verification.** See Implementation Record (2026-07-31) above for the full change. `SettingsSheet`'s Export/Import now use `useOptionalIndexedDb()` + `src/lib/db/indexedDbBackup.ts`'s `exportIndexedDbBackupToJson`/`importIndexedDbBackupFromJson`.
+  - **Retest performed by DevAgent (2026-07-31, not a substitute for independent QA re-verification)**: real-browser Playwright check (see Task 6.3 Export/Import round trip entry above) confirmed Export now downloads a correctly-shaped IndexedDB backup (`stores` envelope) with `stores.condition_locations` = 23 (previously silently `[]`), `stores.conditions` = 22, `stores.record_images` = 1, matching IndexedDB ground truth. Import was not live-verified in a real browser this session (native file-picker risk in Playwright) but is unit-tested (`tests/lib/indexedDbBackup.test.ts`) and unchanged by this fix. **Recommend QA independently re-verify at least the Import half live before this is considered fully closed.**
+- No other new defects found this session. All 3 automated-suite failures and both lint errors are confirmed pre-existing per Task 6.1's record above.
+
+## Blockers
+
+Carried forward from prior phase cards (not re-litigated as new findings, per this card's own instructions):
+1. **Blob-fidelity untestable in Jest** (`kb4-DONE/p00-environment-spike.md` Blocker #2) — `fake-indexeddb`'s reliance on Node `structuredClone()` can't clone `Blob` in this project's Jest VM-context isolation. Affects `tests/lib/indexedDbBackup.test.ts`'s Blob round-trip test (non-Blob fields only) and any Blob-content assertion via direct IndexedDB reads.
+2. **Canvas/`pdfjs-dist` rendering untestable in Jest** (`kb4-DONE/p00-environment-spike.md` Blocker #1) — no DOM/Canvas in this project's `testEnvironment`; `renderPage.ts` (3.57% Jest coverage) and `indexedDbProvider.tsx` (5.88%) are real-browser-only verification paths by design.
+3. **No provider/facility/care-event IndexedDB object stores yet** (`kb4-DONE/p02-schema-Phase-persistence-layer.md` Blocker #1) — `persistEnrichmentResult` accepts but drops `providers`; real uploads retain provider info only as evidence text, not structured linkage. Documented, not silent.
+4. **Mobile-viewport UI regression pass not fully done** — `kb4-DONE/p05-bodymap-ui-wiring.md`'s Required Validation names "desktop and mobile viewport widths" but its Developer Verification/QA Record only document a desktop-width Playwright pass; no explicit mobile-width (narrow viewport) screenshots or checks are on record in that card. Not re-tested this session (out of this card's stated scope, which is the automated suite + 6.2/6.3/6.4, not a UI regression pass) — flagged here as a carried-forward gap for completeness since Task 6.4 asks to walk acceptance criteria comprehensively, but it isn't one of `userDataReq.md` §10's 6 explicit bullets.
+5. **LLM provider profile/model-chain/OAuth subsystem intentionally remains on SQLite** (`kb4-DONE/p02` Blocker #4) — `pipeline.ts`'s `PipelineOptions.db: SQLiteDatabase` is retained specifically for this, not dead weight.
+
+New this session:
+6. **D-P06-01** (see Defects and Retests) — **fixed 2026-07-31** by DevAgent; pending independent QA re-verification (Import half not live-browser-tested this pass — see Defects and Retests).
+7. **Task 6.2 not performed live** (see QA Record) — no multi-page PDF fixture or generation tooling available this session; only unit-test-level verification obtained. Recommend adding one real multi-page fixture to the repo as follow-up, then re-running this bullet live. Not addressed by this DevAgent pass (out of scope — see task instructions).
+
+## Completion
+
+**Not ready for `kb4-DONE` as-is.** Task 6.1 fully passes (clean pre-existing-only automated-suite results, coverage gate met). D-P06-01 (the defect that made Task 6.3 / acceptance bullet 5 fail) has been fixed by DevAgent on 2026-07-31 and retested by the same agent in a real browser — Export now correctly reads IndexedDB — but this is **not** a substitute for independent QA re-verification, particularly of the Import half (not live-browser-tested this pass). Task 6.2 still could not be performed live this session either (unaddressed, out of this fix's scope) and remains an honest, explicitly-flagged unverified gap.
+
+**Recommendation to orchestrator**:
+1. Route this card to QA for re-verification of D-P06-01's fix (Export confirmed live; Import confirmed only via existing unit tests, not a live round trip) before treating it as closed.
+2. Optionally, add a genuine multi-page PDF fixture and re-run Task 6.2 live before final sign-off — lower priority, still an open acceptance-criteria bullet, unrelated to D-P06-01.
+3. All other Blockers (1, 2, 3, 5 above) are pre-existing, already user-acknowledged (per their own cards' Completion sections being QA-approved with those exact gaps on record) and don't need to block this plan's completion.
+
+Moving this card to `kb3-TEST` for QA re-verification of the D-P06-01 fix.
+
+## History
+- 2026-08-01: QAAgent executed Tasks 6.1–6.4 end to end. Task 6.1: clean automated-suite run, confirmed all failures/errors pre-existing via `git blame`/`git diff` cross-checks, coverage gate passes (88.59% lines vs. 80% target). Task 6.2: not performed live (no PDF fixture/tooling), documented as an explicit gap with unit-test-level substitute evidence. Task 6.3: performed live via `uiux-auditor` Playwright session against demo data; found D-P06-01 (Export/Import UI reads the wrong database, worse than previously documented — silently produces a backup with no real user data for non-demo sessions). Task 6.4: walked all 6 `userDataReq.md` §10 bullets — 4 pass, 1 unverified, 1 fails. Card moved `kb2-CODE` → `kb3-TEST` with a recommendation against moving straight to `kb4-DONE` until D-P06-01 is fixed.
+- 2026-07-31: DevAgent fixed D-P06-01 — rewired `SettingsSheet`'s Export/Import handlers in `src/app/bodymap.tsx` from the legacy SQLite `backup.ts` path to the IndexedDB-native `indexedDbBackup.ts` path (`useOptionalIndexedDb()`, `exportIndexedDbBackupToJson`, `importIndexedDbBackupFromJson`). UI/UX unchanged (same buttons, labels, confirm/cancel flow, error handling, reload-on-import behavior). Verified: `npm run typecheck` (15 pre-existing errors, none new), `npx expo lint` (2 pre-existing errors, 10 pre-existing warnings, none new), `npx jest tests/lib/indexedDbBackup.test.ts __tests__/screens/bodymap.test.tsx` (20/20 passed), full `npm test -- --coverage` (559/562 passed, same 3 pre-existing failures, 88.59% lines coverage — gate passes). Real-browser retest via `uiux-auditor` Playwright subagent: Export confirmed producing correct IndexedDB-shaped JSON with `condition_locations` = 23 (previously silently empty), matching IndexedDB ground truth; Import not live-tested (file-picker risk), relies on existing unit-test coverage. Card moved `kb2-CODE` → `kb3-TEST` for QA re-verification, per this session's task instructions (DevAgent does not self-approve to `kb4-DONE`).
