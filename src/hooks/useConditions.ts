@@ -4,7 +4,7 @@ import {
 } from '@/model/conditions'
 import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
 import {
-  getIndexedConditions, getConditionRecords, getIndexedConditionDots,
+ getIndexedConditions, getConditionRecords, getIndexedConditionDots, hasIndexedUserRecords,
   type ConditionRecordEntry, type IndexedConditionDot,
 } from '@/lib/db/indexedDb'
 import { useAppStore, type ConditionSource } from '@/store/useAppStore'
@@ -56,13 +56,16 @@ export function useConditions(sourceOverride?: ConditionSource): [
     const startedAt = Date.now()
     if (effectiveSource === 'auto') console.info('[health-pipeline] bodymap-load-started')
     getIndexedConditions(db, effectiveSource)
-      .then((rows) => {
+ .then(async (rows) => {
+ const hasUserRecords = rows.length === 0 && effectiveSource === 'auto'
+ ? await hasIndexedUserRecords(db)
+ : false
         if (effectiveSource === 'auto') console.info('[health-pipeline] bodymap-load-completed', {
           rows: rows.length,
-          usedFallback: rows.length === 0,
+ usedFallback: rows.length === 0 && !hasUserRecords,
           durationMs: Date.now() - startedAt,
         })
-        setConditions(rows.length > 0 ? rows : CONDITIONS)
+ setConditions(rows.length > 0 || hasUserRecords ? rows : CONDITIONS)
       })
       .catch((error: unknown) => {
         if (effectiveSource === 'auto') console.error('[health-pipeline] bodymap-load-failed', {
@@ -101,7 +104,12 @@ export function useConditionDots(sourceOverride?: ConditionSource): [IndexedCond
   const refresh = useCallback(() => {
     if (!db) return // initial/current state already holds the fallback
     getIndexedConditionDots(db, effectiveSource)
-      .then((rows) => setDots(rows.length > 0 ? rows : conditionsToDots(CONDITIONS)))
+ .then(async (rows) => {
+ const hasUserRecords = rows.length === 0 && effectiveSource === 'auto'
+ ? await hasIndexedUserRecords(db)
+ : false
+ setDots(rows.length > 0 || hasUserRecords ? rows : conditionsToDots(CONDITIONS))
+ })
       .catch(() => setDots(conditionsToDots(CONDITIONS)))
   }, [db, effectiveSource])
 

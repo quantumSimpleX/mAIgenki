@@ -267,6 +267,15 @@ function firstNonNull<T>(a: T | null | undefined, b: T | null | undefined): T | 
   return a ?? b ?? null
 }
 
+function latestConditionStatus(a: ConditionInput, b: ConditionInput): ConditionInput['status'] {
+  const aDate = a.date_diagnosed ?? a.date_onset
+  const bDate = b.date_diagnosed ?? b.date_onset
+  if (aDate && bDate) return bDate >= aDate ? b.status : a.status
+  if (bDate) return b.status
+  if (aDate) return a.status
+  return b.status
+}
+
 // Merges two occurrences of "the same" condition found in different chunks:
 // earliest date wins, evidence/care_events/locations concatenate, other
 // scalar fields prefer whichever occurrence already has a non-null value.
@@ -278,7 +287,7 @@ function mergeTwoConditions(a: ConditionInput, b: ConditionInput): ConditionInpu
     system: a.system,
     organ: firstNonNull(a.organ, b.organ),
     anatomical_location: firstNonNull(a.anatomical_location, b.anatomical_location),
-    status: a.status,
+    status: latestConditionStatus(a, b),
     severity: firstNonNull(a.severity, b.severity),
     certainty: firstNonNull(a.certainty, b.certainty),
     date_onset: earlierDate(a.date_onset, b.date_onset),

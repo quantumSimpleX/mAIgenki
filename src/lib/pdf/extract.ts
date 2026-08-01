@@ -104,5 +104,7 @@ async function extractOnWeb(uri: string): Promise<ExtractionResult> {
   }
   await loadingTask.destroy()
 
-  return classify(parts.join('\n').trim(), pageCount, pageBreaks, pageCharCounts)
+  // Keep the joined text untrimmed so pageBreaks remain offsets into the exact
+  // returned string, including leading separators from empty pages.
+  return classify(parts.join('\n'), pageCount, pageBreaks, pageCharCounts)
 }

@@ -51,6 +51,11 @@ function reanchorSections(text: string, sections: RecordSection[], pageBreaks: n
       : Math.min(text.length, start + 1)
   }
 
+  // Text before the first heading is still part of the record. Keep it in
+  // the first extraction chunk so diagnoses or measurements in the preamble
+  // are not silently omitted.
+  anchored[0].startOffset = 0
+
   for (let i = 0; i < anchored.length; i += 1) {
     anchored[i].endOffset = i + 1 < anchored.length ? anchored[i + 1].startOffset : text.length
   }

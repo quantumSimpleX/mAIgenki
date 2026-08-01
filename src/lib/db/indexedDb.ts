@@ -504,6 +504,15 @@ export async function getIndexedConditions(db: IDBDatabase, mode: ConditionQuery
     }))
 }
 
+// Distinguishes an initialized user database with zero extracted conditions
+// from a fresh database that should still show the design fallback.
+export async function hasIndexedUserRecords(db: IDBDatabase): Promise<boolean> {
+  const transaction = db.transaction('health_records', 'readonly')
+  const records = await requestToPromise(transaction.objectStore('health_records').getAll()) as IndexedHealthRecord[]
+  await transactionToPromise(transaction)
+  return records.some((record) => record.record_type !== 'demo')
+}
+
 // mode mirrors getIndexedConditions's demo/user visibility rule — without it,
 // demo hotspots kept rendering on the body map alongside a user's own
 // uploaded conditions once real records existed.

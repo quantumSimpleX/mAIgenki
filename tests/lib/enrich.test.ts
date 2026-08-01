@@ -371,7 +371,7 @@ describe('enrichFromText — imageSections', () => {
       'Imaging\nCT scan shows a kidney stone.', '', [], { pageBreaks: [0, 20] },
     )
     expect(result.imageSections).toHaveLength(1)
-    expect(result.imageSections?.[0]).toMatchObject({ heading: 'Imaging', pageStart: 1, pageEnd: 1 })
+    expect(result.imageSections?.[0]).toMatchObject({ heading: 'Imaging', pageStart: 1, pageEnd: 2 })
     expect(result.imageSections?.[0].conditionKeys).toHaveLength(1)
   })
 
