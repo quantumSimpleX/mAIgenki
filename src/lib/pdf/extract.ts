@@ -40,7 +40,7 @@ function classify(text: string, pageCount: number, pageBreaks: number[], pageCha
   const charsPerPage = pageCount > 0 ? text.length / pageCount : 0
   const method: 'text' | 'ocr' = charsPerPage >= MIN_CHARS_PER_PAGE ? 'text' : 'ocr'
   const imageOnlyPages = pageCharCounts
-    ?.map((count, index) => count === 0 ? index + 1 : null)
+    ?.map((count, index) => count < MIN_CHARS_PER_PAGE ? index + 1 : null)
     .filter((page): page is number => page != null)
   return {
     text, pageCount, method, pageBreaks,

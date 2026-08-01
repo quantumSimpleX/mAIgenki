@@ -59,6 +59,50 @@ export async function buildIndexedDbBackup(db: IDBDatabase): Promise<IndexedDbBa
 // row must be a plain object. Without this, a truncated or hand-edited backup
 // file would still pass the envelope check, clear every live store, and then
 // restore only whatever partial data it did contain, silently wiping the rest.
+type BackupRow = Record<string, unknown>
+
+function isRecord(value: unknown): value is BackupRow {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isNullableString(value: unknown): boolean {
+  return value === null || typeof value === 'string'
+}
+
+function isNullableNumber(value: unknown): boolean {
+  return value === null || (typeof value === 'number' && Number.isFinite(value))
+}
+
+function isStringArray(value: unknown): boolean {
+  return value === null || (Array.isArray(value) && value.every((item) => typeof item === 'string'))
+}
+
+function isBlob(value: unknown): boolean {
+  return typeof Blob !== 'undefined' && value instanceof Blob
+}
+
+function requireField(
+  row: BackupRow,
+  storeName: string,
+  field: string,
+  predicate: (value: unknown) => boolean,
+): void {
+  if (!Object.prototype.hasOwnProperty.call(row, field) || !predicate(row[field])) {
+    throw new Error(`Invalid backup: store "${storeName}" has an invalid "${field}" field`)
+  }
+}
+
+function optionalField(
+  row: BackupRow,
+  storeName: string,
+  field: string,
+  predicate: (value: unknown) => boolean,
+): void {
+  if (Object.prototype.hasOwnProperty.call(row, field) && !predicate(row[field])) {
+    throw new Error(`Invalid backup: store "${storeName}" has an invalid "${field}" field`)
+  }
+}
+
 function validateBackupStores(stores: unknown): asserts stores is Record<string, unknown[]> {
   if (typeof stores !== 'object' || stores === null || Array.isArray(stores)) {
     throw new Error('Invalid backup: "stores" is missing or not an object')
@@ -69,9 +113,110 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
     if (!Array.isArray(rows)) {
       throw new Error(`Invalid backup: store "${storeName}" is missing or not an array`)
     }
-    if (rows.some((row) => typeof row !== 'object' || row === null || Array.isArray(row))) {
+    if (rows.some((row) => !isRecord(row))) {
       throw new Error(`Invalid backup: store "${storeName}" contains a malformed row`)
     }
+  }
+
+  const rows = (storeName: string): BackupRow[] => record[storeName] as BackupRow[]
+  const healthRecordIds = new Set<string>()
+  const conditionIds = new Set<string>()
+  const imageIds = new Set<string>()
+
+  for (const row of rows('health_records')) {
+    requireField(row, 'health_records', 'id', (value) => typeof value === 'string')
+    requireField(row, 'health_records', 'filename', (value) => typeof value === 'string')
+    requireField(row, 'health_records', 'record_type', isNullableString)
+    optionalField(row, 'health_records', 'page_count', isNullableNumber)
+    optionalField(row, 'health_records', 'extraction_method', isNullableString)
+    healthRecordIds.add(row.id as string)
+  }
+
+  for (const row of rows('conditions')) {
+    requireField(row, 'conditions', 'id', (value) => typeof value === 'string')
+    requireField(row, 'conditions', 'record_id', (value) => value === null || (typeof value === 'string' && healthRecordIds.has(value)))
+    requireField(row, 'conditions', 'name_medical', (value) => typeof value === 'string')
+    requireField(row, 'conditions', 'name_common', isNullableString)
+    requireField(row, 'conditions', 'system', (value) => typeof value === 'string')
+    requireField(row, 'conditions', 'status', (value) => value === 'documented' || value === 'resolved' || value === 'inferred')
+    requireField(row, 'conditions', 'cx', (value) => typeof value === 'number' && Number.isFinite(value))
+    requireField(row, 'conditions', 'cy', (value) => typeof value === 'number' && Number.isFinite(value))
+    requireField(row, 'conditions', 'year_frac', (value) => typeof value === 'number' && Number.isFinite(value))
+    requireField(row, 'conditions', 'date', isNullableString)
+    requireField(row, 'conditions', 'note', isNullableString)
+    requireField(row, 'conditions', 'evidence', isNullableString)
+    requireField(row, 'conditions', 'local_names', (value) => value === null || isRecord(value))
+    requireField(row, 'conditions', 'inferred_fields', isStringArray)
+    conditionIds.add(row.id as string)
+  }
+
+  for (const row of rows('condition_locations')) {
+    requireField(row, 'condition_locations', 'id', (value) => typeof value === 'string')
+    requireField(row, 'condition_locations', 'condition_id', (value) => typeof value === 'string' && conditionIds.has(value))
+    requireField(row, 'condition_locations', 'cx', (value) => typeof value === 'number' && Number.isFinite(value))
+    requireField(row, 'condition_locations', 'cy', (value) => typeof value === 'number' && Number.isFinite(value))
+    requireField(row, 'condition_locations', 'is_primary', (value) => typeof value === 'boolean')
+    optionalField(row, 'condition_locations', 'anatomical_location', isNullableString)
+    optionalField(row, 'condition_locations', 'laterality', isNullableString)
+    optionalField(row, 'condition_locations', 'evidence', isNullableString)
+  }
+
+  for (const row of rows('record_images')) {
+    requireField(row, 'record_images', 'id', (value) => typeof value === 'string')
+    requireField(row, 'record_images', 'record_id', (value) => typeof value === 'string' && healthRecordIds.has(value))
+    requireField(row, 'record_images', 'page_number', isNullableNumber)
+    requireField(row, 'record_images', 'source_file', isNullableString)
+    requireField(row, 'record_images', 'title', isNullableString)
+    requireField(row, 'record_images', 'mime_type', (value) => typeof value === 'string')
+    requireField(row, 'record_images', 'width', isNullableNumber)
+    requireField(row, 'record_images', 'height', isNullableNumber)
+    requireField(row, 'record_images', 'byte_size', isNullableNumber)
+    requireField(row, 'record_images', 'image_blob', isBlob)
+    requireField(row, 'record_images', 'thumbnail_blob', (value) => value === null || isBlob(value))
+    requireField(row, 'record_images', 'date', isNullableString)
+    requireField(row, 'record_images', 'notes', isNullableString)
+    requireField(row, 'record_images', 'created_at', (value) => typeof value === 'string')
+    imageIds.add(row.id as string)
+  }
+
+  for (const row of rows('condition_records')) {
+    requireField(row, 'condition_records', 'id', (value) => typeof value === 'string')
+    requireField(row, 'condition_records', 'condition_id', (value) => typeof value === 'string' && conditionIds.has(value))
+    requireField(row, 'condition_records', 'record_type', (value) => typeof value === 'string')
+    requireField(row, 'condition_records', 'title', isNullableString)
+    requireField(row, 'condition_records', 'image_id', (value) => value === null || (typeof value === 'string' && imageIds.has(value)))
+    requireField(row, 'condition_records', 'chart_json', isNullableString)
+    requireField(row, 'condition_records', 'table_json', isNullableString)
+    requireField(row, 'condition_records', 'color', isNullableString)
+    requireField(row, 'condition_records', 'date', isNullableString)
+    requireField(row, 'condition_records', 'source_file', isNullableString)
+    requireField(row, 'condition_records', 'notes', isNullableString)
+    requireField(row, 'condition_records', 'created_at', (value) => typeof value === 'string')
+  }
+
+  for (const row of rows('measurements')) {
+    requireField(row, 'measurements', 'id', (value) => typeof value === 'string')
+    requireField(row, 'measurements', 'record_id', (value) => value === null || (typeof value === 'string' && healthRecordIds.has(value)))
+    requireField(row, 'measurements', 'name', (value) => typeof value === 'string')
+    requireField(row, 'measurements', 'value_numeric', isNullableNumber)
+    requireField(row, 'measurements', 'unit', isNullableString)
+    requireField(row, 'measurements', 'date', (value) => typeof value === 'string')
+    requireField(row, 'measurements', 'inferred_fields', isStringArray)
+  }
+
+  for (const row of rows('providers')) {
+    requireField(row, 'providers', 'id', (value) => typeof value === 'string')
+    requireField(row, 'providers', 'record_id', (value) => typeof value === 'string' && healthRecordIds.has(value))
+    requireField(row, 'providers', 'name', (value) => typeof value === 'string')
+    requireField(row, 'providers', 'specialty', isNullableString)
+    requireField(row, 'providers', 'email', isNullableString)
+    requireField(row, 'providers', 'phone', isNullableString)
+    requireField(row, 'providers', 'evidence', isNullableString)
+  }
+
+  for (const row of rows('settings')) {
+    requireField(row, 'settings', 'key', (value) => typeof value === 'string')
+    requireField(row, 'settings', 'value', (value) => typeof value === 'string')
   }
 }
 
