@@ -386,9 +386,12 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     await putIndexedConditionLocation(db, {
       id: `${conditionId}-primary`, condition_id: conditionId, cx, cy, is_primary: true,
     })
-    for (const loc of c.locations ?? []) {
+    // Deterministic id (not uuid()) so re-seeding the same condition (e.g.
+    // demo data reloaded) upserts each secondary location in place instead of
+    // accumulating a fresh duplicate row per run.
+    for (const [index, loc] of (c.locations ?? []).entries()) {
       await putIndexedConditionLocation(db, {
-        id: uuid(), condition_id: conditionId, cx: loc.cx ?? cx, cy: loc.cy ?? cy, is_primary: false,
+        id: `${conditionId}-loc-${index}`, condition_id: conditionId, cx: loc.cx ?? cx, cy: loc.cy ?? cy, is_primary: false,
         anatomical_location: loc.anatomical_location ?? null,
         laterality: loc.laterality ?? null,
         evidence: loc.evidence ?? null,

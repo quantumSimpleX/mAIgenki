@@ -34,7 +34,10 @@ function toConditionRecord(r: ConditionRecordEntry): ConditionRecord {
 
 // Loads seeded conditions from IndexedDB, falling back to the hardcoded
 // CONDITIONS (used in tests, before the DB is seeded, or when the DB is
-// unavailable on web).
+// unavailable on web). Reads only IndexedDB, not the legacy expo-sqlite
+// store, by design — see CLAUDE.md/AGENTS.md: mAIgenki hasn't launched, so
+// no user has ever saved a real record against expo-sqlite, and no
+// SQLite-to-IndexedDB migration is needed.
 export function useConditions(sourceOverride?: ConditionSource): [
   DesignCondition[],
   () => void,

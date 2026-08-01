@@ -13,7 +13,7 @@ import {
   persistEnrichmentResult, putRecordImage, putConditionRecord,
   type EnrichedInput, type PersistEnrichmentResult,
 } from './db/indexedDb'
-import { redactPII, extractProviderContacts } from './privacy/redact'
+import { redactPIIWithOffsetMap, extractProviderContacts } from './privacy/redact'
 import { renderPageToCanvas } from './pdf/renderPage'
 import { compressToTarget } from './media/compress'
 
@@ -257,9 +257,15 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
     durationMs: Date.now() - extractionStartedAt,
   })
 
-  // Step 2 — redact PII before any text leaves the device
+  // Step 2 — redact PII before any text leaves the device. `pageBreaks` was
+  // computed against the original (pre-redaction) `text`, but downstream
+  // page-resolution (structure.ts, via enrichFromText below) runs against
+  // `safeText` — a redaction like `[PATIENT NAME]` changes the surrounding
+  // text's length, so pageBreaks must be rebased onto safeText's offsets or
+  // an image-worthy section can resolve to the wrong page.
   report(1, 0.4)
-  const safeText = redactPII(text)
+  const { text: safeText, mapOffset: mapToSafeTextOffset } = redactPIIWithOffsetMap(text)
+  if (pageBreaks) pageBreaks = pageBreaks.map(mapToSafeTextOffset)
   const localProviderContacts = extractProviderContacts(text)
   trace('redaction-completed', {
     originalCharacters: text.length,

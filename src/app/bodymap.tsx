@@ -616,13 +616,21 @@ function GhostDots({
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       >
-        {visible.map((d) => (
-          <Circle
-            key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)} r={1.5}
-            fill={SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'} fillOpacity={0.3}
-            pointerEvents="none"
-          />
-        ))}
+        {visible.map((d) => {
+          const isInferred = d.status === 'inferred'
+          const color = SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'
+          return (
+            <Circle
+              key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)} r={1.5}
+              fill={isInferred ? 'none' : color} fillOpacity={isInferred ? undefined : 0.3}
+              stroke={isInferred ? color : 'none'}
+              strokeWidth={isInferred ? 1 : 0}
+              strokeOpacity={isInferred ? 0.3 : undefined}
+              strokeDasharray={isInferred ? '1.2,1' : undefined}
+              pointerEvents="none"
+            />
+          )
+        })}
       </Svg>
       {/* Click-handling layer: outside the SVG to avoid SVG pointer-events fragility */}
       {IS_WEB ? (

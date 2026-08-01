@@ -20,6 +20,19 @@ describe('IndexedDB vertical slice', () => {
     db.close()
   })
 
+  // Regression for a Codex review finding on PR #1: secondary locations were
+  // given a fresh random id on every persistEnrichmentResult call, so
+  // re-seeding the same condition (e.g. reloading demo data) accumulated
+  // duplicate overlapping dots instead of overwriting the prior ones.
+  it('does not duplicate secondary-location dots when demo data is seeded twice', async () => {
+    const db = await openIndexedDb(`maigenki-reseed-${Date.now()}`)
+    await seedIndexedDbDemoData(db)
+    await seedIndexedDbDemoData(db)
+    const dots = await getIndexedConditionDots(db)
+    expect(dots).toHaveLength(CONDITIONS.length + 5) // unchanged from a single seed
+    db.close()
+  })
+
   it('creates the versioned stores and relationship indexes', async () => {
     const db = await openIndexedDb(`maigenki-schema-${Date.now()}`)
     expect(Array.from(db.objectStoreNames)).toEqual(expect.arrayContaining([
