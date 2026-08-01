@@ -1,5 +1,7 @@
 import 'fake-indexeddb/auto'
-import { getIndexedConditionDots, openIndexedDb, persistEnrichmentResult, seedIndexedDbDemoData } from '@/lib/db/indexedDb'
+import {
+  getIndexedConditionDots, getProvidersForRecord, openIndexedDb, persistEnrichmentResult, seedIndexedDbDemoData,
+} from '@/lib/db/indexedDb'
 import { CONDITIONS, CONDITION_RECORDS } from '@/model/conditions'
 
 describe('IndexedDB vertical slice', () => {
@@ -21,7 +23,8 @@ describe('IndexedDB vertical slice', () => {
   it('creates the versioned stores and relationship indexes', async () => {
     const db = await openIndexedDb(`maigenki-schema-${Date.now()}`)
     expect(Array.from(db.objectStoreNames)).toEqual(expect.arrayContaining([
-      'health_records', 'conditions', 'condition_locations', 'record_images', 'condition_records', 'settings',
+      'health_records', 'conditions', 'condition_locations', 'record_images', 'condition_records',
+      'measurements', 'providers', 'settings',
     ]))
     const transaction = db.transaction('condition_locations', 'readonly')
     expect(transaction.objectStore('condition_locations').indexNames.contains('condition_id')).toBe(true)
@@ -58,18 +61,15 @@ describe('IndexedDB vertical slice', () => {
     db.close()
   })
 
-  // Regression for kb2-CODE/p01-provider-Phase-attribution-fix.md: IndexedDB
-  // has no provider/facility/care-event object stores yet (a documented,
-  // intentional gap — see p02's Blockers #1), so `EnrichedInput.providers` and
-  // a condition's own `provider` field must be accepted for shape-compat only
-  // and never silently written anywhere. This guards against a future change
-  // reintroducing the original blanket-fallback bug by wiring provider
-  // persistence in without the per-condition evidence gate.
-  it('does not persist provider data anywhere — no provider store, no provider field on stored conditions', async () => {
-    const db = await openIndexedDb(`maigenki-provider-guard-${Date.now()}`)
+  // Regression for a Codex review finding on PR #1: real uploads were silently
+  // discarding `EnrichedInput.providers` because IndexedDB had no store for it.
+  // persistEnrichmentResult trusts its caller to have already evidence-gated
+  // the list (see pipeline.ts) — it just needs to persist whatever it's given.
+  it('persists EnrichedInput.providers to the record-scoped providers store', async () => {
+    const db = await openIndexedDb(`maigenki-provider-${Date.now()}`)
     const attributedProvider = { name: 'Dr. Kim', specialty: null, email: null, phone: null, evidence: 'seen by Dr. Kim' }
 
-    await persistEnrichmentResult(db, {
+    const { recordId } = await persistEnrichmentResult(db, {
       filename: 'report.pdf',
       pageCount: 1,
       extractionMethod: 'text',
@@ -83,17 +83,72 @@ describe('IndexedDB vertical slice', () => {
       providers: [attributedProvider],
     })
 
-    expect(Array.from(db.objectStoreNames)).not.toEqual(expect.arrayContaining([
-      'providers', 'facilities', 'condition_providers', 'condition_care_events',
-    ]))
+    expect(Array.from(db.objectStoreNames)).toEqual(expect.arrayContaining(['providers']))
 
-    const conditions = await new Promise<unknown[]>((resolve, reject) => {
-      const req = db.transaction('conditions', 'readonly').objectStore('conditions').getAll()
-      req.onsuccess = () => resolve(req.result)
-      req.onerror = () => reject(req.error)
+    const stored = await getProvidersForRecord(db, recordId)
+    expect(stored).toHaveLength(1)
+    expect(stored[0]).toMatchObject(attributedProvider)
+
+    db.close()
+  })
+
+  // Regression for a Codex review finding on PR #1: an LLM-detected inferred
+  // condition's status was computed but never written, so bodymap.tsx had no
+  // way to distinguish it from a documented one (AGENTS.md hard constraint).
+  it('persists and reads back condition status, including inferred', async () => {
+    const db = await openIndexedDb(`maigenki-status-${Date.now()}`)
+
+    await persistEnrichmentResult(db, {
+      filename: 'report.pdf',
+      pageCount: 1,
+      extractionMethod: 'text',
+      conditions: [
+        {
+          id: 'documented-1', name_medical: 'Essential hypertension', name_common: null, system: 'cardiovascular',
+          organ: null, anatomical_location: null, status: 'documented', severity: null, certainty: null,
+          date_onset: null, date_diagnosed: '2022-06-01', evidence: 'BP 145/92',
+        },
+        {
+          id: 'inferred-1', name_medical: 'Hypertension', name_common: null, system: 'cardiovascular',
+          organ: null, anatomical_location: null, status: 'inferred', severity: null, certainty: null,
+          date_onset: null, date_diagnosed: '2022-06-01', evidence: 'Inferred from repeated BP readings',
+        },
+      ],
+      measurements: [],
     })
-    expect(conditions).toHaveLength(1)
-    expect(conditions[0]).not.toHaveProperty('provider')
+
+    const dots = await getIndexedConditionDots(db)
+    expect(dots.find((d) => d.conditionId === 'documented-1')?.status).toBe('documented')
+    expect(dots.find((d) => d.conditionId === 'inferred-1')?.status).toBe('inferred')
+
+    db.close()
+  })
+
+  // Regression for a Codex review finding on PR #1: getIndexedConditionDots
+  // had no demo/user visibility filter, unlike getIndexedConditions — so demo
+  // hotspots kept rendering on the body map after a real upload existed.
+  it('hides demo dots once a real record exists, in auto mode', async () => {
+    const db = await openIndexedDb(`maigenki-dot-filter-${Date.now()}`)
+    await seedIndexedDbDemoData(db)
+
+    await persistEnrichmentResult(db, {
+      filename: 'report.pdf',
+      pageCount: 1,
+      extractionMethod: 'text',
+      conditions: [{
+        id: 'user-1', name_medical: 'Essential hypertension', name_common: null, system: 'cardiovascular',
+        organ: null, anatomical_location: null, status: 'documented', severity: null, certainty: null,
+        date_onset: null, date_diagnosed: '2022-06-01', evidence: 'BP 145/92',
+      }],
+      measurements: [],
+    })
+
+    const autoDots = await getIndexedConditionDots(db, 'auto')
+    expect(autoDots.every((d) => d.conditionId === 'user-1')).toBe(true)
+
+    const demoDots = await getIndexedConditionDots(db, 'demo')
+    expect(demoDots.some((d) => d.conditionId === 'stones')).toBe(true)
+    expect(demoDots.every((d) => d.conditionId !== 'user-1')).toBe(true)
 
     db.close()
   })

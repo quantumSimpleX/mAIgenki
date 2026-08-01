@@ -13,7 +13,7 @@ export type OrgSystem =
   | 'endocrine'        // Endocrine
   | 'reproductive'       // Reproductive
 
-export type ConditionStatus = 'documented' | 'resolved' | 'inferred'
+export type ConditionStatus = 'documented' | 'resolved' | 'suspected' | 'inferred'
 
 export type Condition = {
   id: string

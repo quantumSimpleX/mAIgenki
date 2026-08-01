@@ -14,6 +14,7 @@ import { useAppStore, type ConditionSource } from '@/store/useAppStore'
 function conditionsToDots(conditions: DesignCondition[]): IndexedConditionDot[] {
   return conditions.map((c) => ({
     conditionId: c.id, system: c.system, cx_percent: c.cx_percent, cy_percent: c.cy_percent, yearFrac: c.yearFrac,
+    status: c.status ?? 'documented',
   }))
 }
 
@@ -98,10 +99,10 @@ export function useConditionDots(sourceOverride?: ConditionSource): [IndexedCond
 
   const refresh = useCallback(() => {
     if (!db) return // initial/current state already holds the fallback
-    getIndexedConditionDots(db)
+    getIndexedConditionDots(db, effectiveSource)
       .then((rows) => setDots(rows.length > 0 ? rows : conditionsToDots(CONDITIONS)))
       .catch(() => setDots(conditionsToDots(CONDITIONS)))
-  }, [db])
+  }, [db, effectiveSource])
 
   useEffect(() => { refresh() }, [refresh, effectiveSource])
 

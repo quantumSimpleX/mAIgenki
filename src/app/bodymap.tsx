@@ -683,12 +683,16 @@ function BodySvg({
       {visibleDots.map((d) => {
         const isSelected = selectedCondition?.id === d.conditionId
         const isRelocating = relocatingCondition?.id === d.conditionId
+        const isInferred = d.status === 'inferred'
         const color = SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'
         return (
           <Circle
             key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)}
             r={isRelocating ? 4 : isSelected ? 2.5 : 1.5}
-            fill={color}
+            fill={isInferred ? 'none' : color}
+            stroke={isInferred ? color : 'none'}
+            strokeWidth={isInferred ? 1 : 0}
+            strokeDasharray={isInferred ? '1.2,1' : undefined}
             pointerEvents="none"
           />
         )
@@ -1256,7 +1260,14 @@ function ConditionSheet() {
           {/* Common name in the preferred language; English common + full name
               beneath (only when the preferred language isn't English, where the
               title already is the English common name). */}
-          <Text style={styles.sheetCondNameLarge}>{localName}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc(8) }}>
+            <Text style={styles.sheetCondNameLarge}>{localName}</Text>
+            {selectedCondition.status === 'inferred' && (
+              <View style={styles.inferredBadge}>
+                <Text style={styles.inferredBadgeText}>Inferred</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.sheetCondSubEn}>
             {preferredLanguage !== 'en'
               ? `${selectedCondition.label} · ${selectedCondition.medName}`
@@ -2464,6 +2475,12 @@ const styles = StyleSheet.create({
 
   sheetCondNameLarge: { fontFamily: 'MOMCAKE-Bold', fontSize: fs(26), color: C.ink, marginBottom: sc(4) },
   sheetCondSubEn: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(13), color: C.inkMuted, marginBottom: sc(10) },
+  inferredBadge: {
+    borderWidth: 1, borderColor: C.inkMuted, borderRadius: sc(4), paddingHorizontal: sc(6), paddingVertical: sc(2), marginBottom: sc(4),
+  },
+  inferredBadgeText: {
+    fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), textTransform: 'uppercase', letterSpacing: sc(1), color: C.inkMuted,
+  },
 
   sheetDateRow: { marginBottom: sc(12) },
   dateViewRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8) },

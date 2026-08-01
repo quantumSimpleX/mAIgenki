@@ -1,4 +1,4 @@
-import type { OrgSystem } from '@/model/health'
+import type { OrgSystem, ConditionStatus } from '@/model/health'
 
 export type SystemId = OrgSystem
 
@@ -20,6 +20,9 @@ export type DesignCondition = {
   cy_percent: number
   note: string
   evidence: string
+  // Undefined for the hardcoded CONDITIONS fallback (pre-DB-load state) —
+  // callers should treat missing status as 'documented'.
+  status?: ConditionStatus
   locations?: Array<{
     cx_percent: number
     cy_percent: number

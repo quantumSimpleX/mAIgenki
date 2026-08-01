@@ -1,5 +1,8 @@
 import 'fake-indexeddb/auto'
-import { openIndexedDb, seedIndexedDbDemoData, getIndexedConditionDots, putRecordImage, getRecordImageBlob } from '@/lib/db/indexedDb'
+import {
+  openIndexedDb, seedIndexedDbDemoData, getIndexedConditionDots, putRecordImage, getRecordImageBlob,
+  putIndexedMeasurement, putIndexedProvider, getProvidersForRecord,
+} from '@/lib/db/indexedDb'
 import {
   buildIndexedDbBackup, restoreIndexedDbBackup, exportIndexedDbBackupToJson, importIndexedDbBackupFromJson,
 } from '@/lib/db/indexedDbBackup'
@@ -67,6 +70,40 @@ describe('IndexedDB backup adapter', () => {
     const restored = await getRecordImageBlob(db, 'img-1')
     expect(restored).not.toBeNull()
     expect(restored!.mimeType).toBe('image/png')
+
+    db.close()
+  })
+
+  // Regression for a Codex review finding on PR #1: the `measurements` store
+  // was missing from INDEXED_DB_BACKUP_STORES, so export/import silently
+  // dropped all lab/vital history. `providers` (added alongside the new
+  // providers store) is covered the same way.
+  it('round-trips measurements and providers through a backup', async () => {
+    const db = await openIndexedDb(`maigenki-backup-measurements-${Date.now()}`)
+    await putIndexedMeasurement(db, {
+      id: 'm-1', record_id: 'rec-1', name: 'Blood pressure', value_numeric: 145, unit: 'mmHg',
+      date: '2022-06-01', inferred_fields: null,
+    })
+    await putIndexedProvider(db, {
+      id: 'p-1', record_id: 'rec-1', name: 'Dr. Kim', specialty: null, email: null, phone: null, evidence: 'seen by Dr. Kim',
+    })
+
+    const backup = await buildIndexedDbBackup(db)
+    db.transaction('measurements', 'readwrite').objectStore('measurements').clear()
+    db.transaction('providers', 'readwrite').objectStore('providers').clear()
+    await restoreIndexedDbBackup(db, backup)
+
+    const measurementsTx = db.transaction('measurements', 'readonly')
+    const measurements = await new Promise<unknown[]>((resolve, reject) => {
+      const req = measurementsTx.objectStore('measurements').getAll()
+      req.onsuccess = () => resolve(req.result)
+      req.onerror = () => reject(req.error)
+    })
+    expect(measurements).toHaveLength(1)
+
+    const providers = await getProvidersForRecord(db, 'rec-1')
+    expect(providers).toHaveLength(1)
+    expect(providers[0].name).toBe('Dr. Kim')
 
     db.close()
   })

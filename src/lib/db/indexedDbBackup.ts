@@ -7,6 +7,8 @@ export const INDEXED_DB_BACKUP_STORES = [
   'condition_locations',
   'record_images',
   'condition_records',
+  'measurements',
+  'providers',
   'settings',
 ] as const
 

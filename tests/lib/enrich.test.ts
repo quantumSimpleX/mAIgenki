@@ -1,4 +1,4 @@
-import { enrichFromText, EnrichmentFailedError } from '@/lib/llm/enrich'
+import { enrichFromText, EnrichmentFailedError, coalesceImageSections } from '@/lib/llm/enrich'
 import { callLLMWithFallback } from '@/lib/llm/client'
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
@@ -399,5 +399,28 @@ describe('enrichFromText — imageSections', () => {
 
     const result = await enrichFromText('Imaging\nCT scan shows a kidney stone.', '', [])
     expect(result.imageSections).toBeUndefined()
+  })
+})
+
+// Regression for a Codex review finding on PR #1: a section longer than the
+// chunk char limit splits into multiple chunks that all inherit the same
+// pageStart/pageEnd, and each was pushing its own imageSections entry —
+// producing duplicate image captures/timeline entries for one page range.
+describe('coalesceImageSections', () => {
+  it('merges entries sharing a page range and unions their conditionKeys', () => {
+    const merged = coalesceImageSections([
+      { heading: 'Imaging', pageStart: 1, pageEnd: 3, inferredDate: '2023-01-01', conditionKeys: ['a', 'b'] },
+      { heading: 'Imaging', pageStart: 1, pageEnd: 3, inferredDate: '2023-01-01', conditionKeys: ['b', 'c'] },
+    ])
+    expect(merged).toHaveLength(1)
+    expect(merged[0].conditionKeys.sort()).toEqual(['a', 'b', 'c'])
+  })
+
+  it('keeps distinct page ranges as separate entries', () => {
+    const merged = coalesceImageSections([
+      { heading: 'Imaging', pageStart: 1, pageEnd: 1, inferredDate: null, conditionKeys: ['a'] },
+      { heading: 'Labs', pageStart: 2, pageEnd: 2, inferredDate: null, conditionKeys: ['b'] },
+    ])
+    expect(merged).toHaveLength(2)
   })
 })

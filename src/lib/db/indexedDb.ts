@@ -9,7 +9,9 @@ import type { ConditionInput, MeasurementInput, ProviderInput } from '@/lib/llm/
 export const INDEXED_DB_NAME = 'maigenki'
 // v2 adds the `measurements` store and the `record_images.record_id` index —
 // bumped so onupgradeneeded re-fires for databases already created at v1.
-export const INDEXED_DB_VERSION = 2
+// v3 adds the `providers` store, so structured provider data from real
+// uploads (previously discarded) is retained.
+export const INDEXED_DB_VERSION = 3
 
 export const DEMO_RECORD_ID = 'demo-record'
 const DEMO_IMAGE_ID = 'demo-image-stones-kub'
@@ -28,6 +30,7 @@ export type IndexedCondition = {
   name_medical: string
   name_common: string | null
   system: string
+  status: ConditionInput['status']
   cx: number
   cy: number
   year_frac: number
@@ -49,6 +52,9 @@ export type IndexedConditionLocation = {
   cx: number
   cy: number
   is_primary: boolean
+  anatomical_location?: string | null
+  laterality?: string | null
+  evidence?: string | null
 }
 
 export type IndexedConditionDot = {
@@ -57,6 +63,7 @@ export type IndexedConditionDot = {
   cx_percent: number
   cy_percent: number
   yearFrac: number
+  status: ConditionInput['status']
 }
 
 export type RecordImage = {
@@ -101,6 +108,16 @@ export type IndexedMeasurement = {
   inferred_fields: string[] | null
 }
 
+export type IndexedProvider = {
+  id: string
+  record_id: string
+  name: string
+  specialty: string | null
+  email: string | null
+  phone: string | null
+  evidence: string | null
+}
+
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0
@@ -135,6 +152,7 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
       ['record_images', { keyPath: 'id' }],
       ['condition_records', { keyPath: 'id' }],
       ['measurements', { keyPath: 'id' }],
+      ['providers', { keyPath: 'id' }],
       ['settings', { keyPath: 'key' }],
     ]
     for (const [storeName, options] of stores) {
@@ -148,6 +166,8 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
     if (images && !images.indexNames.contains('record_id')) images.createIndex('record_id', 'record_id')
     const measurements = request.transaction?.objectStore('measurements')
     if (measurements && !measurements.indexNames.contains('record_id')) measurements.createIndex('record_id', 'record_id')
+    const providers = request.transaction?.objectStore('providers')
+    if (providers && !providers.indexNames.contains('record_id')) providers.createIndex('record_id', 'record_id')
   }
   return requestToPromise(request)
 }
@@ -255,6 +275,21 @@ export async function putIndexedMeasurement(db: IDBDatabase, measurement: Indexe
   await transactionToPromise(transaction)
 }
 
+export async function putIndexedProvider(db: IDBDatabase, provider: IndexedProvider): Promise<void> {
+  const transaction = db.transaction('providers', 'readwrite')
+  transaction.objectStore('providers').put(provider)
+  await transactionToPromise(transaction)
+}
+
+export async function getProvidersForRecord(db: IDBDatabase, recordId: string): Promise<IndexedProvider[]> {
+  const transaction = db.transaction('providers', 'readonly')
+  const rows = await requestToPromise(
+    transaction.objectStore('providers').index('record_id').getAll(recordId),
+  ) as IndexedProvider[]
+  await transactionToPromise(transaction)
+  return rows
+}
+
 // Updates a condition's own position and its primary condition_locations
 // record together, so getIndexedConditionDots (which prefers stored locations
 // over the condition's own cx/cy once any location exists) reflects the move.
@@ -304,11 +339,10 @@ export async function putIndexedSetting(db: IDBDatabase, key: string, value: str
 // userDataReq.md §2a, everything from inference rules onward must be identical
 // for demo and real data, not just similar.
 //
-// Known gap: IndexedDB has no facilities/providers/condition_care_events
-// stores yet (Phase 2's task list never defines them), so `providers` is
-// accepted for shape-compatibility but not persisted. Real (non-demo) uploads
-// will not retain structured provider/facility/care-event data until a later
-// phase adds those stores — tracked as a follow-up, not silently patched over.
+// Known gap: IndexedDB has no facilities/condition_care_events stores yet
+// (Phase 2's task list never defines them), so only the flat `providers` list
+// (name/specialty/contact/evidence, record-scoped) is persisted — facility and
+// per-condition care-event detail is still discarded, tracked as a follow-up.
 export type EnrichedInput = {
   filename: string
   pageCount: number | null
@@ -339,6 +373,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
       name_medical: c.name_medical,
       name_common: c.name_common,
       system: c.system,
+      status: c.status,
       cx: c.cx ?? undefined,
       cy: c.cy ?? undefined,
       year_frac: parseDateFrac(dateForTimeline),
@@ -354,6 +389,9 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     for (const loc of c.locations ?? []) {
       await putIndexedConditionLocation(db, {
         id: uuid(), condition_id: conditionId, cx: loc.cx ?? cx, cy: loc.cy ?? cy, is_primary: false,
+        anatomical_location: loc.anatomical_location ?? null,
+        laterality: loc.laterality ?? null,
+        evidence: loc.evidence ?? null,
       })
     }
   }
@@ -367,6 +405,18 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
       unit: m.unit,
       date: m.date ?? new Date().toISOString().slice(0, 10),
       inferred_fields: m.inferred_from_structure && m.inferred_from_structure.length > 0 ? m.inferred_from_structure : null,
+    })
+  }
+
+  for (const p of input.providers ?? []) {
+    await putIndexedProvider(db, {
+      id: uuid(),
+      record_id: recordId,
+      name: p.name,
+      specialty: p.specialty,
+      email: p.email,
+      phone: p.phone,
+      evidence: p.evidence,
     })
   }
 
@@ -436,20 +486,35 @@ export async function getIndexedConditions(db: IDBDatabase, mode: ConditionQuery
       cy_percent: c.cy,
       note: c.note ?? '',
       evidence: c.evidence ?? '',
+      status: c.status,
     }))
 }
 
-export async function getIndexedConditionDots(db: IDBDatabase): Promise<IndexedConditionDot[]> {
-  const transaction = db.transaction(['conditions', 'condition_locations'], 'readonly')
-  const conditions = await requestToPromise(transaction.objectStore('conditions').getAll()) as IndexedCondition[]
+// mode mirrors getIndexedConditions's demo/user visibility rule — without it,
+// demo hotspots kept rendering on the body map alongside a user's own
+// uploaded conditions once real records existed.
+export async function getIndexedConditionDots(db: IDBDatabase, mode: ConditionQueryMode = 'auto'): Promise<IndexedConditionDot[]> {
+  const transaction = db.transaction(['health_records', 'conditions', 'condition_locations'], 'readonly')
+  const healthRecords = await requestToPromise(transaction.objectStore('health_records').getAll()) as IndexedHealthRecord[]
+  const allConditions = await requestToPromise(transaction.objectStore('conditions').getAll()) as IndexedCondition[]
   const locations = await requestToPromise(transaction.objectStore('condition_locations').getAll()) as IndexedConditionLocation[]
   await transactionToPromise(transaction)
+  const demoRecordIds = new Set(healthRecords.filter((r) => r.record_type === 'demo').map((r) => r.id))
+  const hasUserRecords = healthRecords.some((r) => r.record_type !== 'demo')
+  const conditions = mode === 'demo'
+    ? allConditions.filter((c) => c.record_id && demoRecordIds.has(c.record_id))
+    : hasUserRecords
+      ? allConditions.filter((c) => !c.record_id || !demoRecordIds.has(c.record_id))
+      : allConditions
   const byCondition = new Map<string, IndexedConditionLocation[]>()
   for (const location of locations) byCondition.set(location.condition_id, [...(byCondition.get(location.condition_id) ?? []), location])
   return conditions.flatMap((condition) => {
     const conditionLocations = byCondition.get(condition.id) ?? []
     const points = conditionLocations.length > 0 ? conditionLocations : [{ cx: condition.cx, cy: condition.cy }]
-    return points.map((point) => ({ conditionId: condition.id, system: condition.system, cx_percent: point.cx, cy_percent: point.cy, yearFrac: condition.year_frac }))
+    return points.map((point) => ({
+      conditionId: condition.id, system: condition.system, cx_percent: point.cx, cy_percent: point.cy,
+      yearFrac: condition.year_frac, status: condition.status,
+    }))
   })
 }
 

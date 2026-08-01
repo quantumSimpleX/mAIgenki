@@ -2,6 +2,7 @@ import { callLLMWithFallback, DEFAULT_MODELS } from './client'
 import { analyzeRecordStructure, type EnrichRoutingOptions } from './structure'
 import { chunkRecordBySections, type TextChunk } from './chunk'
 import { runWithConcurrency } from './pool'
+import type { ConditionStatus } from '@/model/health'
 
 export type { EnrichRoutingOptions } from './structure'
 
@@ -29,7 +30,7 @@ export type ConditionInput = {
   system: string
   organ: string | null
   anatomical_location: string | null
-  status: 'documented' | 'resolved' | 'suspected' | 'inferred'
+  status: ConditionStatus
   severity: string | null
   certainty: string | null
   date_onset: string | null
@@ -391,12 +392,30 @@ export async function enrichFromText(
   const providers = mergedConditions
     .map((c) => c.provider)
     .filter((p): p is ProviderInput => Boolean(p))
+  const coalescedImageSections = coalesceImageSections(imageSections)
 
   return {
     conditions: mergedConditions,
     measurements: mergedMeasurements,
     providers,
     ...(partialFailures.length > 0 ? { partialFailures } : {}),
-    ...(imageSections.length > 0 ? { imageSections } : {}),
+    ...(coalescedImageSections.length > 0 ? { imageSections: coalescedImageSections } : {}),
   }
+}
+
+// A section longer than the chunk limit is split into multiple chunks that
+// all inherit the same pageStart/pageEnd — merge those back into one entry
+// (unioning conditionKeys) so captureRecordImages captures each page range once.
+export function coalesceImageSections(sections: ImageWorthySection[]): ImageWorthySection[] {
+  const byPageRange = new Map<string, ImageWorthySection>()
+  for (const section of sections) {
+    const key = `${section.pageStart}-${section.pageEnd}`
+    const existing = byPageRange.get(key)
+    if (existing) {
+      existing.conditionKeys = [...new Set([...existing.conditionKeys, ...section.conditionKeys])]
+    } else {
+      byPageRange.set(key, { ...section })
+    }
+  }
+  return [...byPageRange.values()]
 }
