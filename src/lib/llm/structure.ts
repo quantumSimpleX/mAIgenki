@@ -111,7 +111,7 @@ function parseStructure(content: string): RawStructure | null {
 // Resolves a character offset to a 1-based page number via `pageBreaks`
 // (Task 3.1's per-page/estimated offsets) — the last page whose start is
 // at or before `offset`.
-function resolvePage(offset: number, pageBreaks: number[] | undefined): number | null {
+export function resolvePage(offset: number, pageBreaks: number[] | undefined): number | null {
   if (!pageBreaks || pageBreaks.length === 0) return null
   let page = 1
   for (let i = 0; i < pageBreaks.length; i += 1) {

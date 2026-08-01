@@ -1,5 +1,7 @@
 import { INDEXED_DB_NAME } from './indexedDb'
 import { base64ToUint8Array, uint8ArrayToBase64 } from './blob'
+import { loadProfile } from '../llm/profile'
+import { makeKeyStore } from '../llm/keystore'
 
 // `settings` (which includes the user's OpenRouter API key) is included on
 // purpose — see CLAUDE.md/AGENTS.md Hard Constraints. A portable backup is
@@ -23,6 +25,11 @@ export type IndexedDbBackup = {
   database: string
   exportedAt: string
   stores: Record<string, unknown[]>
+  // The active provider's credential, e.g. from LocalStorageKeyStore — lives
+  // outside IndexedDB entirely, so it isn't captured by `stores` and must be
+  // serialized separately for a restore to leave a fully working setup
+  // (matching the `settings`/profile data, which already round-trips).
+  providerKey?: { providerId: string; key: string } | null
 }
 
 function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
@@ -47,9 +54,31 @@ export async function buildIndexedDbBackup(db: IDBDatabase): Promise<IndexedDbBa
   }
 }
 
+// Rejects a malformed/incomplete backup before any destructive work starts —
+// every expected store must be present as an array (even if empty), and every
+// row must be a plain object. Without this, a truncated or hand-edited backup
+// file would still pass the envelope check, clear every live store, and then
+// restore only whatever partial data it did contain, silently wiping the rest.
+function validateBackupStores(stores: unknown): asserts stores is Record<string, unknown[]> {
+  if (typeof stores !== 'object' || stores === null || Array.isArray(stores)) {
+    throw new Error('Invalid backup: "stores" is missing or not an object')
+  }
+  const record = stores as Record<string, unknown>
+  for (const storeName of INDEXED_DB_BACKUP_STORES) {
+    const rows = record[storeName]
+    if (!Array.isArray(rows)) {
+      throw new Error(`Invalid backup: store "${storeName}" is missing or not an array`)
+    }
+    if (rows.some((row) => typeof row !== 'object' || row === null || Array.isArray(row))) {
+      throw new Error(`Invalid backup: store "${storeName}" contains a malformed row`)
+    }
+  }
+}
+
 export async function restoreIndexedDbBackup(db: IDBDatabase, backup: IndexedDbBackup): Promise<void> {
   if (backup.app !== 'maigenki') throw new Error(`Not a mAIgenki IndexedDB backup (app="${String(backup.app)}")`)
   if (backup.formatVersion !== 1) throw new Error(`Unsupported IndexedDB backup formatVersion: ${String(backup.formatVersion)}`)
+  validateBackupStores(backup.stores)
   const transaction = db.transaction([...INDEXED_DB_BACKUP_STORES], 'readwrite')
   for (const storeName of [...INDEXED_DB_BACKUP_STORES].reverse()) transaction.objectStore(storeName).clear()
   for (const storeName of INDEXED_DB_BACKUP_STORES) {
@@ -115,11 +144,21 @@ export async function exportIndexedDbBackupToJson(db: IDBDatabase): Promise<stri
   for (const [storeName, fields] of Object.entries(BLOB_FIELDS)) {
     if (stores[storeName]) stores[storeName] = await encodeBlobFields(stores[storeName], fields)
   }
-  return JSON.stringify({ ...backup, stores })
+
+  let providerKey: IndexedDbBackup['providerKey'] = null
+  const profile = await loadProfile(db)
+  if (profile.activeProviderId) {
+    const keyStore = await makeKeyStore()
+    const key = await keyStore.get(profile.activeProviderId)
+    if (key) providerKey = { providerId: profile.activeProviderId, key }
+  }
+
+  return JSON.stringify({ ...backup, stores, providerKey })
 }
 
 // Reverses exportIndexedDbBackupToJson's Blob encoding and restores the result
-// into `db` via restoreIndexedDbBackup (which validates the envelope).
+// into `db` via restoreIndexedDbBackup (which validates the envelope), then
+// restores the active provider credential (if any) into the live KeyStore.
 export async function importIndexedDbBackupFromJson(db: IDBDatabase, json: string): Promise<void> {
   const parsed = JSON.parse(json) as IndexedDbBackup
   const stores = { ...parsed.stores }
@@ -127,4 +166,9 @@ export async function importIndexedDbBackupFromJson(db: IDBDatabase, json: strin
     if (stores[storeName]) stores[storeName] = decodeBlobFields(stores[storeName], fields)
   }
   await restoreIndexedDbBackup(db, { ...parsed, stores })
+
+  if (parsed.providerKey) {
+    const keyStore = await makeKeyStore()
+    await keyStore.set(parsed.providerKey.providerId, parsed.providerKey.key)
+  }
 }

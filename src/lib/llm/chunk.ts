@@ -1,4 +1,4 @@
-import type { RecordSection, RecordStructure, SectionType } from './structure'
+import { resolvePage, type RecordSection, type RecordStructure, type SectionType } from './structure'
 
 // Pure, LLM-free chunking (Task 3.3): turns a RecordStructure (Task 3.2, whose
 // section offsets are the LLM's best-effort guess) into TextChunks whose `text`
@@ -31,11 +31,12 @@ type AnchoredSection = RecordSection & { startOffset: number; endOffset: number 
 // endOffset is then fixed to exactly where the next section starts (or the end
 // of the text for the last section), so sections are contiguous and slices
 // never drift from the source.
-function reanchorSections(text: string, sections: RecordSection[]): AnchoredSection[] {
+function reanchorSections(text: string, sections: RecordSection[], pageBreaks: number[] | undefined): AnchoredSection[] {
   if (sections.length === 0) {
     return [{
       heading: '', startOffset: 0, endOffset: text.length, inferredDate: null,
-      sectionType: 'other', imageWorthy: false, pageStart: null, pageEnd: null,
+      sectionType: 'other', imageWorthy: false,
+      pageStart: resolvePage(0, pageBreaks), pageEnd: resolvePage(Math.max(0, text.length - 1), pageBreaks),
     }]
   }
 
@@ -50,6 +51,15 @@ function reanchorSections(text: string, sections: RecordSection[]): AnchoredSect
 
   for (let i = 0; i < anchored.length; i += 1) {
     anchored[i].endOffset = i + 1 < anchored.length ? anchored[i + 1].startOffset : text.length
+  }
+
+  // Re-resolve pageStart/pageEnd from the reanchored (verbatim-heading-search)
+  // offsets, not the LLM's original approximate startOffset/endOffset — the
+  // latter can land on the wrong page even when the heading search itself
+  // correctly locates the real section.
+  for (const section of anchored) {
+    section.pageStart = resolvePage(section.startOffset, pageBreaks)
+    section.pageEnd = resolvePage(Math.max(section.startOffset, section.endOffset - 1), pageBreaks)
   }
 
   // Degenerate sections (heading search collapsed two sections onto the same
@@ -137,8 +147,9 @@ export function chunkRecordBySections(
   text: string,
   structure: RecordStructure,
   maxCharsPerChunk = DEFAULT_MAX_CHARS_PER_CHUNK,
+  pageBreaks?: number[],
 ): TextChunk[] {
-  const sections = mergeTinySections(reanchorSections(text, structure.sections), MIN_SECTION_CHARS)
+  const sections = mergeTinySections(reanchorSections(text, structure.sections, pageBreaks), MIN_SECTION_CHARS)
   const chunks: TextChunk[] = []
   for (const section of sections) {
     const length = section.endOffset - section.startOffset

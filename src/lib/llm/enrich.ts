@@ -340,7 +340,7 @@ export async function enrichFromText(
   const { pageBreaks, ...llmRouting } = routing ?? {}
 
   const structure = await analyzeRecordStructure(text, apiKey, modelChain, llmRouting, pageBreaks)
-  const chunks = chunkRecordBySections(text, structure)
+  const chunks = chunkRecordBySections(text, structure, undefined, pageBreaks)
   const total = chunks.length
 
   if (total === 0) {
