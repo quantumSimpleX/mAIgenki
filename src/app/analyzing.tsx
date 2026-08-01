@@ -10,7 +10,6 @@ import Svg, {
 import { Image } from 'expo-image'
 import { useAppStore } from '@/store/useAppStore'
 import { ALL_SYSTEMS, CONDITIONS, type SystemId } from '@/model/conditions'
-import { useOptionalDatabase } from '@/lib/db/provider'
 import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
 import { seedIndexedDbDemoData } from '@/lib/db/indexedDb'
 import { processHealthRecord } from '@/lib/pipeline'
@@ -334,7 +333,6 @@ export default function AnalyzingScreen() {
   const setLastUploadResult = useAppStore((s) => s.setLastUploadResult)
   const setPipelineError = useAppStore((s) => s.setPipelineError)
   const gender = useAppStore((s) => s.gender)
-  const db = useOptionalDatabase()
   const idb = useOptionalIndexedDb()
   const { width: viewportW } = useWindowDimensions()
   const fontScale = fontScaleForWidth(viewportW)
@@ -456,13 +454,11 @@ export default function AnalyzingScreen() {
   ])
 
   // Upload path: run extraction/enrichment/inference/persistence, then route to
-  // bodymap when IndexedDB has the uploaded conditions. `db` (SQLite) is still
-  // required alongside `idb` (IndexedDB) — the LLM provider profile/model-chain
-  // subsystem (src/lib/llm/profile.ts, client.ts) hasn't moved off SQLite.
+  // bodymap when IndexedDB has the uploaded conditions.
   useEffect(() => {
     if (!pendingUpload || startedRef.current) return
 
-    if (!db || !idb) {
+    if (!idb) {
       const timer = setTimeout(() => {
         if (startedRef.current || !mountedRef.current) return
         startedRef.current = true
@@ -499,7 +495,6 @@ export default function AnalyzingScreen() {
       try {
         const result = await processHealthRecord({
           uri: upload.uri,
-          db,
           idb,
           kind: upload.kind,
           sex: gender,
@@ -554,7 +549,7 @@ export default function AnalyzingScreen() {
 
     return () => clearInterval(smooth)
   }, [
-    pendingUpload, db, idb, gender,
+    pendingUpload, idb, gender,
     setAnalyzeProgress, setAnalyzePhase, setScreen,
     setPendingUpload, setLastUploadResult, setConditionSource, setPipelineError,
   ])

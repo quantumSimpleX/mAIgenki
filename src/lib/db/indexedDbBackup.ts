@@ -5,7 +5,7 @@ import { base64ToUint8Array, uint8ArrayToBase64 } from './blob'
 // purpose — see CLAUDE.md/AGENTS.md Hard Constraints. A portable backup is
 // meant to fully restore a user's working setup, key included; it's the
 // user's own exported file, same trust boundary as any file they create.
-// Do not add secret-filtering here (unlike the legacy expo-sqlite backup.ts).
+// Do not add secret-filtering here.
 export const INDEXED_DB_BACKUP_STORES = [
   'health_records',
   'conditions',

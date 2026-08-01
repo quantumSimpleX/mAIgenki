@@ -145,7 +145,7 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
   const request = indexedDB.open(name, INDEXED_DB_VERSION)
   request.onupgradeneeded = () => {
     const database = request.result
-    const stores: Array<[string, IDBObjectStoreParameters]> = [
+    const stores: [string, IDBObjectStoreParameters][] = [
       ['health_records', { keyPath: 'id' }],
       ['conditions', { keyPath: 'id' }],
       ['condition_locations', { keyPath: 'id' }],
@@ -330,6 +330,12 @@ export async function getIndexedSetting(db: IDBDatabase, key: string): Promise<s
 export async function putIndexedSetting(db: IDBDatabase, key: string, value: string): Promise<void> {
   const transaction = db.transaction('settings', 'readwrite')
   transaction.objectStore('settings').put({ key, value })
+  await transactionToPromise(transaction)
+}
+
+export async function deleteIndexedSetting(db: IDBDatabase, key: string): Promise<void> {
+  const transaction = db.transaction('settings', 'readwrite')
+  transaction.objectStore('settings').delete(key)
   await transactionToPromise(transaction)
 }
 
@@ -522,10 +528,9 @@ export async function getIndexedConditionDots(db: IDBDatabase, mode: ConditionQu
 }
 
 // Ports the full hardcoded demo dataset (all CONDITIONS + their
-// CONDITION_RECORDS, per model/conditions.ts) so the IndexedDB-backed demo
-// experience is visually identical to the expo-sqlite one (see seed.ts's
-// seedDemoData, the equivalent this replaces). `put()` is already an upsert
-// on a fixed id, so this is safe to call idempotently on every demo load.
+// CONDITION_RECORDS, per model/conditions.ts) into IndexedDB. `put()` is
+// already an upsert on a fixed id, so this is safe to call idempotently on
+// every demo load.
 export async function seedIndexedDbDemoData(db: IDBDatabase): Promise<void> {
   // Per userDataReq.md §2a (Demo Data Principle): convert the hardcoded design
   // dataset into the same ConditionInput/MeasurementInput shapes real

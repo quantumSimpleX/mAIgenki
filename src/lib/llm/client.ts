@@ -1,7 +1,8 @@
-import type { SQLiteDatabase } from 'expo-sqlite'
-import type { KeyStore, LMFProfile, Telemetry } from '@/lib/lmf'
-import type { Candidate, ChatResult, LMFFailure } from '@/lib/lmf'
+import type {
+  KeyStore, LMFProfile, Telemetry, Candidate, ChatResult, LMFFailure,
+} from '@/lib/lmf'
 import { lmfChat, lmfEnrich } from './service'
+import { getIndexedSetting, putIndexedSetting } from '@/lib/db/indexedDb'
 
 // ── Model chain ───────────────────────────────────────────────────────────────
 // One fallback chain for every OpenRouter call, following the simFolio pattern:
@@ -54,7 +55,7 @@ interface CallOptions<T> {
   validate?: (content: string) => T | null | undefined
   temperature?: number
   label?: string
-  db?: SQLiteDatabase
+  db?: IDBDatabase
   profile?: LMFProfile
   keys?: KeyStore
   timeoutMs?: number
@@ -138,19 +139,17 @@ export async function callLLMWithFallback<T = string>(
 }
 
 // ── Dynamic chain management ──────────────────────────────────────────────────
-// The active chain is stored in SQLite settings under `llm_model_chain` as a
-// JSON array. This lets the chain be updated at runtime (e.g. from the settings
-// screen) without a code change or app update. Falls back to DEFAULT_MODELS if
-// no override is stored or the stored value can't be parsed.
+// The active chain is stored in the IndexedDB settings store under
+// `llm_model_chain` as a JSON array. This lets the chain be updated at runtime
+// (e.g. from the settings screen) without a code change or app update. Falls
+// back to DEFAULT_MODELS if no override is stored or the stored value can't
+// be parsed.
 
-export async function getModelChain(db: SQLiteDatabase): Promise<string[]> {
-  const row = await db.getFirstAsync<{ value: string }>(
-    'SELECT value FROM settings WHERE key = ?',
-    [SETTINGS_KEY],
-  )
-  if (!row) return DEFAULT_MODELS
+export async function getModelChain(db: IDBDatabase): Promise<string[]> {
+  const raw = await getIndexedSetting(db, SETTINGS_KEY)
+  if (!raw) return DEFAULT_MODELS
   try {
-    const parsed = JSON.parse(row.value)
+    const parsed = JSON.parse(raw)
     if (Array.isArray(parsed) && parsed.length > 0) return parsed
   } catch {
     // fall through to default
@@ -159,13 +158,10 @@ export async function getModelChain(db: SQLiteDatabase): Promise<string[]> {
 }
 
 export async function updateModelChain(
-  db: SQLiteDatabase,
+  db: IDBDatabase,
   models: string[],
 ): Promise<void> {
-  await db.runAsync(
-    'INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)',
-    [SETTINGS_KEY, JSON.stringify(models)],
-  )
+  await putIndexedSetting(db, SETTINGS_KEY, JSON.stringify(models))
 }
 
 // ── Session chat helper ───────────────────────────────────────────────────────

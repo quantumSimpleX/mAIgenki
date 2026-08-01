@@ -9,7 +9,7 @@ import { IS_WEB, IS_DESKTOP, S, fs, sc } from '@/lib/scale'
 import { SETTINGS_CONTROL_GAP } from '@/lib/settingsLayout'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, {
-  Circle, Ellipse, G, Line, Path as SvgPath, Rect,
+  Circle, Ellipse, Line, Path as SvgPath, Rect,
 } from 'react-native-svg'
 import { Image } from 'expo-image'
 import * as DocumentPicker from 'expo-document-picker'
@@ -26,7 +26,6 @@ import {
 } from '@/model/conditions'
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
 import { openQSWebsite } from '@/lib/links'
-import { useOptionalDatabase } from '@/lib/db/provider'
 import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
 import {
   getIndexedSetting, putIndexedSetting, updateIndexedConditionPosition,
@@ -1095,7 +1094,6 @@ function ConditionSheet() {
     startRelocation, setOpenSettingsSection, llmTier,
   } = useAppStore()
 
-  const db = useOptionalDatabase()
   const idb = useOptionalIndexedDb()
   const condRecords = useConditionRecords(selectedCondition?.id)
 
@@ -1122,7 +1120,7 @@ function ConditionSheet() {
       addChatMessage({ role: 'assistant', content: DISCLAIMER })
       disclaimerShown.current = true
     }
-  }, [chatOpen, sheetOpen])
+  }, [chatOpen, sheetOpen, addChatMessage])
 
   // First-chat-use upgrade nudge (lmfPlan.md A1 trigger 3, Phase 6): purely
   // additive to the disclaimer above — never gates or reorders it. Checked
@@ -1176,7 +1174,7 @@ function ConditionSheet() {
         DISCLAIMER,
       ].filter(Boolean).join(' ')
       const apiKey = idb ? (await getIndexedSetting(idb, 'openrouter_api_key')) ?? '' : ''
-      const outcome = await lmfChat(sys, userMsg, { apiKey, db: db ?? undefined })
+      const outcome = await lmfChat(sys, userMsg, { apiKey, db: idb ?? undefined })
       if (outcome.ok) {
         addChatMessage({ role: 'assistant', content: outcome.content })
       } else {
@@ -1630,6 +1628,9 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
   const [importConfirm, setImportConfirm] = useState(false)
   const [backupError, setBackupError] = useState<string | null>(null)
   const [openDropdown, setOpenDropdown] = useState<SettingsDropdownId>(null)
+  // Derived, not effect-cleared: closing settings should hide any open dropdown
+  // without a render-then-clear round trip.
+  const effectiveOpenDropdown: SettingsDropdownId = settingsOpen ? openDropdown : null
   const [providerSettingsDirty, setProviderSettingsDirty] = useState(false)
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
 
@@ -1716,10 +1717,6 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
     }).start()
   }, [anim, settingsOpen])
 
-  useEffect(() => {
-    if (!settingsOpen) setOpenDropdown(null)
-  }, [settingsOpen])
-
   // React to an upgrade-nudge CTA (e.g. analyzing.tsx) asking us to open the
   // Open settings from an upgrade-nudge CTA; clear the flag so it does not
   // re-trigger on the next render.
@@ -1753,11 +1750,11 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
       <LanguageDropdown
         value={preferredLanguage}
         onChange={setPreferredLanguage}
-        open={openDropdown === 'language'}
+        open={effectiveOpenDropdown === 'language'}
         setOpenDropdown={setOpenDropdown}
       />
 
-      <View style={[styles.birthGenderRow, openDropdown === 'month' && styles.birthGenderRowOpen]}>
+      <View style={[styles.birthGenderRow, effectiveOpenDropdown === 'month' && styles.birthGenderRowOpen]}>
         <View style={styles.birthCol}>
           <Text style={styles.settingsSectionLabel}>Birth: Inferred</Text>
           <View style={styles.dobRow}>
@@ -1778,7 +1775,7 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
             <MonthDropdown
               value={birthMonth}
               onChange={setBirthMonth}
-              open={openDropdown === 'month'}
+              open={effectiveOpenDropdown === 'month'}
               setOpenDropdown={setOpenDropdown}
             />
           </View>
@@ -1855,7 +1852,7 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
 
       <View style={[styles.providerSectionBox, providerSettingsDirty && styles.providerSectionBoxOpen]}>
         <ProviderSettings
-          openDropdown={openDropdown}
+          openDropdown={effectiveOpenDropdown}
           setOpenDropdown={setOpenDropdown}
           onDirtyChange={setProviderSettingsDirty}
         />

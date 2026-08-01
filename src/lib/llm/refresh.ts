@@ -1,7 +1,5 @@
-import type { SQLiteDatabase } from 'expo-sqlite'
 import { DEFAULT_MODELS, updateModelChain } from './client'
-import { upsertSetting } from '../db/queries'
-import { scheduleSnapshot } from '../db/snapshot'
+import { putIndexedSetting } from '../db/indexedDb'
 
 // ── Weights ───────────────────────────────────────────────────────────────────
 // Ordered by relevance to medical text extraction + structured JSON output.
@@ -91,7 +89,7 @@ export function shouldRefresh(lastChecked: string | null): boolean {
 // ── Main refresh ──────────────────────────────────────────────────────────────
 
 export async function refreshModelChain(
-  db: SQLiteDatabase,
+  db: IDBDatabase,
   apiKey: string,
 ): Promise<string[]> {
   try {
@@ -113,8 +111,7 @@ export async function refreshModelChain(
 
     // Step 3 — persist chain + timestamp
     await updateModelChain(db, chain)
-    await upsertSetting(db, 'llm_chain_last_checked', new Date().toISOString())
-    scheduleSnapshot(db)
+    await putIndexedSetting(db, 'llm_chain_last_checked', new Date().toISOString())
 
     return chain
   } catch {

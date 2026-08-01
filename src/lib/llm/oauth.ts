@@ -4,11 +4,10 @@
 // via expo-web-browser, and on a successful redirect exchanges the code for a
 // key and activates it (KeyStore + LMFProfile). See lmfPlan.md A9.
 
-import type { SQLiteDatabase } from 'expo-sqlite'
 import * as Crypto from 'expo-crypto'
 import * as Linking from 'expo-linking'
 import * as WebBrowser from 'expo-web-browser'
-import { getSetting, upsertSetting, deleteSetting } from '@/lib/db/queries'
+import { getIndexedSetting, putIndexedSetting, deleteIndexedSetting } from '@/lib/db/indexedDb'
 import { BUILT_IN_PROVIDERS, createPkcePair, buildAuthorizeURL, exchangeCode, validateKey } from '@/lib/lmf'
 import { makeKeyStore } from './keystore'
 import { loadProfile, saveProfile } from './profile'
@@ -26,16 +25,16 @@ export type OAuthConnectResult =
 // Reads the code verifier persisted before the browser was launched. Exposed
 // for the future oauth completion route (pB05-T02), which needs it to finish
 // the exchange after a native cold-launch reopens the app on the redirect.
-export async function getPendingVerifier(db: SQLiteDatabase): Promise<string | null> {
-  return getSetting(db, OAUTH_PENDING_KEY)
+export async function getPendingVerifier(db: IDBDatabase): Promise<string | null> {
+  return getIndexedSetting(db, OAUTH_PENDING_KEY)
 }
 
 // Deletes the persisted pending-verifier setting. Exposed for the oauth
 // completion route (pB05-T02), which must clear it after finishing (or
 // failing) a native cold-launch exchange — mirroring connectOpenRouter's own
 // cleanup on every terminal outcome below.
-export async function clearPendingVerifier(db: SQLiteDatabase): Promise<void> {
-  await deleteSetting(db, OAUTH_PENDING_KEY)
+export async function clearPendingVerifier(db: IDBDatabase): Promise<void> {
+  await deleteIndexedSetting(db, OAUTH_PENDING_KEY)
 }
 
 // Exchanges an authorization code for a key and, on success, activates it:
@@ -44,7 +43,7 @@ export async function clearPendingVerifier(db: SQLiteDatabase): Promise<void> {
 // validateKey sanity check. Exposed so the future cold-launch completion route
 // (pB05-T02) can reuse this instead of duplicating the exchange.
 export async function completeOAuthExchange(
-  db: SQLiteDatabase,
+  db: IDBDatabase,
   code: string,
   codeVerifier: string,
   fetchImpl?: typeof fetch,
@@ -71,7 +70,7 @@ export async function completeOAuthExchange(
 // opens a browser/popup, which browsers and some platforms block if it isn't a
 // direct result of user interaction. That constraint is on the caller, not here.
 export async function connectOpenRouter(
-  db: SQLiteDatabase,
+  db: IDBDatabase,
   fetchImpl?: typeof fetch,
 ): Promise<OAuthConnectResult> {
   const { codeVerifier, codeChallenge } = await createPkcePair(
@@ -86,7 +85,7 @@ export async function connectOpenRouter(
 
   // Persisted before the browser opens so a native cold-launch during the
   // redirect can still complete the exchange later (see pB05-T02).
-  await upsertSetting(db, OAUTH_PENDING_KEY, codeVerifier)
+  await putIndexedSetting(db, OAUTH_PENDING_KEY, codeVerifier)
 
   const authorizeUrl = buildAuthorizeURL(OPENROUTER_SPEC, { codeChallenge, redirectUri })
   const result = await WebBrowser.openAuthSessionAsync(authorizeUrl, redirectUri)

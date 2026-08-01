@@ -1,5 +1,4 @@
 import { callLLMWithFallback, type LLMTraceEvent } from './client'
-import type { SQLiteDatabase } from 'expo-sqlite'
 import type { KeyStore, LMFProfile } from '@/lib/lmf'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -9,7 +8,7 @@ import type { KeyStore, LMFProfile } from '@/lib/lmf'
 // object literal (db/profile/keys/timeoutMs/onTrace) satisfies both call sites
 // unchanged.
 export type EnrichRoutingOptions = {
-  db?: SQLiteDatabase
+  db?: IDBDatabase
   profile?: LMFProfile
   keys?: KeyStore
   timeoutMs?: number

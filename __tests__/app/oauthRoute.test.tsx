@@ -20,9 +20,9 @@ jest.mock('expo-web-browser', () => ({
   maybeCompleteAuthSession: (...args: unknown[]) => mockMaybeCompleteAuthSession(...args),
 }))
 
-const mockUseOptionalDatabase = jest.fn()
-jest.mock('@/lib/db/provider', () => ({
-  useOptionalDatabase: () => mockUseOptionalDatabase(),
+const mockUseOptionalIndexedDb = jest.fn()
+jest.mock('@/lib/db/indexedDbProvider', () => ({
+  useOptionalIndexedDb: () => mockUseOptionalIndexedDb(),
 }))
 
 const mockGetPendingVerifier = jest.fn()
@@ -36,12 +36,12 @@ jest.mock('@/lib/llm/oauth', () => ({
 
 import OAuthOpenRouterScreen from '@/app/oauth/openrouter'
 
-const fakeDb = { __fake: true } as unknown as import('expo-sqlite').SQLiteDatabase
+const fakeDb = { __fake: true } as unknown as IDBDatabase
 
 describe('OAuth completion route', () => {
   beforeEach(() => {
     jest.clearAllMocks()
-    mockUseOptionalDatabase.mockReturnValue(fakeDb)
+    mockUseOptionalIndexedDb.mockReturnValue(fakeDb)
   })
 
   it('web: calls maybeCompleteAuthSession and never touches the db', async () => {

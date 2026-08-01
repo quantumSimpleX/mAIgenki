@@ -23,12 +23,12 @@ export type DesignCondition = {
   // Undefined for the hardcoded CONDITIONS fallback (pre-DB-load state) —
   // callers should treat missing status as 'documented'.
   status?: ConditionStatus
-  locations?: Array<{
+  locations?: {
     cx_percent: number
     cy_percent: number
     anatomical_location?: string
     laterality?: string
-  }>
+  }[]
 }
 
 // Condition dot positions are stored as percentages (0-100) of this viewBox,

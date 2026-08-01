@@ -1,4 +1,6 @@
+import 'fake-indexeddb/auto'
 import type { LMFProfile } from '@/lib/lmf/types'
+import { openIndexedDb, getIndexedSetting, putIndexedSetting } from '@/lib/db/indexedDb'
 
 // ── expo-* mocks ──────────────────────────────────────────────────────────
 
@@ -29,31 +31,8 @@ import {
 
 const mockWebBrowser = WebBrowser as jest.Mocked<typeof WebBrowser>
 
-// ── mock SQLite settings KV (same shape as tests/lib/profile.test.ts) ──────
-
-function makeMockDb() {
-  const settings = new Map<string, string>()
-  return {
-    settings,
-    runAsync: jest.fn(async (sql: string, params: unknown[] = []) => {
-      if (sql.includes('INSERT OR REPLACE INTO settings')) {
-        const [key, value] = params as [string, string]
-        settings.set(key, value)
-      } else if (sql.includes('DELETE FROM settings')) {
-        const [key] = params as [string]
-        settings.delete(key)
-      }
-      return { lastInsertRowId: 1, changes: 1 }
-    }),
-    getFirstAsync: jest.fn(async (sql: string, params: unknown[] = []) => {
-      if (sql.includes('SELECT value FROM settings')) {
-        const [key] = params as [string]
-        const value = settings.get(key)
-        return value === undefined ? null : { value }
-      }
-      return null
-    }),
-  }
+function freshDb(): Promise<IDBDatabase> {
+  return openIndexedDb(`maigenki-oauth-${Date.now()}-${Math.random()}`)
 }
 
 function makeMockKeyStore() {
@@ -87,11 +66,11 @@ beforeEach(() => {
 
 describe('connectOpenRouter success', () => {
   it('persists the verifier before launching the browser, exchanges the code, stores the key, and sets tier 1/oauth', async () => {
-    const db = makeMockDb()
+    const db = await freshDb()
     let verifierAtLaunch: string | null = null
 
     mockWebBrowser.openAuthSessionAsync.mockImplementation(async () => {
-      verifierAtLaunch = await getPendingVerifier(db as any)
+      verifierAtLaunch = await getPendingVerifier(db)
       return { type: 'success', url: 'maigenki://oauth/openrouter?code=abc123' }
     })
     mockFetch.mockImplementation(async (url: string) => {
@@ -99,26 +78,26 @@ describe('connectOpenRouter success', () => {
       return jsonResponse(200, { data: [] })
     })
 
-    const result = await connectOpenRouter(db as any, mockFetch as unknown as typeof fetch)
+    const result = await connectOpenRouter(db, mockFetch as unknown as typeof fetch)
 
     expect(verifierAtLaunch).not.toBeNull()
     expect(result).toEqual({ status: 'success' })
 
     expect(mockKeyStore.store.get('openrouter')).toBe('sk-or-new-key')
 
-    const profileRaw = db.settings.get('lmf_profile')!
+    const profileRaw = (await getIndexedSetting(db, 'lmf_profile'))!
     const profile: LMFProfile = JSON.parse(profileRaw)
     expect(profile.tier).toBe(1)
     expect(profile.activeProviderId).toBe('openrouter')
     expect(profile.keySource).toBe('oauth')
 
     // Pending verifier deleted after the exchange completes.
-    expect(await getPendingVerifier(db as any)).toBeNull()
+    expect(await getPendingVerifier(db)).toBeNull()
   })
 
   it('preserves existing profile fields (model, customBaseURL, fallbackToFree) instead of clobbering them', async () => {
-    const db = makeMockDb()
-    db.settings.set('lmf_profile', JSON.stringify({
+    const db = await freshDb()
+    await putIndexedSetting(db, 'lmf_profile', JSON.stringify({
       tier: 0,
       activeProviderId: null,
       model: 'some/model',
@@ -136,9 +115,9 @@ describe('connectOpenRouter success', () => {
       return jsonResponse(200, { data: [] })
     })
 
-    await connectOpenRouter(db as any, mockFetch as unknown as typeof fetch)
+    await connectOpenRouter(db, mockFetch as unknown as typeof fetch)
 
-    const profile: LMFProfile = JSON.parse(db.settings.get('lmf_profile')!)
+    const profile: LMFProfile = JSON.parse((await getIndexedSetting(db, 'lmf_profile'))!)
     expect(profile.model).toBe('some/model')
     expect(profile.customBaseURL).toBe('https://custom.example.com')
     expect(profile.fallbackToFree).toBe(false)
@@ -149,7 +128,7 @@ describe('connectOpenRouter success', () => {
 
 describe('connectOpenRouter exchange failure', () => {
   it('surfaces a 403 as "try again" and does not set tier 1 or store a key', async () => {
-    const db = makeMockDb()
+    const db = await freshDb()
     mockWebBrowser.openAuthSessionAsync.mockResolvedValue({
       type: 'success',
       url: 'maigenki://oauth/openrouter?code=abc123',
@@ -159,16 +138,16 @@ describe('connectOpenRouter exchange failure', () => {
       return jsonResponse(200, { data: [] })
     })
 
-    const result = await connectOpenRouter(db as any, mockFetch as unknown as typeof fetch)
+    const result = await connectOpenRouter(db, mockFetch as unknown as typeof fetch)
 
     expect(result).toEqual({ status: 'error', message: 'Authorization expired or invalid — try again.' })
     expect(mockKeyStore.store.has('openrouter')).toBe(false)
-    expect(db.settings.has('lmf_profile')).toBe(false)
-    expect(await getPendingVerifier(db as any)).toBeNull()
+    expect(await getIndexedSetting(db, 'lmf_profile')).toBeNull()
+    expect(await getPendingVerifier(db)).toBeNull()
   })
 
   it('surfaces a 400 distinctly from a 403', async () => {
-    const db = makeMockDb()
+    const db = await freshDb()
     mockWebBrowser.openAuthSessionAsync.mockResolvedValue({
       type: 'success',
       url: 'maigenki://oauth/openrouter?code=abc123',
@@ -178,7 +157,7 @@ describe('connectOpenRouter exchange failure', () => {
       return jsonResponse(200, { data: [] })
     })
 
-    const result = await connectOpenRouter(db as any, mockFetch as unknown as typeof fetch)
+    const result = await connectOpenRouter(db, mockFetch as unknown as typeof fetch)
 
     expect(result.status).toBe('error')
     expect((result as { message: string }).message).not.toMatch(/try again/i)
@@ -186,17 +165,17 @@ describe('connectOpenRouter exchange failure', () => {
   })
 
   it('surfaces an ?error= redirect param without calling exchangeCode', async () => {
-    const db = makeMockDb()
+    const db = await freshDb()
     mockWebBrowser.openAuthSessionAsync.mockResolvedValue({
       type: 'success',
       url: 'maigenki://oauth/openrouter?error=access_denied',
     })
 
-    const result = await connectOpenRouter(db as any, mockFetch as unknown as typeof fetch)
+    const result = await connectOpenRouter(db, mockFetch as unknown as typeof fetch)
 
     expect(result).toEqual({ status: 'error', message: 'Authorization failed: access_denied' })
     expect(mockFetch).not.toHaveBeenCalled()
-    expect(await getPendingVerifier(db as any)).toBeNull()
+    expect(await getPendingVerifier(db)).toBeNull()
   })
 })
 
@@ -204,32 +183,32 @@ describe('connectOpenRouter exchange failure', () => {
 
 describe('connectOpenRouter non-completion results', () => {
   it('user-cancel leaves tier 0 intact, cleans up the pending verifier, and never calls exchangeCode', async () => {
-    const db = makeMockDb()
+    const db = await freshDb()
     mockWebBrowser.openAuthSessionAsync.mockResolvedValue({ type: 'cancel' } as any)
 
-    const result = await connectOpenRouter(db as any, mockFetch as unknown as typeof fetch)
+    const result = await connectOpenRouter(db, mockFetch as unknown as typeof fetch)
 
     expect(result).toEqual({ status: 'cancelled' })
     expect(mockFetch).not.toHaveBeenCalled()
-    expect(db.settings.has('lmf_profile')).toBe(false)
-    expect(await getPendingVerifier(db as any)).toBeNull()
+    expect(await getIndexedSetting(db, 'lmf_profile')).toBeNull()
+    expect(await getPendingVerifier(db)).toBeNull()
   })
 
   it('dismiss behaves the same as cancel', async () => {
-    const db = makeMockDb()
+    const db = await freshDb()
     mockWebBrowser.openAuthSessionAsync.mockResolvedValue({ type: 'dismiss' } as any)
 
-    const result = await connectOpenRouter(db as any, mockFetch as unknown as typeof fetch)
+    const result = await connectOpenRouter(db, mockFetch as unknown as typeof fetch)
 
     expect(result).toEqual({ status: 'cancelled' })
-    expect(await getPendingVerifier(db as any)).toBeNull()
+    expect(await getPendingVerifier(db)).toBeNull()
   })
 
   it('locked returns an "another sign-in in progress" result', async () => {
-    const db = makeMockDb()
+    const db = await freshDb()
     mockWebBrowser.openAuthSessionAsync.mockResolvedValue({ type: 'locked' } as any)
 
-    const result = await connectOpenRouter(db as any, mockFetch as unknown as typeof fetch)
+    const result = await connectOpenRouter(db, mockFetch as unknown as typeof fetch)
 
     expect(result.status).toBe('locked')
     expect(mockFetch).not.toHaveBeenCalled()

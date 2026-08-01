@@ -1,16 +1,12 @@
-import type { SQLiteDatabase } from 'expo-sqlite'
 import { extractTextFromPDF } from './pdf/extract'
 import { extractTextFromImage } from './ocr/extract'
-import { enrichFromText } from './llm/enrich'
+import { enrichFromText, conditionKey } from './llm/enrich'
 import { applyInferenceRules } from './inference/rules'
-import { getModelChain } from './llm/client'
-import type { LLMTraceEvent } from './llm/client'
+import { getModelChain, type LLMTraceEvent } from './llm/client'
 import { loadProfile } from './llm/profile'
 import { makeKeyStore } from './llm/keystore'
-import { conditionKey } from './llm/enrich'
-import { getSetting } from './db/queries'
 import {
-  persistEnrichmentResult, putRecordImage, putConditionRecord,
+  persistEnrichmentResult, putRecordImage, putConditionRecord, getIndexedSetting,
   type EnrichedInput, type PersistEnrichmentResult,
 } from './db/indexedDb'
 import { redactPIIWithOffsetMap, extractProviderContacts } from './privacy/redact'
@@ -36,11 +32,6 @@ export type ProgressPhase = 0 | 1 | 2 | 3
 
 export type PipelineOptions = {
   uri: string
-  // Still SQLite — the LLM provider profile/model-chain/legacy-key-migration
-  // subsystem (src/lib/llm/profile.ts, client.ts) is out of the IndexedDB
-  // migration's scope (userDataTask.md's Phase 2 never defines IndexedDB
-  // stores for it) and remains on its existing storage.
-  db: SQLiteDatabase
   // Health-data persistence target — conditions/measurements/locations write
   // here via persistEnrichmentResult (Task 2.15), the same path demo seeding
   // uses (src/lib/db/indexedDb.ts's seedIndexedDbDemoData).
@@ -177,7 +168,7 @@ async function captureRecordImages(
 
 export async function processHealthRecord(opts: PipelineOptions): Promise<PipelineResult> {
   const {
-    uri, db, idb, sex, kind, onProgress,
+    uri, idb, sex, kind, onProgress,
   } = opts
   const pipelineStartedAt = Date.now()
   const trace = (event: string, details: Record<string, unknown> = {}): void => {
@@ -275,12 +266,12 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   })
 
   // Step 3 — get model chain + API key, enrich with LLM
-  const models = opts.models ?? await getModelChain(db)
-  const apiKey = opts.apiKey ?? (await getSetting(db, 'openrouter_api_key')) ?? ''
+  const models = opts.models ?? await getModelChain(idb)
+  const apiKey = opts.apiKey ?? (await getIndexedSetting(idb, 'openrouter_api_key')) ?? ''
   // Explicit pipeline API keys are used by callers/tests that intentionally
   // bypass the persisted profile. The app upload flow leaves this unset and
   // therefore uses the saved provider profile below.
-  const profile = opts.apiKey ? null : await loadProfile(db)
+  const profile = opts.apiKey ? null : await loadProfile(idb)
   trace('routing-selected', {
     profileTier: profile?.tier ?? 0,
     provider: profile?.activeProviderId ?? 'openrouter-tier-0',
@@ -293,7 +284,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   const enrichmentStartedAt = Date.now()
   const enrichment = profile && profile.tier > 0 && profile.activeProviderId && profile.model
     ? await enrichFromText(safeText, apiKey, models, {
-      db,
+      db: idb,
       profile,
       keys: await makeKeyStore(),
       timeoutMs: profile.activeProviderId === 'gemini' ? 180_000 : undefined,
@@ -305,7 +296,7 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
     })
     : profile
       ? await enrichFromText(safeText, apiKey, models, {
-        db,
+        db: idb,
         profile,
         onTrace: traceLlm,
         pageBreaks,
@@ -332,7 +323,6 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   }
   const providers = llmProviders.map((provider, index) => {
     const providerName = String(provider.name ?? '').trim()
-    const normalizedProviderName = normalizedName(providerName)
     const local = contactForProvider(providerName, index, localProviderContacts)
     return {
       ...provider,

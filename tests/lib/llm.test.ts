@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto'
 import {
   DEFAULT_MODELS,
   callLLMWithFallback,
@@ -5,6 +6,7 @@ import {
   resolveOpenRouterApiKey,
   updateModelChain,
 } from '@/lib/llm/client'
+import { openIndexedDb, putIndexedSetting } from '@/lib/db/indexedDb'
 
 // ── Mock fetch ────────────────────────────────────────────────────────────────
 // Calls now flow through the lmf engine (service.ts -> lmfChat/lmfEnrich ->
@@ -34,13 +36,6 @@ function errorResponse(status: number, message: string) {
     headers: new Map(),
     json: () => Promise.resolve({ error: { message } }),
   })
-}
-
-// ── Mock expo-sqlite (for getModelChain / updateModelChain) ───────────────────
-
-const mockDb = {
-  runAsync: jest.fn().mockResolvedValue(undefined),
-  getFirstAsync: jest.fn().mockResolvedValue(null),
 }
 
 beforeEach(() => {
@@ -249,34 +244,38 @@ describe('callLLMWithFallback', () => {
 
 describe('getModelChain', () => {
   it('returns DEFAULT_MODELS when no chain is stored in settings', async () => {
-    mockDb.getFirstAsync.mockResolvedValueOnce(null)
-    const chain = await getModelChain(mockDb as any)
+    const db = await openIndexedDb(`maigenki-modelchain-${Date.now()}`)
+    const chain = await getModelChain(db)
     expect(chain).toEqual(DEFAULT_MODELS)
+    db.close()
   })
 
   it('returns the stored chain when one exists in settings', async () => {
+    const db = await openIndexedDb(`maigenki-modelchain-${Date.now()}`)
     const custom = ['model-x:free', 'model-y:free']
-    mockDb.getFirstAsync.mockResolvedValueOnce({ value: JSON.stringify(custom) })
-    const chain = await getModelChain(mockDb as any)
+    await updateModelChain(db, custom)
+    const chain = await getModelChain(db)
     expect(chain).toEqual(custom)
+    db.close()
   })
 
   it('falls back to DEFAULT_MODELS if stored value is invalid JSON', async () => {
-    mockDb.getFirstAsync.mockResolvedValueOnce({ value: 'not-json' })
-    const chain = await getModelChain(mockDb as any)
+    const db = await openIndexedDb(`maigenki-modelchain-${Date.now()}`)
+    await putIndexedSetting(db, 'llm_model_chain', 'not-json')
+    const chain = await getModelChain(db)
     expect(chain).toEqual(DEFAULT_MODELS)
+    db.close()
   })
 })
 
 // ── updateModelChain ──────────────────────────────────────────────────────────
 
 describe('updateModelChain', () => {
-  it('persists the chain to the settings table as JSON', async () => {
+  it('persists the chain to the settings store as JSON', async () => {
+    const db = await openIndexedDb(`maigenki-modelchain-${Date.now()}`)
     const newChain = ['model-new:free', 'model-fallback:free']
-    await updateModelChain(mockDb as any, newChain)
-    expect(mockDb.runAsync).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT OR REPLACE INTO settings'),
-      ['llm_model_chain', JSON.stringify(newChain)],
-    )
+    await updateModelChain(db, newChain)
+    expect(await getModelChain(db)).toEqual(newChain)
+    db.close()
   })
 })
