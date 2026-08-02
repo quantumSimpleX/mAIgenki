@@ -10,13 +10,9 @@
 import { render, screen, fireEvent, waitFor } from '@testing-library/react-native'
 import type { LMFProfile } from '@/lib/lmf/types'
 
-jest.mock('expo-sqlite', () => ({
-  useSQLiteContext: jest.fn(),
-}))
-
-const mockUseOptionalDatabase = jest.fn()
-jest.mock('@/lib/db/provider', () => ({
-  useOptionalDatabase: () => mockUseOptionalDatabase(),
+const mockUseOptionalIndexedDb = jest.fn()
+jest.mock('@/lib/db/indexedDbProvider', () => ({
+  useOptionalIndexedDb: () => mockUseOptionalIndexedDb(),
 }))
 
 const mockConnectOpenRouter = jest.fn()
@@ -51,13 +47,13 @@ const DEFAULT_PROFILE: LMFProfile = {
   keySource: null,
 }
 
-const fakeDb = { __fake: true } as unknown as import('expo-sqlite').SQLiteDatabase
+const fakeDb = { __fake: true } as unknown as IDBDatabase
 const savedStoreState = { ...useAppStore.getState() }
 
 beforeEach(() => {
   jest.clearAllMocks()
   useAppStore.setState({ ...savedStoreState, llmTier: 0, llmStatus: 'ok' }, true)
-  mockUseOptionalDatabase.mockReturnValue(fakeDb)
+  mockUseOptionalIndexedDb.mockReturnValue(fakeDb)
   mockLoadProfile.mockResolvedValue({ ...DEFAULT_PROFILE })
 })
 

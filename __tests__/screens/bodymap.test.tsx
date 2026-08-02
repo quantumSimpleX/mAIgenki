@@ -13,12 +13,6 @@ jest.mock('react-native-safe-area-context', () => ({
 
 jest.mock('react-native-reanimated', () => require('react-native-reanimated/mock'))
 
-jest.mock('expo-sqlite', () => ({
-  useSQLiteContext: function () { return { getAllAsync: jest.fn().mockResolvedValue([]) } },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  SQLiteProvider: function (props: any) { return props.children },
-}))
-
 jest.mock('@/hooks/useConditions', () => ({
   useConditions: function () {
     return require('@/model/conditions').CONDITIONS.slice(0, 2)

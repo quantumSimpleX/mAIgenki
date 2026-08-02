@@ -2,12 +2,40 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   CONDITIONS, CONDITION_RECORDS, ConditionRecord, DesignCondition,
 } from '@/model/conditions'
-import { useOptionalDatabase } from '@/lib/db/provider'
-import { getConditions, getConditionRecords } from '@/lib/db/queries'
+import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
+import {
+ getIndexedConditions, getConditionRecords, getIndexedConditionDots, hasIndexedUserRecords,
+  type ConditionRecordEntry, type IndexedConditionDot,
+} from '@/lib/db/indexedDb'
 import { useAppStore, type ConditionSource } from '@/store/useAppStore'
 
-// Loads seeded conditions from SQLite, falling back to the hardcoded CONDITIONS
-// (used in tests, before the DB is seeded, or when the DB is unavailable on web).
+// Fallback dot list built from the hardcoded CONDITIONS (single, primary
+// location per condition) — mirrors the shape getIndexedConditionDots returns.
+function conditionsToDots(conditions: DesignCondition[]): IndexedConditionDot[] {
+  return conditions.map((c) => ({
+    conditionId: c.id, system: c.system, cx_percent: c.cx_percent, cy_percent: c.cy_percent, yearFrac: c.yearFrac,
+    status: c.status ?? 'documented',
+  }))
+}
+
+// Design-layer read: maps the raw IndexedDB record_records shape onto the
+// ConditionRecord shape the body-map records carousel renders (mirrors what
+// queries.ts's SQLite getConditionRecords used to do inline).
+function toConditionRecord(r: ConditionRecordEntry): ConditionRecord {
+  return {
+    id: r.id,
+    type: r.record_type as ConditionRecord['type'],
+    label: r.title ?? '',
+    date: r.date ?? '',
+    color: r.color ?? '#FFFFFF',
+    imageId: r.image_id,
+  }
+}
+
+// Loads seeded conditions from IndexedDB, falling back to the hardcoded
+// CONDITIONS (used in tests, before the DB is seeded, or when the DB is
+// unavailable on web). IndexedDB is the sole persistence layer — see
+// CLAUDE.md/AGENTS.md.
 export function useConditions(sourceOverride?: ConditionSource): [
   DesignCondition[],
   () => void,
@@ -16,7 +44,7 @@ export function useConditions(sourceOverride?: ConditionSource): [
   // Seed initial state with the hardcoded fallback so no state is ever empty —
   // this also avoids a synchronous setState when the DB is unavailable.
   const [conditions, setConditions] = useState<DesignCondition[]>(CONDITIONS)
-  const db = useOptionalDatabase()
+  const db = useOptionalIndexedDb()
   const conditionSource = useAppStore((s) => s.conditionSource)
   const effectiveSource = sourceOverride ?? conditionSource
 
@@ -27,14 +55,17 @@ export function useConditions(sourceOverride?: ConditionSource): [
     }
     const startedAt = Date.now()
     if (effectiveSource === 'auto') console.info('[health-pipeline] bodymap-load-started')
-    getConditions(db, effectiveSource)
-      .then((rows) => {
+    getIndexedConditions(db, effectiveSource)
+ .then(async (rows) => {
+ const hasUserRecords = rows.length === 0 && effectiveSource === 'auto'
+ ? await hasIndexedUserRecords(db)
+ : false
         if (effectiveSource === 'auto') console.info('[health-pipeline] bodymap-load-completed', {
           rows: rows.length,
-          usedFallback: rows.length === 0,
+ usedFallback: rows.length === 0 && !hasUserRecords,
           durationMs: Date.now() - startedAt,
         })
-        setConditions(rows.length > 0 ? rows : CONDITIONS)
+ setConditions(rows.length > 0 || hasUserRecords ? rows : CONDITIONS)
       })
       .catch((error: unknown) => {
         if (effectiveSource === 'auto') console.error('[health-pipeline] bodymap-load-failed', {
@@ -58,7 +89,36 @@ export function useConditions(sourceOverride?: ConditionSource): [
   return [conditions, refresh, updatePosition]
 }
 
-// Loads a condition's attached records from SQLite, falling back to the
+// Loads the flattened multi-location dot list (one entry per condition
+// *location*, not per condition) from IndexedDB, falling back to the
+// hardcoded CONDITIONS (single dot each). Mirrors useConditions()'s pattern —
+// state seeded with a safe fallback, DB-access hook + effect — but returns a
+// [dots, refresh] tuple (rather than a bare array) so callers can re-fetch
+// after a relocation or upload, same as useConditions()'s own refresh.
+export function useConditionDots(sourceOverride?: ConditionSource): [IndexedConditionDot[], () => void] {
+  const [dots, setDots] = useState<IndexedConditionDot[]>(() => conditionsToDots(CONDITIONS))
+  const db = useOptionalIndexedDb()
+  const conditionSource = useAppStore((s) => s.conditionSource)
+  const effectiveSource = sourceOverride ?? conditionSource
+
+  const refresh = useCallback(() => {
+    if (!db) return // initial/current state already holds the fallback
+    getIndexedConditionDots(db, effectiveSource)
+ .then(async (rows) => {
+ const hasUserRecords = rows.length === 0 && effectiveSource === 'auto'
+ ? await hasIndexedUserRecords(db)
+ : false
+ setDots(rows.length > 0 || hasUserRecords ? rows : conditionsToDots(CONDITIONS))
+ })
+      .catch(() => setDots(conditionsToDots(CONDITIONS)))
+  }, [db, effectiveSource])
+
+  useEffect(() => { refresh() }, [refresh, effectiveSource])
+
+  return [dots, refresh]
+}
+
+// Loads a condition's attached records from IndexedDB, falling back to the
 // hardcoded CONDITION_RECORDS map.
 export function useConditionRecords(condId: string | null | undefined): ConditionRecord[] {
   // Only DB-loaded rows live in state; the hardcoded fallback and the empty/no-id
@@ -66,13 +126,13 @@ export function useConditionRecords(condId: string | null | undefined): Conditio
   // `id` tags which condition the loaded rows belong to, guarding against showing
   // stale rows after condId changes.
   const [loaded, setLoaded] = useState<{ id: string; rows: ConditionRecord[] } | null>(null)
-  const db = useOptionalDatabase()
+  const db = useOptionalIndexedDb()
 
   useEffect(() => {
     if (!condId || !db) return
     let cancelled = false
     getConditionRecords(db, condId)
-      .then((rows) => { if (!cancelled) setLoaded({ id: condId, rows }) })
+      .then((rows) => { if (!cancelled) setLoaded({ id: condId, rows: rows.map(toConditionRecord) }) })
       .catch(() => { if (!cancelled) setLoaded({ id: condId, rows: [] }) })
     return () => { cancelled = true }
   }, [db, condId])

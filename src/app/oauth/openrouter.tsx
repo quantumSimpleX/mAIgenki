@@ -17,14 +17,14 @@ import { useEffect, useState } from 'react'
 import { Platform, StyleSheet, Text, View } from 'react-native'
 import { router, useLocalSearchParams } from 'expo-router'
 import * as WebBrowser from 'expo-web-browser'
-import { useOptionalDatabase } from '@/lib/db/provider'
+import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
 import { clearPendingVerifier, completeOAuthExchange, getPendingVerifier } from '@/lib/llm/oauth'
 
 const REDIRECT_DELAY_MS = 1200
 
 export default function OAuthOpenRouterScreen() {
   const { code } = useLocalSearchParams<{ code?: string }>()
-  const db = useOptionalDatabase()
+  const db = useOptionalIndexedDb()
   const [message, setMessage] = useState('Completing sign-in…')
 
   // Web: hand the result back to the opener and close the popup. The
@@ -40,7 +40,7 @@ export default function OAuthOpenRouterScreen() {
   // so this screen must finish the exchange itself before returning to the app.
   useEffect(() => {
     if (Platform.OS === 'web') return
-    if (!db) return // wait for DatabaseProvider to finish opening
+    if (!db) return // wait for IndexedDbProvider to finish opening
 
     let cancelled = false
 

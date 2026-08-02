@@ -89,11 +89,19 @@ function buildNameSweepPattern(name: string): RegExp | null {
 
 // ── Main export ───────────────────────────────────────────────────────────────
 
-export function redactPII(text: string): string {
-  // Pass 1a — extract patient names from labeled fields before replacing them
+type Edit = { start: number; end: number; replacement: string }
+
+// Collects every redaction as a {start, end, replacement} span against the
+// *original* (pre-redaction) text — a single source of truth both the output
+// text and an original→redacted offset map (below, for rebasing pageBreaks)
+// are built from, so the two can never drift apart.
+function collectEdits(text: string): Edit[] {
+  const edits: Edit[] = []
+  const overlaps = (start: number, end: number) => edits.some((e) => start < e.end && end > e.start)
+
+  // Pass 1a — extract patient names from labeled fields before matching them
   const extractedNames: string[] = []
   for (const pattern of NAME_EXTRACT_PATTERNS) {
-    // Reset lastIndex for global patterns
     pattern.lastIndex = 0
     let match: RegExpExecArray | null
     while ((match = pattern.exec(text)) !== null) {
@@ -102,21 +110,73 @@ export function redactPII(text: string): string {
     }
   }
 
-  // Pass 1b — apply all redaction rules
-  let result = text
+  // Pass 1b — every RULES match, in rule-precedence order (first rule to
+  // claim a span wins, matching the old sequential-replace behavior).
   for (const { pattern, replacement } of RULES) {
-    result = result.replace(pattern, replacement)
-  }
-
-  // Pass 2 — sweep for all remaining occurrences of each extracted name
-  for (const name of extractedNames) {
-    const sweepPattern = buildNameSweepPattern(name)
-    if (sweepPattern) {
-      result = result.replace(sweepPattern, '[PATIENT NAME]')
+    pattern.lastIndex = 0
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(text)) !== null) {
+      const start = match.index
+      const end = start + match[0].length
+      if (!overlaps(start, end)) edits.push({ start, end, replacement })
+      if (match[0].length === 0) pattern.lastIndex += 1 // guard against zero-width infinite loops
     }
   }
 
+  // Pass 2 — every remaining occurrence of each extracted name, skipping any
+  // span already claimed by pass 1b (i.e. the name's own labeled occurrence).
+  for (const name of extractedNames) {
+    const sweepPattern = buildNameSweepPattern(name)
+    if (!sweepPattern) continue
+    let match: RegExpExecArray | null
+    while ((match = sweepPattern.exec(text)) !== null) {
+      const start = match.index
+      const end = start + match[0].length
+      if (!overlaps(start, end)) edits.push({ start, end, replacement: '[PATIENT NAME]' })
+      if (match[0].length === 0) sweepPattern.lastIndex += 1
+    }
+  }
+
+  return edits.sort((a, b) => a.start - b.start)
+}
+
+function applyEdits(text: string, edits: Edit[]): string {
+  let result = ''
+  let cursor = 0
+  for (const edit of edits) {
+    result += text.slice(cursor, edit.start) + edit.replacement
+    cursor = edit.end
+  }
+  result += text.slice(cursor)
   return result
+}
+
+export function redactPII(text: string): string {
+  return applyEdits(text, collectEdits(text))
+}
+
+// Redacts `text` and also returns a function that maps a character offset in
+// the *original* text to the corresponding offset in the redacted text — for
+// rebasing anything computed against the pre-redaction text (e.g. pipeline.ts's
+// `pageBreaks`, whose offsets would otherwise drift once a replacement like
+// `[PATIENT NAME]` changes the surrounding text's length).
+export function redactPIIWithOffsetMap(text: string): { text: string; mapOffset: (originalOffset: number) => number } {
+  const edits = collectEdits(text)
+  const redactedText = applyEdits(text, edits)
+  let cumulativeDelta = 0
+  const breakpoints = edits.map((edit) => {
+    cumulativeDelta += edit.replacement.length - (edit.end - edit.start)
+    return { originalEnd: edit.end, deltaAfter: cumulativeDelta }
+  })
+  const mapOffset = (originalOffset: number): number => {
+    let delta = 0
+    for (const bp of breakpoints) {
+      if (bp.originalEnd > originalOffset) break
+      delta = bp.deltaAfter
+    }
+    return originalOffset + delta
+  }
+  return { text: redactedText, mapOffset }
 }
 
 // Capture labeled clinician contacts locally, before the general patient-PII

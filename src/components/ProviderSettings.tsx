@@ -3,18 +3,18 @@
 // (same dark palette, BarlowCondensed section labels, surfaceHigh fields).
 //
 // Hard constraints (see CLAUDE.md): the provider key is never logged, never
-// written to SQLite, and only ever sent to the selected provider's own
-// baseURL — enforced here by only ever using validateKey/listModels (which
-// take the ProviderSpec's baseURL) and KeyStore, never a bespoke fetch.
+// written to the app database, and only ever sent to the selected provider's
+// own baseURL — enforced here by only ever using validateKey/listModels
+// (which take the ProviderSpec's baseURL) and KeyStore, never a bespoke fetch.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ActivityIndicator, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View,
+  ActivityIndicator, Platform, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View,
 } from 'react-native'
 import { fs, sc } from '@/lib/scale'
 import { SETTINGS_CONTROL_GAP } from '@/lib/settingsLayout'
 import { useAppStore } from '@/store/useAppStore'
-import { useOptionalDatabase } from '@/lib/db/provider'
+import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
 import { loadProfile, saveProfile } from '@/lib/llm/profile'
 import { makeKeyStore } from '@/lib/llm/keystore'
 import { connectOpenRouter } from '@/lib/llm/oauth'
@@ -61,7 +61,7 @@ export function ProviderSettings({
   const llmTier = useAppStore((s) => s.llmTier)
   const llmStatus = useAppStore((s) => s.llmStatus)
   const setLlmTier = useAppStore((s) => s.setLlmTier)
-  const db = useOptionalDatabase()
+  const db = useOptionalIndexedDb()
 
   const [keyStore, setKeyStore] = useState<KeyStore | null>(null)
   const [profile, setProfile] = useState<LMFProfile | null>(null)
@@ -74,7 +74,7 @@ export function ProviderSettings({
   const [freeTextModel, setFreeTextModel] = useState('')
   const [allModelsOpen, setAllModelsOpen] = useState(false)
   const [allModels, setAllModels] = useState<string[]>([])
-  const [allModelsLoading, setAllModelsLoading] = useState(false)
+  const [, setAllModelsLoading] = useState(false)
   const [modelQuery, setModelQuery] = useState('')
   const modelSearchRef = useRef<TextInput>(null)
 
@@ -179,6 +179,11 @@ export function ProviderSettings({
   // action. The debounce avoids sending a request for every keypress.
   useEffect(() => {
     if (spec.authStyle === 'none' || !keyInput) {
+      // Resets validation for either a provider switch (spec) or the key
+      // field being cleared (keyInput) — two independently-changing inputs,
+      // not reducible to a single derived value without duplicating this
+      // same branch at both call sites.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setValidation({ status: 'idle' })
       return
     }

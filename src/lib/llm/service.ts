@@ -6,7 +6,6 @@
 // Callers that do not provide a profile retain the tier-0 OpenRouter behavior.
 // The upload pipeline provides the persisted profile and provider KeyStore.
 
-import type { SQLiteDatabase } from 'expo-sqlite'
 import {
   buildRoute,
   callWithFallback,
@@ -22,7 +21,7 @@ import {
 } from '@/lib/lmf'
 import { useAppStore } from '@/store/useAppStore'
 import { DEFAULT_MODELS, getModelChain, resolveOpenRouterApiKey } from './client'
-import { getSetting } from '../db/queries'
+import { getIndexedSetting } from '../db/indexedDb'
 import { refreshModelChain, shouldRefresh } from './refresh'
 
 // One in-memory cooldown ledger for the process lifetime — resets on relaunch,
@@ -45,10 +44,10 @@ export function __resetCooldownLedgerForTests(): void {
 // failure, and the .catch here guards the setting lookup itself.
 let refreshTriggered = false
 
-function maybeRefreshModelChain(db: SQLiteDatabase | undefined, apiKey: string): void {
+function maybeRefreshModelChain(db: IDBDatabase | undefined, apiKey: string): void {
   if (!db || refreshTriggered) return
   refreshTriggered = true
-  getSetting(db, 'llm_chain_last_checked')
+  getIndexedSetting(db, 'llm_chain_last_checked')
     .then((lastChecked) => (shouldRefresh(lastChecked) ? refreshModelChain(db, apiKey) : undefined))
     .catch(() => {})
 }
@@ -135,7 +134,7 @@ function envKeyStore(userApiKey: string): KeyStore {
   }
 }
 
-async function resolveFreeChain(db?: SQLiteDatabase, models?: string[]): Promise<string[]> {
+async function resolveFreeChain(db?: IDBDatabase, models?: string[]): Promise<string[]> {
   if (models && models.length > 0) return models
   if (db) return getModelChain(db)
   return DEFAULT_MODELS
@@ -144,7 +143,7 @@ async function resolveFreeChain(db?: SQLiteDatabase, models?: string[]): Promise
 export type LmfServiceOptions = {
   apiKey?: string
   models?: string[]
-  db?: SQLiteDatabase
+  db?: IDBDatabase
   profile?: LMFProfile
   keys?: KeyStore
   telemetry?: Telemetry

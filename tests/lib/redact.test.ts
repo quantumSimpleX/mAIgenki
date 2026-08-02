@@ -1,4 +1,4 @@
-import { redactPII } from '@/lib/privacy/redact'
+import { redactPII, redactPIIWithOffsetMap } from '@/lib/privacy/redact'
 
 // ── Patient name ──────────────────────────────────────────────────────────────
 
@@ -209,5 +209,32 @@ describe('redactPII — medical content preserved', () => {
     expect(result).toContain('172 mg/dL')
     expect(result).toContain('eGFR: 58')
     expect(result).toContain('2020-03-15')
+  })
+})
+
+// ── Offset map (regression for a Codex review finding on PR #1) ────────────────
+// pageBreaks was computed against the original text but applied to the
+// redacted text without adjustment — a length-changing replacement before an
+// image-worthy section could resolve it to the wrong page.
+
+describe('redactPIIWithOffsetMap', () => {
+  it('produces the same text as redactPII', () => {
+    const text = 'Patient: John Smith\nDOB: 1958-03-22\nDiagnosis: Hypertension'
+    expect(redactPIIWithOffsetMap(text).text).toBe(redactPII(text))
+  })
+
+  it('maps an offset after a length-shrinking replacement to its shifted position', () => {
+    const text = 'Patient: John Smith Extended Full Legal Name\nImaging\nCT shows a kidney stone.'
+    const { text: redacted, mapOffset } = redactPIIWithOffsetMap(text)
+    const imagingOriginalOffset = text.indexOf('Imaging')
+    const imagingRedactedOffset = redacted.indexOf('Imaging')
+    expect(imagingRedactedOffset).not.toBe(imagingOriginalOffset)
+    expect(mapOffset(imagingOriginalOffset)).toBe(imagingRedactedOffset)
+  })
+
+  it('maps an offset before any redaction unchanged', () => {
+    const text = 'Findings\nPatient: John Smith\nMore text here.'
+    const { mapOffset } = redactPIIWithOffsetMap(text)
+    expect(mapOffset(0)).toBe(0)
   })
 })

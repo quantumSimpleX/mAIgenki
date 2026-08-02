@@ -37,6 +37,8 @@ Build a mobile-first, cross-platform app (iOS, Android, web) that lets anyone up
 
 **Privacy model:** PDFs are processed on-device (text extraction via native libraries). Only extracted plain text — never raw PDFs or binary data — is sent to OpenRouter for condition enrichment. All structured results are stored on-device only (SQLite). No user accounts required.
 
+**Portable storage clarification:** “On-device” means the app has no managed remote storage; it does not mean binary assets must live in the OS photo library or as separate local files. The SQLite database is the complete, portable source of truth. Every structured record and binary asset needed to reconstruct the body-map explorer—including embedded X-rays and other report images—must be stored in SQLite, using BLOB columns where appropriate. Users may explicitly export the complete database to a computer or chosen cloud drive and import it later. Raw PDFs, embedded images, and other binary data are never sent to an LLM.
+
 **LLM key model:** App ships with OpenRouter free-tier models that require no API key. Users can enter their own OpenRouter API key in Settings to unlock faster models. Key is stored locally on-device only.
 
 ---
@@ -344,6 +346,12 @@ mAIgenki/
 
 ## Hard Constraints
 
+SQLite is the complete portable source of truth. Store every structured record and
+required binary asset in the database, not only as an app-private or OS-library
+file reference. Export/import must preserve BLOBs losslessly so the explorer can
+be reconstructed on another device. Explicit user-directed export to a computer
+or chosen cloud drive is allowed; it is portability, not app-managed cloud storage.
+
 **Always:**
 - Store all health data locally (SQLite). No remote database.
 - Send only extracted plain text to the LLM API — never raw PDFs or binary data.
@@ -422,6 +430,11 @@ records, users need a way to carry their data across devices without violating t
 no-cloud/no-auth constraint. The answer is a **user-owned backup file**.
 
 ### Format
+
+Binary assets stored as SQLite BLOBs must be represented losslessly in the backup
+format (for example, tagged base64 in JSON) and restored to BLOBs on import. A
+backup is valid only if it reconstructs the complete explorer without access to
+paths or files from the source device.
 
 - **Plain (unencrypted) JSON** — v1 decision. Encryption may be added later as a format bump.
 - Envelope: `{ app: 'maigenki', formatVersion: 1, exportedAt: ISO-8601, tables: { <table>: rows[] } }`

@@ -1,4 +1,4 @@
-import { ComponentProps, useCallback, useEffect, useRef, useState } from 'react'
+import { ComponentProps, ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import {
   Animated, Dimensions, Easing, GestureResponderEvent,
   KeyboardAvoidingView, Platform,
@@ -9,7 +9,7 @@ import { IS_WEB, IS_DESKTOP, S, fs, sc } from '@/lib/scale'
 import { SETTINGS_CONTROL_GAP } from '@/lib/settingsLayout'
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import Svg, {
-  Circle, Ellipse, G, Line, Path as SvgPath, Rect,
+  Circle, Ellipse, Line, Path as SvgPath, Rect,
 } from 'react-native-svg'
 import { Image } from 'expo-image'
 import * as DocumentPicker from 'expo-document-picker'
@@ -19,17 +19,19 @@ import { QSWordmark } from '@/components/QSWordmark'
 import { GearIcon } from '@/components/GearIcon'
 import { useAppStore } from '@/store/useAppStore'
 import type { Gender, PendingUpload } from '@/store/useAppStore'
-import { useConditions, useConditionRecords } from '@/hooks/useConditions'
+import { useConditions, useConditionRecords, useConditionDots } from '@/hooks/useConditions'
 import {
   ALL_SYSTEMS, ConditionRecord, DesignCondition, SystemId,
-  SYSTEM_META, SupportedLang, getLocalName, getSvgX, getSvgY,
+  SYSTEM_META, SupportedLang, getLocalName, getSvgX, getSvgY, normalizeSystemId,
 } from '@/model/conditions'
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
 import { openQSWebsite } from '@/lib/links'
-import { useOptionalDatabase } from '@/lib/db/provider'
-import { getSetting, updateConditionPosition, upsertSetting } from '@/lib/db/queries'
-import { exportBackupToFile, pickAndReadBackup, restoreBackup } from '@/lib/db/backup'
-import { scheduleSnapshot, saveSnapshotNow } from '@/lib/db/snapshot'
+import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
+import {
+  getIndexedSetting, putIndexedSetting, updateIndexedConditionPosition,
+  getRecordImageThumbnail, getRecordImageBlob, type IndexedConditionDot,
+} from '@/lib/db/indexedDb'
+import { exportIndexedDbBackupToJson, importIndexedDbBackupFromJson } from '@/lib/db/indexedDbBackup'
 import { ProviderSettings } from '@/components/ProviderSettings'
 import { SettingsDropdown, type SettingsDropdownId } from '@/components/SettingsDropdown'
 import { chatErrorCopyForKind } from '@/lib/llm/chatErrorCopy'
@@ -219,7 +221,60 @@ function PencilIcon({ size = fs(13) }: { size?: number }) {
 
 // ─── Record thumbnails (SVG, one per type) ───────────────────────────────────
 
+// Lazily fetches a stored record image (thumbnail resolution) and renders it,
+// falling back to the SVG placeholder art (passed in as `fallback`) while
+// loading or on fetch error — no layout flash, since the fallback occupies
+// the same w×h from the first render.
+function RecordThumbImage({
+  imageId, w, h, fallback,
+}: {
+  imageId: string
+  w: number
+  h: number
+  fallback: ReactNode
+}) {
+  const idb = useOptionalIndexedDb()
+  const [uri, setUri] = useState<string | null>(null)
+
+  // Keyed by `imageId` at the call site below, so a change of image remounts
+  // this component (fresh `uri: null` state) instead of resetting state
+  // synchronously inside the effect body.
+  useEffect(() => {
+    if (!idb) return
+    let cancelled = false
+    let objectUrl: string | null = null
+    getRecordImageThumbnail(idb, imageId)
+      .then((blob) => {
+        if (cancelled || !blob) return
+        objectUrl = URL.createObjectURL(blob)
+        setUri(objectUrl)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [idb, imageId])
+
+  if (!uri) return <>{fallback}</>
+  return (
+    <Image
+      source={{ uri }}
+      style={{ width: w, height: h, borderRadius: 6 }}
+      contentFit="cover"
+    />
+  )
+}
+
 function renderRecordThumb(rec: ConditionRecord, w: number, h: number) {
+  const svgThumb = renderRecordThumbSvg(rec, w, h)
+  if (rec.imageId) {
+    return <RecordThumbImage key={rec.imageId} imageId={rec.imageId} w={w} h={h} fallback={svgThumb} />
+  }
+  return svgThumb
+}
+
+function renderRecordThumbSvg(rec: ConditionRecord, w: number, h: number) {
   const col = rec.color
   switch (rec.type) {
     case 'TREND': {
@@ -525,25 +580,32 @@ function BodyLayers({ activeSystems }: { activeSystems: SystemId[] }) {
 // between tightly-clustered dots and (b) SVG z-order eclipsing where a higher-layer dot's
 // hit area would block a lower-layer dot from ever being reachable.
 function GhostDots({
-  conditions, activeSystems, onPress, onRelocationPlace,
+  dots, conditions, activeSystems, onPress, onRelocationPlace,
 }: {
+  dots: IndexedConditionDot[]
   conditions: DesignCondition[]
   activeSystems: SystemId[]
   onPress: (c: DesignCondition) => void
   onRelocationPlace?: (cx: number, cy: number) => void
 }) {
-  const visible = conditions.filter((c) => activeSystems.includes(c.system))
+  const visible = dots.filter((d) => activeSystems.includes(normalizeSystemId(d.system)))
   const [nativeSize, setNativeSize] = useState({ w: 260, h: 460 })
 
+  // Resolves the tapped dot's conditionId back to the full DesignCondition
+  // (from the parallel useConditions()-sourced list) at press time — the two
+  // lists are joined by id here, not merged (Task 5.3).
   const pressNearest = useCallback((svgX: number, svgY: number) => {
-    let nearest: DesignCondition | null = null
+    let nearest: IndexedConditionDot | null = null
     let minDist = 8  // SVG units — must click within this radius of a dot
-    for (const c of visible) {
-      const d = Math.hypot(getSvgX(c.cx_percent) - svgX, getSvgY(c.cy_percent) - svgY)
-      if (d < minDist) { minDist = d; nearest = c }
+    for (const d of visible) {
+      const dist = Math.hypot(getSvgX(d.cx_percent) - svgX, getSvgY(d.cy_percent) - svgY)
+      if (dist < minDist) { minDist = dist; nearest = d }
     }
-    if (nearest) onPress(nearest)
-  }, [visible, onPress])
+    if (nearest) {
+      const cond = conditions.find((c) => c.id === nearest!.conditionId)
+      if (cond) onPress(cond)
+    }
+  }, [visible, conditions, onPress])
 
   return (
     <>
@@ -553,13 +615,21 @@ function GhostDots({
         style={StyleSheet.absoluteFill}
         pointerEvents="none"
       >
-        {visible.map((c) => (
-          <Circle
-            key={c.id} cx={getSvgX(c.cx_percent)} cy={getSvgY(c.cy_percent)} r={1.5}
-            fill={SYSTEM_META[c.system]?.color ?? '#fff'} fillOpacity={0.3}
-            pointerEvents="none"
-          />
-        ))}
+        {visible.map((d) => {
+          const isInferred = d.status === 'inferred'
+          const color = SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'
+          return (
+            <Circle
+              key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)} r={1.5}
+              fill={isInferred ? 'none' : color} fillOpacity={isInferred ? undefined : 0.3}
+              stroke={isInferred ? color : 'none'}
+              strokeWidth={isInferred ? 1 : 0}
+              strokeOpacity={isInferred ? 0.3 : undefined}
+              strokeDasharray={isInferred ? '1.2,1' : undefined}
+              pointerEvents="none"
+            />
+          )
+        })}
       </Svg>
       {/* Click-handling layer: outside the SVG to avoid SVG pointer-events fragility */}
       {IS_WEB ? (
@@ -593,21 +663,21 @@ function GhostDots({
 }
 
 function BodySvg({
-  activeSystems, conditions, onConditionPress, currentYear,
+  activeSystems, dots, onConditionPress, currentYear,
   condDateOverrides, selectedCondition, relocatingCondition,
 }: {
   activeSystems: SystemId[]
-  conditions: DesignCondition[]
+  dots: IndexedConditionDot[]
   onConditionPress: (c: DesignCondition) => void
   currentYear: number
   condDateOverrides: Record<string, string>
   selectedCondition: DesignCondition | null
   relocatingCondition: DesignCondition | null
 }) {
-  const visibleConds = conditions.filter((c) => {
-    if (!activeSystems.includes(c.system)) return false
-    const override = condDateOverrides[c.id]
-    const frac = override ? parseFloat(override) : c.yearFrac
+  const visibleDots = dots.filter((d) => {
+    if (!activeSystems.includes(normalizeSystemId(d.system))) return false
+    const override = condDateOverrides[d.conditionId]
+    const frac = override ? parseFloat(override) : d.yearFrac
     return frac <= currentYear
   })
 
@@ -617,15 +687,19 @@ function BodySvg({
           DOM <g>) instead of onPress — onPress makes react-native-svg attach its
           touchable responder handlers, which leak to the DOM as "Unknown event
           handler property". On native, use onPress. */}
-      {visibleConds.map((c) => {
-        const isSelected = selectedCondition?.id === c.id
-        const isRelocating = relocatingCondition?.id === c.id
-        const color = SYSTEM_META[c.system]?.color ?? '#fff'
+      {visibleDots.map((d) => {
+        const isSelected = selectedCondition?.id === d.conditionId
+        const isRelocating = relocatingCondition?.id === d.conditionId
+        const isInferred = d.status === 'inferred'
+        const color = SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'
         return (
           <Circle
-            key={c.id} cx={getSvgX(c.cx_percent)} cy={getSvgY(c.cy_percent)}
+            key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)}
             r={isRelocating ? 4 : isSelected ? 2.5 : 1.5}
-            fill={color}
+            fill={isInferred ? 'none' : color}
+            stroke={isInferred ? color : 'none'}
+            strokeWidth={isInferred ? 1 : 0}
+            strokeDasharray={isInferred ? '1.2,1' : undefined}
             pointerEvents="none"
           />
         )
@@ -669,33 +743,33 @@ function RippleRing({ color, delay, size }: { color: string; delay: number; size
 // Radiating ripple over each condition dot whose marker the time rail is
 // currently snapped to, so the user can spot where the condition sits.
 function ConditionRipples({
-  conditions, activeSystems, currentYear, condDateOverrides,
+  dots, activeSystems, currentYear, condDateOverrides,
 }: {
-  conditions: DesignCondition[]
+  dots: IndexedConditionDot[]
   activeSystems: SystemId[]
   currentYear: number
   condDateOverrides: Record<string, string>
 }) {
-  const snapped = conditions.filter((c) => {
-    if (!activeSystems.includes(c.system)) return false
-    const frac = condDateOverrides[c.id] ? parseFloat(condDateOverrides[c.id]) : c.yearFrac
+  const snapped = dots.filter((d) => {
+    if (!activeSystems.includes(normalizeSystemId(d.system))) return false
+    const frac = condDateOverrides[d.conditionId] ? parseFloat(condDateOverrides[d.conditionId]) : d.yearFrac
     return Math.abs(frac - currentYear) < 1e-9
   })
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {snapped.map((c) => (
+      {snapped.map((d) => (
         <View
-          key={c.id}
+          key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`}
           style={{
             position: 'absolute',
-            left: `${c.cx_percent}%`,
-            top: `${c.cy_percent}%`,
+            left: `${d.cx_percent}%`,
+            top: `${d.cy_percent}%`,
             width: 0, height: 0,
           }}
         >
-          <RippleRing color={SYSTEM_META[c.system]?.color ?? '#fff'} delay={0} size={sc(30)} />
-          <RippleRing color={SYSTEM_META[c.system]?.color ?? '#fff'} delay={700} size={sc(30)} />
-          <RippleRing color={SYSTEM_META[c.system]?.color ?? '#fff'} delay={1400} size={sc(30)} />
+          <RippleRing color={SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'} delay={0} size={sc(30)} />
+          <RippleRing color={SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'} delay={700} size={sc(30)} />
+          <RippleRing color={SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'} delay={1400} size={sc(30)} />
         </View>
       ))}
     </View>
@@ -1020,7 +1094,7 @@ function ConditionSheet() {
     startRelocation, setOpenSettingsSection, llmTier,
   } = useAppStore()
 
-  const db = useOptionalDatabase()
+  const idb = useOptionalIndexedDb()
   const condRecords = useConditionRecords(selectedCondition?.id)
 
   const [sheetTranslateY] = useState(() => new Animated.Value(1)) // 1 = off-screen
@@ -1046,30 +1120,30 @@ function ConditionSheet() {
       addChatMessage({ role: 'assistant', content: DISCLAIMER })
       disclaimerShown.current = true
     }
-  }, [chatOpen, sheetOpen])
+  }, [chatOpen, sheetOpen, addChatMessage])
 
   // First-chat-use upgrade nudge (lmfPlan.md A1 trigger 3, Phase 6): purely
   // additive to the disclaimer above — never gates or reorders it. Checked
   // once per sheet mount so re-renders don't re-query settings.
   useEffect(() => {
-    if (!chatOpen || !db || firstChatNudgeChecked.current) return
+    if (!chatOpen || !idb || firstChatNudgeChecked.current) return
     firstChatNudgeChecked.current = true
     ;(async () => {
       const [seenFlag, dismissedAt] = await Promise.all([
-        getSetting(db, 'lmf_first_chat_nudge_seen'),
-        getSetting(db, 'lmf_nudge_dismissed_at'),
+        getIndexedSetting(idb, 'lmf_first_chat_nudge_seen'),
+        getIndexedSetting(idb, 'lmf_nudge_dismissed_at'),
       ])
       if (shouldShowFirstChatNudge(llmTier, seenFlag, dismissedAt, new Date())) {
         setFirstChatNudgeVisible(true)
       }
     })()
-  }, [chatOpen, db, llmTier])
+  }, [chatOpen, idb, llmTier])
 
   async function dismissFirstChatNudge() {
     setFirstChatNudgeVisible(false)
-    if (!db) return
-    await upsertSetting(db, 'lmf_first_chat_nudge_seen', 'true')
-    await upsertSetting(db, 'lmf_nudge_dismissed_at', new Date().toISOString())
+    if (!idb) return
+    await putIndexedSetting(idb, 'lmf_first_chat_nudge_seen', 'true')
+    await putIndexedSetting(idb, 'lmf_nudge_dismissed_at', new Date().toISOString())
   }
 
   const sheetH = chatOpen
@@ -1099,8 +1173,8 @@ function ConditionSheet() {
         'Answer in 1–3 short sentences. Always recommend consulting a healthcare provider.',
         DISCLAIMER,
       ].filter(Boolean).join(' ')
-      const apiKey = db ? (await getSetting(db, 'openrouter_api_key')) ?? '' : ''
-      const outcome = await lmfChat(sys, userMsg, { apiKey, db: db ?? undefined })
+      const apiKey = idb ? (await getIndexedSetting(idb, 'openrouter_api_key')) ?? '' : ''
+      const outcome = await lmfChat(sys, userMsg, { apiKey, db: idb ?? undefined })
       if (outcome.ok) {
         addChatMessage({ role: 'assistant', content: outcome.content })
       } else {
@@ -1183,12 +1257,23 @@ function ConditionSheet() {
         </TouchableOpacity>
       </View>
 
+      {/* Image/chart timeline — persistent whenever a condition is selected and
+          the sheet is open, independent of chat state (Task 5.4). */}
+      {selectedCondition && condRecords.length > 0 && <RecordsCarousel records={condRecords} />}
+
       {!chatOpen && selectedCondition && (
         <>
           {/* Common name in the preferred language; English common + full name
               beneath (only when the preferred language isn't English, where the
               title already is the English common name). */}
-          <Text style={styles.sheetCondNameLarge}>{localName}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc(8) }}>
+            <Text style={styles.sheetCondNameLarge}>{localName}</Text>
+            {selectedCondition.status === 'inferred' && (
+              <View style={styles.inferredBadge}>
+                <Text style={styles.inferredBadgeText}>Inferred</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.sheetCondSubEn}>
             {preferredLanguage !== 'en'
               ? `${selectedCondition.label} · ${selectedCondition.medName}`
@@ -1265,7 +1350,6 @@ function ConditionSheet() {
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={80}
         >
-          {condRecords.length > 0 && <RecordsCarousel records={condRecords} />}
           <ScrollView style={styles.chatScroll} contentContainerStyle={styles.chatContent} showsVerticalScrollIndicator={false}>
             {chatMessages.map((msg, i) => (
               <View
@@ -1337,6 +1421,36 @@ function ConditionSheet() {
 
 // ─── Record Lightbox ──────────────────────────────────────────────────────────
 
+// Lazily fetches the full-resolution stored image for the lightbox (Task
+// 5.6), distinct from renderRecordThumb's thumbnail-only fetch (Task 5.5).
+// Keyed by `imageId` at the call site below so switching records remounts
+// this component (fresh `uri: null` state) instead of resetting state
+// synchronously inside the effect body.
+function LightboxFullImage({ imageId, fallback }: { imageId: string; fallback: ReactNode }) {
+  const idb = useOptionalIndexedDb()
+  const [uri, setUri] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!idb) return
+    let cancelled = false
+    let objectUrl: string | null = null
+    getRecordImageBlob(idb, imageId)
+      .then((result) => {
+        if (cancelled || !result) return
+        objectUrl = URL.createObjectURL(result.blob)
+        setUri(objectUrl)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [idb, imageId])
+
+  if (!uri) return <>{fallback}</>
+  return <Image source={{ uri }} style={{ width: sc(358), height: sc(226), borderRadius: 6 }} contentFit="cover" />
+}
+
 function RecordLightbox() {
   const { lightboxRecord, setLightboxRecord, selectedRecords, setSelectedRecords } = useAppStore()
   if (!lightboxRecord) return null
@@ -1355,7 +1469,9 @@ function RecordLightbox() {
           </TouchableOpacity>
         </View>
         <View style={styles.lightboxThumb}>
-          {renderRecordThumb(rec, sc(358), sc(226))}
+          {rec.imageId
+            ? <LightboxFullImage key={rec.imageId} imageId={rec.imageId} fallback={renderRecordThumb(rec, sc(358), sc(226))} />
+            : renderRecordThumb(rec, sc(358), sc(226))}
         </View>
         <Text style={styles.lightboxLabel}>{rec.label}</Text>
         <Text style={styles.lightboxDate}>{rec.date}</Text>
@@ -1508,10 +1624,13 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
     openSettingsSection, setOpenSettingsSection,
   } = useAppStore()
 
-  const db = useOptionalDatabase()
+  const idb = useOptionalIndexedDb()
   const [importConfirm, setImportConfirm] = useState(false)
   const [backupError, setBackupError] = useState<string | null>(null)
   const [openDropdown, setOpenDropdown] = useState<SettingsDropdownId>(null)
+  // Derived, not effect-cleared: closing settings should hide any open dropdown
+  // without a render-then-clear round trip.
+  const effectiveOpenDropdown: SettingsDropdownId = settingsOpen ? openDropdown : null
   const [providerSettingsDirty, setProviderSettingsDirty] = useState(false)
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false)
 
@@ -1527,29 +1646,46 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
 
   // Backup file I/O is web-only for now (native has no post-restore refresh path,
   // so a native import would leave the Zustand store / UI stale until restart).
-  const backupAvailable = !!db && IS_WEB
+  const backupAvailable = !!idb && IS_WEB
 
   async function handleExport() {
-    if (!backupAvailable || !db) return
+    if (!backupAvailable || !idb) return
     try {
       setBackupError(null)
-      await exportBackupToFile(db)
+      const json = await exportIndexedDbBackupToJson(idb)
+      const blob = new Blob([json], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `maigenki-backup-${new Date().toISOString().slice(0, 10)}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
     } catch (e) {
       setBackupError(e instanceof Error ? e.message : 'Export failed')
     }
   }
 
   async function handleImport() {
-    if (!backupAvailable || !db) return
+    if (!backupAvailable || !idb) return
     try {
       setBackupError(null)
-      const backup = await pickAndReadBackup()
-      if (!backup) {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: 'application/json',
+        copyToCacheDirectory: true,
+      })
+      if (result.canceled) {
         setImportConfirm(false)
         return
       }
-      await restoreBackup(db, backup)
-      await saveSnapshotNow(db)
+      const asset = result.assets[0]
+      if (!asset) {
+        setImportConfirm(false)
+        return
+      }
+      const json = await fetch(asset.uri).then((r) => r.text())
+      await importIndexedDbBackupFromJson(idb, json)
       setImportConfirm(false)
       if (Platform.OS === 'web') window.location.reload()
     } catch (e) {
@@ -1580,10 +1716,6 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
       useNativeDriver: !IS_WEB,
     }).start()
   }, [anim, settingsOpen])
-
-  useEffect(() => {
-    if (!settingsOpen) setOpenDropdown(null)
-  }, [settingsOpen])
 
   // React to an upgrade-nudge CTA (e.g. analyzing.tsx) asking us to open the
   // Open settings from an upgrade-nudge CTA; clear the flag so it does not
@@ -1618,11 +1750,11 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
       <LanguageDropdown
         value={preferredLanguage}
         onChange={setPreferredLanguage}
-        open={openDropdown === 'language'}
+        open={effectiveOpenDropdown === 'language'}
         setOpenDropdown={setOpenDropdown}
       />
 
-      <View style={[styles.birthGenderRow, openDropdown === 'month' && styles.birthGenderRowOpen]}>
+      <View style={[styles.birthGenderRow, effectiveOpenDropdown === 'month' && styles.birthGenderRowOpen]}>
         <View style={styles.birthCol}>
           <Text style={styles.settingsSectionLabel}>Birth: Inferred</Text>
           <View style={styles.dobRow}>
@@ -1643,7 +1775,7 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
             <MonthDropdown
               value={birthMonth}
               onChange={setBirthMonth}
-              open={openDropdown === 'month'}
+              open={effectiveOpenDropdown === 'month'}
               setOpenDropdown={setOpenDropdown}
             />
           </View>
@@ -1712,7 +1844,7 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
         <Text style={styles.backupWarn}>Import replaces all current data.</Text>
       )}
       {backupError && <Text style={styles.backupWarn}>{backupError}</Text>}
-      {!db ? (
+      {!idb ? (
         <Text style={styles.settingsHint}>Storage unavailable — backup disabled.</Text>
       ) : !IS_WEB ? (
         <Text style={styles.settingsHint}>Backup is web-only for now.</Text>
@@ -1720,7 +1852,7 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
 
       <View style={[styles.providerSectionBox, providerSettingsDirty && styles.providerSectionBoxOpen]}>
         <ProviderSettings
-          openDropdown={openDropdown}
+          openDropdown={effectiveOpenDropdown}
           setOpenDropdown={setOpenDropdown}
           onDirtyChange={setProviderSettingsDirty}
         />
@@ -1881,7 +2013,8 @@ export default function BodyMapScreen() {
   } = useAppStore()
 
   const [conditions, refreshConditions, updateConditionPositionLocally] = useConditions(routeConditionSource)
-  const db = useOptionalDatabase()
+  const [dots, refreshDots] = useConditionDots(routeConditionSource)
+  const idb = useOptionalIndexedDb()
   const settingsRequested = useRef(false)
 
   useEffect(() => {
@@ -1922,6 +2055,10 @@ export default function BodyMapScreen() {
   }, [lastUploadResult, refreshConditions])
 
   useEffect(() => {
+    if (lastUploadResult) refreshDots()
+  }, [lastUploadResult, refreshDots])
+
+  useEffect(() => {
     if (conditions.length === 0) return
     const years = conditions
       .map((c) => conditionYear(c, condDateOverrides))
@@ -1942,10 +2079,9 @@ export default function BodyMapScreen() {
 
   // ── One-time gender prompt (Phase 9.7.3) ──
   function chooseGender(g: Gender) {
+    // No explicit settings write here — useSettingsPersistence's own effect
+    // already persists `gender` reactively whenever the store value changes.
     setGender(g)
-    if (db) {
-      void upsertSetting(db, 'gender', g).then(() => scheduleSnapshot(db))
-    }
     setGenderPromptNeeded(false)
   }
 
@@ -1959,13 +2095,13 @@ export default function BodyMapScreen() {
     const cyPercent = (cy / 460) * 100
     // console.log(`[Condition Relocated] ${relocatingCondition.label}: ${cxPercent.toFixed(2)}% x ${cyPercent.toFixed(2)}%`)
     updateConditionPositionLocally(relocatingCondition.id, cxPercent, cyPercent)
-    if (db) {
-      await updateConditionPosition(db, relocatingCondition.id, cxPercent, cyPercent)
-      scheduleSnapshot(db)
+    if (idb) {
+      await updateIndexedConditionPosition(idb, relocatingCondition.id, cxPercent, cyPercent)
     }
     refreshConditions()
+    refreshDots()
     cancelRelocation()
-  }, [relocatingCondition, db, refreshConditions, cancelRelocation, updateConditionPositionLocally])
+  }, [relocatingCondition, idb, refreshConditions, refreshDots, cancelRelocation, updateConditionPositionLocally])
 
   const dismissUploadMessage = useCallback(() => {
     if (useAppStore.getState().lastUploadResult) setLastUploadResult(null)
@@ -2178,7 +2314,7 @@ export default function BodyMapScreen() {
               <BodyLayers activeSystems={activeSystems} />
               <BodySvg
                 activeSystems={activeSystems}
-                conditions={conditions}
+                dots={dots}
                 onConditionPress={handleConditionPress}
                 currentYear={currentYear}
                 condDateOverrides={condDateOverrides}
@@ -2186,13 +2322,14 @@ export default function BodyMapScreen() {
                 relocatingCondition={relocatingCondition}
               />
               <GhostDots
+                dots={dots}
                 conditions={conditions}
                 activeSystems={activeSystems}
                 onPress={handleConditionPress}
                 onRelocationPlace={relocatingCondition ? handleRelocationPlace : undefined}
               />
               <ConditionRipples
-                conditions={conditions}
+                dots={dots}
                 activeSystems={activeSystems}
                 currentYear={currentYear}
                 condDateOverrides={condDateOverrides}
@@ -2343,6 +2480,12 @@ const styles = StyleSheet.create({
 
   sheetCondNameLarge: { fontFamily: 'MOMCAKE-Bold', fontSize: fs(26), color: C.ink, marginBottom: sc(4) },
   sheetCondSubEn: { fontFamily: 'BarlowCondensed-Regular', fontSize: fs(13), color: C.inkMuted, marginBottom: sc(10) },
+  inferredBadge: {
+    borderWidth: 1, borderColor: C.inkMuted, borderRadius: sc(4), paddingHorizontal: sc(6), paddingVertical: sc(2), marginBottom: sc(4),
+  },
+  inferredBadgeText: {
+    fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(10), textTransform: 'uppercase', letterSpacing: sc(1), color: C.inkMuted,
+  },
 
   sheetDateRow: { marginBottom: sc(12) },
   dateViewRow: { flexDirection: 'row', alignItems: 'center', gap: sc(8) },

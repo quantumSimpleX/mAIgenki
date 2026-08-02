@@ -1,35 +1,14 @@
+import 'fake-indexeddb/auto'
 import {
   loadProfile,
   saveProfile,
   migrateLegacyOpenRouterKey,
 } from '@/lib/llm/profile'
+import { openIndexedDb, getIndexedSetting, putIndexedSetting } from '@/lib/db/indexedDb'
 import type { KeyStore, LMFProfile } from '@/lib/lmf/types'
 
-// ── Mock expo-sqlite settings KV as an in-memory map ─────────────────────────
-
-function makeMockDb() {
-  const settings = new Map<string, string>()
-  return {
-    settings,
-    runAsync: jest.fn(async (sql: string, params: unknown[] = []) => {
-      if (sql.includes('INSERT OR REPLACE INTO settings')) {
-        const [key, value] = params as [string, string]
-        settings.set(key, value)
-      } else if (sql.includes('DELETE FROM settings')) {
-        const [key] = params as [string]
-        settings.delete(key)
-      }
-      return { lastInsertRowId: 1, changes: 1 }
-    }),
-    getFirstAsync: jest.fn(async (sql: string, params: unknown[] = []) => {
-      if (sql.includes('SELECT value FROM settings')) {
-        const [key] = params as [string]
-        const value = settings.get(key)
-        return value === undefined ? null : { value }
-      }
-      return null
-    }),
-  }
+function freshDb(): Promise<IDBDatabase> {
+  return openIndexedDb(`maigenki-profile-${Date.now()}-${Math.random()}`)
 }
 
 function makeMockKeyStore(): KeyStore & { store: Map<string, string> } {
@@ -48,8 +27,8 @@ beforeEach(() => jest.clearAllMocks())
 
 describe('loadProfile / saveProfile', () => {
   it('returns a sane tier-0 default when no profile row exists', async () => {
-    const db = makeMockDb()
-    const profile = await loadProfile(db as any)
+    const db = await freshDb()
+    const profile = await loadProfile(db)
     expect(profile).toEqual({
       tier: 0,
       activeProviderId: null,
@@ -58,17 +37,19 @@ describe('loadProfile / saveProfile', () => {
       fallbackToFree: true,
       keySource: null,
     })
+    db.close()
   })
 
   it('returns the default when the stored row is unparseable JSON', async () => {
-    const db = makeMockDb()
-    db.settings.set('lmf_profile', '{not json')
-    const profile = await loadProfile(db as any)
+    const db = await freshDb()
+    await putIndexedSetting(db, 'lmf_profile', '{not json')
+    const profile = await loadProfile(db)
     expect(profile.tier).toBe(0)
+    db.close()
   })
 
   it('round-trips a saved profile and never persists secret fields', async () => {
-    const db = makeMockDb()
+    const db = await freshDb()
     const profile: LMFProfile = {
       tier: 3,
       activeProviderId: 'anthropic',
@@ -77,52 +58,55 @@ describe('loadProfile / saveProfile', () => {
       fallbackToFree: false,
       keySource: 'oauth',
     }
-    await saveProfile(db as any, profile)
+    await saveProfile(db, profile)
 
-    const raw = db.settings.get('lmf_profile')!
+    const raw = (await getIndexedSetting(db, 'lmf_profile'))!
     expect(raw).not.toMatch(/sk-|api[_-]?key|secret|token/i)
 
-    const loaded = await loadProfile(db as any)
+    const loaded = await loadProfile(db)
     expect(loaded).toEqual(profile)
+    db.close()
   })
 })
 
 // ── migration ────────────────────────────────────────────────────────────
 
 describe('migrateLegacyOpenRouterKey', () => {
-  it('moves the legacy key into the KeyStore, deletes the SQLite row, and sets tier 2', async () => {
-    const db = makeMockDb()
-    db.settings.set('openrouter_api_key', 'sk-legacy-secret')
+  it('moves the legacy key into the KeyStore, deletes the settings row, and sets tier 2', async () => {
+    const db = await freshDb()
+    await putIndexedSetting(db, 'openrouter_api_key', 'sk-legacy-secret')
     const keyStore = makeMockKeyStore()
 
-    await migrateLegacyOpenRouterKey(db as any, keyStore)
+    await migrateLegacyOpenRouterKey(db, keyStore)
 
     expect(keyStore.store.get('openrouter')).toBe('sk-legacy-secret')
-    expect(db.settings.has('openrouter_api_key')).toBe(false)
+    expect(await getIndexedSetting(db, 'openrouter_api_key')).toBeNull()
 
-    const profile = await loadProfile(db as any)
+    const profile = await loadProfile(db)
     expect(profile.tier).toBe(2)
     expect(profile.activeProviderId).toBe('openrouter')
     expect(profile.keySource).toBe('manual')
 
     // No secret ever lands in the profile JSON.
-    const raw = db.settings.get('lmf_profile')!
+    const raw = (await getIndexedSetting(db, 'lmf_profile'))!
     expect(raw).not.toMatch(/sk-legacy-secret/)
+    db.close()
   })
 
   it('is a no-op when there is no legacy key row', async () => {
-    const db = makeMockDb()
+    const db = await freshDb()
     const keyStore = makeMockKeyStore()
 
-    await migrateLegacyOpenRouterKey(db as any, keyStore)
+    await migrateLegacyOpenRouterKey(db, keyStore)
 
     expect(keyStore.set).not.toHaveBeenCalled()
-    expect(db.settings.has('lmf_profile')).toBe(false)
+    expect(await getIndexedSetting(db, 'lmf_profile')).toBeNull()
+    db.close()
   })
 
   it('moves the legacy key but does not overwrite a profile that already exists', async () => {
-    const db = makeMockDb()
-    db.settings.set('openrouter_api_key', 'sk-legacy-secret')
+    const db = await freshDb()
+    await putIndexedSetting(db, 'openrouter_api_key', 'sk-legacy-secret')
     const preexisting: LMFProfile = {
       tier: 1,
       activeProviderId: 'gemini',
@@ -131,24 +115,25 @@ describe('migrateLegacyOpenRouterKey', () => {
       fallbackToFree: true,
       keySource: 'oauth',
     }
-    db.settings.set('lmf_profile', JSON.stringify(preexisting))
+    await putIndexedSetting(db, 'lmf_profile', JSON.stringify(preexisting))
     const keyStore = makeMockKeyStore()
 
-    await migrateLegacyOpenRouterKey(db as any, keyStore)
+    await migrateLegacyOpenRouterKey(db, keyStore)
 
     expect(keyStore.store.get('openrouter')).toBe('sk-legacy-secret')
-    expect(db.settings.has('openrouter_api_key')).toBe(false)
+    expect(await getIndexedSetting(db, 'openrouter_api_key')).toBeNull()
 
-    const profile = await loadProfile(db as any)
+    const profile = await loadProfile(db)
     expect(profile).toEqual(preexisting)
+    db.close()
   })
 
   it('is idempotent: a second call is a no-op and does not clobber a profile changed since the first migration', async () => {
-    const db = makeMockDb()
-    db.settings.set('openrouter_api_key', 'sk-legacy-secret')
+    const db = await freshDb()
+    await putIndexedSetting(db, 'openrouter_api_key', 'sk-legacy-secret')
     const keyStore = makeMockKeyStore()
 
-    await migrateLegacyOpenRouterKey(db as any, keyStore)
+    await migrateLegacyOpenRouterKey(db, keyStore)
 
     // User changes their profile after the first migration ran.
     const changedProfile: LMFProfile = {
@@ -159,13 +144,14 @@ describe('migrateLegacyOpenRouterKey', () => {
       fallbackToFree: true,
       keySource: 'oauth',
     }
-    await saveProfile(db as any, changedProfile)
+    await saveProfile(db, changedProfile)
 
     jest.clearAllMocks()
-    await migrateLegacyOpenRouterKey(db as any, keyStore)
+    await migrateLegacyOpenRouterKey(db, keyStore)
 
     expect(keyStore.set).not.toHaveBeenCalled()
-    const profile = await loadProfile(db as any)
+    const profile = await loadProfile(db)
     expect(profile).toEqual(changedProfile)
+    db.close()
   })
 })
