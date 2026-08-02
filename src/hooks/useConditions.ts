@@ -13,8 +13,8 @@ import { useAppStore, type ConditionSource } from '@/store/useAppStore'
 // location per condition) — mirrors the shape getIndexedConditionDots returns.
 function conditionsToDots(conditions: DesignCondition[]): IndexedConditionDot[] {
   return conditions.map((c) => ({
-    conditionId: c.id, system: c.system, cx_percent: c.cx_percent, cy_percent: c.cy_percent, yearFrac: c.yearFrac,
-    status: c.status ?? 'documented',
+    conditionId: c.id, locationId: null, system: c.system, cx_percent: c.cx_percent, cy_percent: c.cy_percent,
+    yearFrac: c.yearFrac, status: c.status ?? 'documented',
   }))
 }
 

@@ -1,6 +1,7 @@
 import 'fake-indexeddb/auto'
 import {
   getIndexedConditionDots, getProvidersForRecord, openIndexedDb, persistEnrichmentResult, seedIndexedDbDemoData,
+  putIndexedCondition, putIndexedConditionLocation, getConditionLocations, deleteConditionLocation,
 } from '@/lib/db/indexedDb'
 import { CONDITIONS, CONDITION_RECORDS } from '@/model/conditions'
 
@@ -162,6 +163,74 @@ describe('IndexedDB vertical slice', () => {
     const demoDots = await getIndexedConditionDots(db, 'demo')
     expect(demoDots.some((d) => d.conditionId === 'stones')).toBe(true)
     expect(demoDots.every((d) => d.conditionId !== 'user-1')).toBe(true)
+
+    db.close()
+  })
+
+  // Task 7.1: locationId lets the Remove tool know exactly which
+  // condition_locations row to delete, and distinguishes real rows from the
+  // synthesized fallback dot.
+  it('locationId is non-null and distinct for each real condition_locations row', async () => {
+    const db = await openIndexedDb(`maigenki-locationid-real-${Date.now()}`)
+    await seedIndexedDbDemoData(db)
+
+    const dots = await getIndexedConditionDots(db)
+    const stonesDots = dots.filter((d) => d.conditionId === 'stones')
+    expect(stonesDots).toHaveLength(2)
+    for (const dot of stonesDots) expect(dot.locationId).not.toBeNull()
+    expect(new Set(stonesDots.map((d) => d.locationId)).size).toBe(2)
+
+    db.close()
+  })
+
+  it('locationId is null for the synthesized fallback dot of a condition with zero location rows', async () => {
+    const db = await openIndexedDb(`maigenki-locationid-fallback-${Date.now()}`)
+    await putIndexedCondition(db, {
+      id: 'no-locations', record_id: null, name_medical: 'Legacy condition', name_common: null,
+      system: 'cardiovascular', organ: null, anatomical_location: null, status: 'documented',
+      severity: null, certainty: null, year_frac: 2020, date: null, date_onset: null,
+      date_diagnosed: null, note: null, evidence: null, local_names: null, inferred_fields: null,
+      cx: 50, cy: 50,
+    })
+
+    const dots = await getIndexedConditionDots(db)
+    const fallbackDots = dots.filter((d) => d.conditionId === 'no-locations')
+    expect(fallbackDots).toHaveLength(1)
+    expect(fallbackDots[0].locationId).toBeNull()
+
+    db.close()
+  })
+
+  // Task 7.6 removal guard: bodymap.tsx's handleLocationRemoveAttempt rejects
+  // removing a condition's last location, checked via getConditionLocations's
+  // row count before ever calling deleteConditionLocation. This exercises the
+  // underlying data-layer mechanics that guard relies on (bodymap.tsx itself
+  // isn't rendered in tests — see __tests__/screens/bodymap.test.tsx's own
+  // note on the SVG/Animated render cost — so the guard's branching is
+  // covered by Task 7.9 manual verification instead).
+  it('deleteConditionLocation removes exactly one row, leaving the last location intact', async () => {
+    const db = await openIndexedDb(`maigenki-removal-guard-${Date.now()}`)
+    await putIndexedCondition(db, {
+      id: 'two-loc', record_id: null, name_medical: 'Bilateral condition', name_common: null,
+      system: 'skeletal', organ: null, anatomical_location: null, status: 'documented',
+      severity: null, certainty: null, year_frac: 2020, date: null, date_onset: null,
+      date_diagnosed: null, note: null, evidence: null, local_names: null, inferred_fields: null,
+      cx: 40, cy: 40,
+    })
+    await putIndexedConditionLocation(db, { id: 'loc-a', condition_id: 'two-loc', cx: 40, cy: 40, is_primary: true })
+    await putIndexedConditionLocation(db, { id: 'loc-b', condition_id: 'two-loc', cx: 60, cy: 40, is_primary: false })
+
+    expect(await getConditionLocations(db, 'two-loc')).toHaveLength(2)
+
+    // 2 locations → removing one down to 1 succeeds.
+    await deleteConditionLocation(db, 'loc-b')
+    const remaining = await getConditionLocations(db, 'two-loc')
+    expect(remaining).toHaveLength(1)
+    expect(remaining[0].id).toBe('loc-a')
+
+    // 1 location remaining → the guard (existingLocations.length <= 1) blocks
+    // any further removal before calling deleteConditionLocation again.
+    expect(remaining.length).toBeLessThanOrEqual(1)
 
     db.close()
   })

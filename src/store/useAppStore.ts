@@ -56,8 +56,12 @@ type AppState = {
   editDateInput: string
   dragging: boolean
   uploadBtnsHovered: boolean
-  relocatingCondition: DesignCondition | null
-  preRelocationSystems: SystemId[]
+  locationEditingCondition: DesignCondition | null
+  locationEditMode: 'add' | 'remove' | null
+  preLocationEditSystems: SystemId[]
+  // Brief inline rejection message shown in the nav bar (e.g. "can't remove
+  // the last location") while location-editing is active.
+  locationEditMessage: string | null
   // Upload → pipeline → bodymap plumbing (URI flows via the store, not route params).
   pendingUpload: PendingUpload | null
   pendingDemo: boolean
@@ -114,8 +118,10 @@ type AppActions = {
   setDragging: (d: boolean) => void
   startAnalyze: () => void
   startDemoAnalyze: () => void
-  startRelocation: (c: DesignCondition) => void
-  cancelRelocation: () => void
+  startLocationEditing: (c: DesignCondition) => void
+  setLocationEditMode: (mode: 'add' | 'remove') => void
+  finishLocationEditing: () => void
+  setLocationEditMessage: (message: string | null) => void
   setPendingUpload: (upload: PendingUpload | null) => void
   setPendingDemo: (pending: boolean) => void
   setConditionSource: (source: ConditionSource) => void
@@ -158,8 +164,10 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   editDateInput: '',
   dragging: false,
   uploadBtnsHovered: false,
-  relocatingCondition: null,
-  preRelocationSystems: [],
+  locationEditingCondition: null,
+  locationEditMode: null,
+  preLocationEditSystems: [],
+  locationEditMessage: null,
   pendingUpload: null,
   pendingDemo: false,
   conditionSource: readInitialConditionSource(),
@@ -285,18 +293,26 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
       pipelineError: null,
     })
   },
-  startRelocation: (c) => set((s) => ({
-    preRelocationSystems: [...s.activeSystems],
+  startLocationEditing: (c) => set((s) => ({
+    preLocationEditSystems: [...s.activeSystems],
     activeSystems: [c.system],
-    relocatingCondition: c,
+    locationEditingCondition: c,
+    locationEditMode: 'add',
+    locationEditMessage: null,
     sheetOpen: false,
     selectedCondition: null,
   })),
-  cancelRelocation: () => set((s) => ({
-    activeSystems: [...s.preRelocationSystems],
-    relocatingCondition: null,
-    preRelocationSystems: [],
+  setLocationEditMode: (locationEditMode) => set({ locationEditMode }),
+  finishLocationEditing: () => set((s) => ({
+    activeSystems: [...s.preLocationEditSystems],
+    selectedCondition: s.locationEditingCondition,
+    sheetOpen: true,
+    locationEditingCondition: null,
+    locationEditMode: null,
+    preLocationEditSystems: [],
+    locationEditMessage: null,
   })),
+  setLocationEditMessage: (locationEditMessage) => set({ locationEditMessage }),
   setPendingUpload: (pendingUpload) => set({ pendingUpload }),
   setPendingDemo: (pendingDemo) => set({ pendingDemo }),
   setConditionSource: (conditionSource) => {

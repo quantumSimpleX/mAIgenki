@@ -74,6 +74,7 @@ export type IndexedConditionLocation = {
 
 export type IndexedConditionDot = {
   conditionId: string
+  locationId: string | null
   system: string
   cx_percent: number
   cy_percent: number
@@ -152,7 +153,7 @@ export type IndexedConditionCareEvent = {
   evidence: string | null
 }
 
-function uuid(): string {
+export function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
     const r = (Math.random() * 16) | 0
     return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
@@ -658,9 +659,12 @@ export async function getIndexedConditionDots(db: IDBDatabase, mode: ConditionQu
   return conditions.flatMap((condition) => {
     const conditionLocations = [...(byCondition.get(condition.id) ?? [])]
       .sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
-    const points = conditionLocations.length > 0 ? conditionLocations : [{ cx: condition.cx, cy: condition.cy }]
+    const points: { cx: number; cy: number; id: string | null }[] = conditionLocations.length > 0
+      ? conditionLocations.map((l) => ({ cx: l.cx, cy: l.cy, id: l.id }))
+      : [{ cx: condition.cx, cy: condition.cy, id: null }]
     return points.map((point) => ({
-      conditionId: condition.id, system: condition.system, cx_percent: point.cx, cy_percent: point.cy,
+      conditionId: condition.id, locationId: point.id, system: condition.system,
+      cx_percent: point.cx, cy_percent: point.cy,
       yearFrac: condition.year_frac, status: condition.status,
     }))
   })

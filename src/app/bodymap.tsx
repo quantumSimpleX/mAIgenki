@@ -30,6 +30,7 @@ import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
 import {
   getIndexedSetting, putIndexedSetting, updateIndexedConditionPosition,
   getRecordImageThumbnail, getRecordImageBlob, type IndexedConditionDot,
+  putIndexedConditionLocation, getConditionLocations, deleteConditionLocation, uuid,
 } from '@/lib/db/indexedDb'
 import { exportIndexedDbBackupToJson, importIndexedDbBackupFromJson } from '@/lib/db/indexedDbBackup'
 import { ProviderSettings } from '@/components/ProviderSettings'
@@ -389,7 +390,8 @@ function NavBar() {
   const {
     currentYear, timeDisplayMode, birthYear, birthMonth,
     toggleTimeDisplayMode, toggleSettings, toggleLegend, legendOpen,
-    relocatingCondition, cancelRelocation, preferredLanguage,
+    locationEditingCondition, locationEditMode, setLocationEditMode,
+    finishLocationEditing, locationEditMessage, setLocationEditMessage, preferredLanguage,
     lastUploadResult, setLastUploadResult,
   } = useAppStore()
   const uploadMessage = lastUploadResult
@@ -397,6 +399,13 @@ function NavBar() {
       ? `${lastUploadResult.conditionCount} condition${lastUploadResult.conditionCount === 1 ? '' : 's'} added`
       : 'No conditions extracted'
     : null
+
+  // Auto-dismiss the removal-rejection message after a brief interval.
+  useEffect(() => {
+    if (!locationEditMessage) return
+    const timer = setTimeout(() => setLocationEditMessage(null), 2200)
+    return () => clearTimeout(timer)
+  }, [locationEditMessage, setLocationEditMessage])
 
   return (
     <View style={styles.nav}>
@@ -410,7 +419,7 @@ function NavBar() {
           </Svg>
         </View>
       </TouchableOpacity>
-      {uploadMessage && !relocatingCondition && (
+      {uploadMessage && !locationEditingCondition && (
         <TouchableOpacity
           style={styles.navCenterMessage}
           onPress={() => setLastUploadResult(null)}
@@ -420,18 +429,43 @@ function NavBar() {
           <Text style={styles.navCenterMessageText} numberOfLines={1}>{uploadMessage}</Text>
         </TouchableOpacity>
       )}
-      {relocatingCondition ? (
-        <>
+      {locationEditingCondition && locationEditMessage && (
+        <View style={styles.navCenterMessage} pointerEvents="none">
+          <Text style={styles.navCenterMessageText} numberOfLines={1}>{locationEditMessage}</Text>
+        </View>
+      )}
+      {locationEditingCondition ? (
+        <View style={styles.navLocationEdit}>
           <Text
-            style={[styles.navRelocationText, { color: SYSTEM_META[relocatingCondition.system]?.color ?? C.aqua }]}
+            style={[styles.navRelocationText, { color: SYSTEM_META[locationEditingCondition.system]?.color ?? C.aqua }]}
             numberOfLines={1}
           >
-            Tap to place · {getLocalName(relocatingCondition, preferredLanguage)}
+            {getLocalName(locationEditingCondition, preferredLanguage)}
           </Text>
-          <TouchableOpacity onPress={cancelRelocation} hitSlop={12}>
-            <Text style={styles.navRelocationCancel}>✕</Text>
-          </TouchableOpacity>
-        </>
+          <View style={styles.navLocationEditControls}>
+            <TouchableOpacity
+              style={[styles.navLocationEditBtn, locationEditMode === 'add' && {
+                backgroundColor: SYSTEM_META[locationEditingCondition.system]?.color ?? C.aqua,
+              }]}
+              onPress={() => setLocationEditMode('add')}
+              hitSlop={6}
+            >
+              <Text style={styles.navLocationEditBtnText}>+ Add</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.navLocationEditBtn, locationEditMode === 'remove' && {
+                backgroundColor: SYSTEM_META[locationEditingCondition.system]?.color ?? C.aqua,
+              }]}
+              onPress={() => setLocationEditMode('remove')}
+              hitSlop={6}
+            >
+              <Text style={styles.navLocationEditBtnText}>− Remove</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.navLocationEditBtn} onPress={finishLocationEditing} hitSlop={6}>
+              <Text style={styles.navLocationEditBtnText}>✓ Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       ) : (
         <View style={styles.navRight}>
           <TouchableOpacity style={styles.datePill} onPress={toggleTimeDisplayMode} hitSlop={8}>
@@ -580,32 +614,54 @@ function BodyLayers({ activeSystems }: { activeSystems: SystemId[] }) {
 // between tightly-clustered dots and (b) SVG z-order eclipsing where a higher-layer dot's
 // hit area would block a lower-layer dot from ever being reachable.
 function GhostDots({
-  dots, conditions, activeSystems, onPress, onRelocationPlace,
+  dots, conditions, activeSystems, onPress,
+  locationEditMode, locationEditingConditionId, onLocationAdd, onLocationRemoveAttempt,
 }: {
   dots: IndexedConditionDot[]
   conditions: DesignCondition[]
   activeSystems: SystemId[]
   onPress: (c: DesignCondition) => void
-  onRelocationPlace?: (cx: number, cy: number) => void
+  locationEditMode?: 'add' | 'remove' | null
+  locationEditingConditionId?: string | null
+  onLocationAdd?: (cx: number, cy: number) => void
+  onLocationRemoveAttempt?: (dot: IndexedConditionDot) => void
 }) {
   const visible = dots.filter((d) => activeSystems.includes(normalizeSystemId(d.system)))
   const [nativeSize, setNativeSize] = useState({ w: 260, h: 460 })
+
+  // "Nearest dot within 8 SVG units" lookup, optionally scoped to a single
+  // condition (used by the Remove tool so other conditions' dots stay inert).
+  const findNearest = useCallback((svgX: number, svgY: number, conditionId?: string) => {
+    let nearest: IndexedConditionDot | null = null
+    let minDist = 8  // SVG units — must click within this radius of a dot
+    for (const d of visible) {
+      if (conditionId && d.conditionId !== conditionId) continue
+      const dist = Math.hypot(getSvgX(d.cx_percent) - svgX, getSvgY(d.cy_percent) - svgY)
+      if (dist < minDist) { minDist = dist; nearest = d }
+    }
+    return nearest
+  }, [visible])
 
   // Resolves the tapped dot's conditionId back to the full DesignCondition
   // (from the parallel useConditions()-sourced list) at press time — the two
   // lists are joined by id here, not merged (Task 5.3).
   const pressNearest = useCallback((svgX: number, svgY: number) => {
-    let nearest: IndexedConditionDot | null = null
-    let minDist = 8  // SVG units — must click within this radius of a dot
-    for (const d of visible) {
-      const dist = Math.hypot(getSvgX(d.cx_percent) - svgX, getSvgY(d.cy_percent) - svgY)
-      if (dist < minDist) { minDist = dist; nearest = d }
-    }
+    const nearest = findNearest(svgX, svgY)
     if (nearest) {
-      const cond = conditions.find((c) => c.id === nearest!.conditionId)
+      const cond = conditions.find((c) => c.id === nearest.conditionId)
       if (cond) onPress(cond)
     }
-  }, [visible, conditions, onPress])
+  }, [findNearest, conditions, onPress])
+
+  const handleTap = useCallback((svgX: number, svgY: number) => {
+    if (locationEditMode === 'add' && onLocationAdd) { onLocationAdd(svgX, svgY); return }
+    if (locationEditMode === 'remove' && onLocationRemoveAttempt) {
+      const nearest = findNearest(svgX, svgY, locationEditingConditionId ?? undefined)
+      if (nearest) onLocationRemoveAttempt(nearest)
+      return
+    }
+    pressNearest(svgX, svgY)
+  }, [locationEditMode, onLocationAdd, onLocationRemoveAttempt, locationEditingConditionId, findNearest, pressNearest])
 
   return (
     <>
@@ -640,7 +696,7 @@ function GhostDots({
               const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
               const svgX = (e.clientX - rect.left) * 260 / rect.width
               const svgY = (e.clientY - rect.top) * 460 / rect.height
-              if (onRelocationPlace) { onRelocationPlace(svgX, svgY) } else { pressNearest(svgX, svgY) }
+              handleTap(svgX, svgY)
             },
           } as object)}
         />
@@ -654,7 +710,7 @@ function GhostDots({
           onPress={(e) => {
             const svgX = (e.nativeEvent.locationX / nativeSize.w) * 260
             const svgY = (e.nativeEvent.locationY / nativeSize.h) * 460
-            if (onRelocationPlace) { onRelocationPlace(svgX, svgY) } else { pressNearest(svgX, svgY) }
+            handleTap(svgX, svgY)
           }}
         />
       )}
@@ -664,7 +720,7 @@ function GhostDots({
 
 function BodySvg({
   activeSystems, dots, onConditionPress, currentYear,
-  condDateOverrides, selectedCondition, relocatingCondition,
+  condDateOverrides, selectedCondition, locationEditingCondition,
 }: {
   activeSystems: SystemId[]
   dots: IndexedConditionDot[]
@@ -672,7 +728,7 @@ function BodySvg({
   currentYear: number
   condDateOverrides: Record<string, string>
   selectedCondition: DesignCondition | null
-  relocatingCondition: DesignCondition | null
+  locationEditingCondition: DesignCondition | null
 }) {
   const visibleDots = dots.filter((d) => {
     if (!activeSystems.includes(normalizeSystemId(d.system))) return false
@@ -689,13 +745,13 @@ function BodySvg({
           handler property". On native, use onPress. */}
       {visibleDots.map((d) => {
         const isSelected = selectedCondition?.id === d.conditionId
-        const isRelocating = relocatingCondition?.id === d.conditionId
+        const isEditingLocation = locationEditingCondition?.id === d.conditionId
         const isInferred = d.status === 'inferred'
         const color = SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'
         return (
           <Circle
             key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)}
-            r={isRelocating ? 4 : isSelected ? 2.5 : 1.5}
+            r={isEditingLocation ? 4 : isSelected ? 2.5 : 1.5}
             fill={isInferred ? 'none' : color}
             stroke={isInferred ? color : 'none'}
             strokeWidth={isInferred ? 1 : 0}
@@ -1091,7 +1147,7 @@ function ConditionSheet() {
     preferredLanguage, selectedRecords,
     condDateOverrides, editingCondDate, editDateInput,
     startEditDate, setEditDateInput, confirmEditDate, cancelEditDate,
-    startRelocation, setOpenSettingsSection, llmTier,
+    startLocationEditing, setOpenSettingsSection, llmTier,
   } = useAppStore()
 
   const idb = useOptionalIndexedDb()
@@ -1243,7 +1299,7 @@ function ConditionSheet() {
               </Text>
               {selectedCondition && meta && (
                 <TouchableOpacity
-                  onPress={() => startRelocation(selectedCondition)}
+                  onPress={() => startLocationEditing(selectedCondition)}
                   hitSlop={10}
                 >
                   <PencilIcon />
@@ -2004,7 +2060,7 @@ export default function BodyMapScreen() {
     activeSystems, selectCondition,
     currentYear, sheetOpen, settingsOpen,
     condDateOverrides, selectedCondition,
-    relocatingCondition, cancelRelocation,
+    locationEditingCondition, locationEditMode, setLocationEditMessage,
     lastUploadResult, setLastUploadResult,
     setCurrentYear, setConditionSource,
     toggleSettings,
@@ -2089,19 +2145,46 @@ export default function BodyMapScreen() {
     selectCondition(c)
   }, [selectCondition])
 
-  const handleRelocationPlace = useCallback(async (cx: number, cy: number) => {
-    if (!relocatingCondition) return
+  // Add tool: places a new location for locationEditingCondition at the tapped
+  // coordinates. A condition with zero real condition_locations rows (a
+  // legacy/fallback condition rendering its synthesized dot) dual-writes the
+  // condition's own cx/cy via updateIndexedConditionPosition, mirroring the
+  // pre-existing relocation dual-write pattern, so getIndexedConditionDots
+  // stops falling back once a real location exists.
+  const handleLocationAdd = useCallback(async (cx: number, cy: number) => {
+    if (!locationEditingCondition || !idb) return
     const cxPercent = (cx / 260) * 100
     const cyPercent = (cy / 460) * 100
-    // console.log(`[Condition Relocated] ${relocatingCondition.label}: ${cxPercent.toFixed(2)}% x ${cyPercent.toFixed(2)}%`)
-    updateConditionPositionLocally(relocatingCondition.id, cxPercent, cyPercent)
-    if (idb) {
-      await updateIndexedConditionPosition(idb, relocatingCondition.id, cxPercent, cyPercent)
+    const existingLocations = await getConditionLocations(idb, locationEditingCondition.id)
+    if (existingLocations.length === 0) {
+      updateConditionPositionLocally(locationEditingCondition.id, cxPercent, cyPercent)
+      await updateIndexedConditionPosition(idb, locationEditingCondition.id, cxPercent, cyPercent)
+      refreshConditions()
+    } else {
+      await putIndexedConditionLocation(idb, {
+        id: uuid(), condition_id: locationEditingCondition.id, cx: cxPercent, cy: cyPercent, is_primary: false,
+      })
     }
-    refreshConditions()
     refreshDots()
-    cancelRelocation()
-  }, [relocatingCondition, idb, refreshConditions, refreshDots, cancelRelocation, updateConditionPositionLocally])
+  }, [locationEditingCondition, idb, refreshConditions, refreshDots, updateConditionPositionLocally])
+
+  // Remove tool: deletes the tapped location, rejecting an attempt that would
+  // leave the condition with zero locations (§5.10) — this covers both the
+  // synthesized fallback dot (locationId === null) and the last real row.
+  const handleLocationRemoveAttempt = useCallback(async (dot: IndexedConditionDot) => {
+    if (!locationEditingCondition || !idb) return
+    if (dot.locationId === null) {
+      setLocationEditMessage("Can't remove the last location")
+      return
+    }
+    const existingLocations = await getConditionLocations(idb, locationEditingCondition.id)
+    if (existingLocations.length <= 1) {
+      setLocationEditMessage("Can't remove the last location")
+      return
+    }
+    await deleteConditionLocation(idb, dot.locationId)
+    refreshDots()
+  }, [locationEditingCondition, idb, refreshDots, setLocationEditMessage])
 
   const dismissUploadMessage = useCallback(() => {
     if (useAppStore.getState().lastUploadResult) setLastUploadResult(null)
@@ -2319,14 +2402,17 @@ export default function BodyMapScreen() {
                 currentYear={currentYear}
                 condDateOverrides={condDateOverrides}
                 selectedCondition={selectedCondition}
-                relocatingCondition={relocatingCondition}
+                locationEditingCondition={locationEditingCondition}
               />
               <GhostDots
                 dots={dots}
                 conditions={conditions}
                 activeSystems={activeSystems}
                 onPress={handleConditionPress}
-                onRelocationPlace={relocatingCondition ? handleRelocationPlace : undefined}
+                locationEditMode={locationEditMode}
+                locationEditingConditionId={locationEditingCondition?.id ?? null}
+                onLocationAdd={locationEditMode === 'add' ? handleLocationAdd : undefined}
+                onLocationRemoveAttempt={locationEditMode === 'remove' ? handleLocationRemoveAttempt : undefined}
               />
               <ConditionRipples
                 dots={dots}
@@ -2400,7 +2486,18 @@ const styles = StyleSheet.create({
     fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(13), letterSpacing: sc(0.2),
     paddingHorizontal: sc(6),
   },
-  navRelocationCancel: { fontSize: fs(18), color: C.inkMuted, padding: sc(4) },
+  navLocationEdit: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end',
+    gap: sc(8),
+  },
+  navLocationEditControls: { flexDirection: 'row', alignItems: 'center', gap: sc(6) },
+  navLocationEditBtn: {
+    paddingHorizontal: sc(8), paddingVertical: sc(4), borderRadius: sc(12),
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
+  },
+  navLocationEditBtnText: {
+    fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(11), color: C.ink, letterSpacing: sc(0.2),
+  },
   datePill: {
     paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(14),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
