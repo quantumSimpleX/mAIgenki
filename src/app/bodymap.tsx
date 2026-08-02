@@ -399,6 +399,12 @@ function NavBar({
     finishLocationEditing, preferredLanguage,
     lastUploadResult, setLastUploadResult, setNavBarHeight,
   } = useAppStore()
+  // Narrow (mobile) viewports drop the Add/Remove/Done labels down to just
+  // their symbols so the row fits alongside the condition name. Read
+  // reactively (not the module-level IS_DESKTOP snapshot) so it responds to
+  // an in-session resize/rotation, not just the width at initial load.
+  const { width: navWinW } = useWindowDimensions()
+  const compactLocationEditBtns = navWinW < 480
   const uploadMessage = lastUploadResult
     ? lastUploadResult.conditionCount > 0
       ? `${lastUploadResult.conditionCount} condition${lastUploadResult.conditionCount === 1 ? '' : 's'} added`
@@ -437,17 +443,22 @@ function NavBar({
           </Text>
           <View style={styles.navLocationEditControls}>
             <TouchableOpacity
-              style={[styles.navLocationEditBtn, locationEditMode === 'add' && {
-                backgroundColor: SYSTEM_META[locationEditingCondition.system]?.color ?? C.aqua,
-              }]}
+              style={[
+                styles.navLocationEditBtn,
+                compactLocationEditBtns && styles.navLocationEditBtnCompact,
+                locationEditMode === 'add' && {
+                  backgroundColor: SYSTEM_META[locationEditingCondition.system]?.color ?? C.aqua,
+                },
+              ]}
               onPress={() => setLocationEditMode('add')}
               hitSlop={6}
             >
-              <Text style={styles.navLocationEditBtnText}>+ Add</Text>
+              <Text style={styles.navLocationEditBtnText}>{compactLocationEditBtns ? '+' : '+ Add'}</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[
                 styles.navLocationEditBtn,
+                compactLocationEditBtns && styles.navLocationEditBtnCompact,
                 locationEditMode === 'remove' && canRemoveLocation && {
                   backgroundColor: SYSTEM_META[locationEditingCondition.system]?.color ?? C.aqua,
                 },
@@ -458,17 +469,21 @@ function NavBar({
               hitSlop={6}
             >
               <Text style={[styles.navLocationEditBtnText, !canRemoveLocation && styles.navLocationEditBtnTextDisabled]}>
-                − Remove
+                {compactLocationEditBtns ? '−' : '− Remove'}
               </Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.navLocationEditBtn, !canFinishLocationEditing && styles.navLocationEditBtnDisabled]}
+              style={[
+                styles.navLocationEditBtn,
+                compactLocationEditBtns && styles.navLocationEditBtnCompact,
+                !canFinishLocationEditing && styles.navLocationEditBtnDisabled,
+              ]}
               onPress={canFinishLocationEditing ? finishLocationEditing : undefined}
               disabled={!canFinishLocationEditing}
               hitSlop={6}
             >
               <Text style={[styles.navLocationEditBtnText, !canFinishLocationEditing && styles.navLocationEditBtnTextDisabled]}>
-                ✓ Done
+                {compactLocationEditBtns ? '✓' : '✓ Done'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -2082,6 +2097,7 @@ export default function BodyMapScreen() {
 
   const [conditions, refreshConditions, updateConditionPositionLocally] = useConditions(routeConditionSource)
   const [dots, refreshDots] = useConditionDots(routeConditionSource)
+  const idb = useOptionalIndexedDb()
   // Real (DB-backed) location count for the condition currently being edited —
   // gates the nav bar's Done button (§5.10 amendment: zero locations is a
   // valid interim state while editing, but Done can't be pressed until at
@@ -2095,7 +2111,13 @@ export default function BodyMapScreen() {
   // this, Done stays enabled for the brief window between an awaited delete
   // and its refresh — a fast double-press could exit with zero locations.
   const [locationWritePendingCount, setLocationWritePendingCount] = useState(0)
-  const canFinishLocationEditing = editingLocationCount > 0 && locationWritePendingCount === 0
+  // When IndexedDB never opened, nothing here can persist at all (Add/Remove
+  // both no-op on a null idb, and the materialize effect below can't seed a
+  // location either) — gating Done on a location count that can never become
+  // positive would trap the user in the editor with no escape (Codex review
+  // finding). Done is unconditionally available in that case; there's no
+  // location data whose integrity it would otherwise be protecting.
+  const canFinishLocationEditing = !idb || (editingLocationCount > 0 && locationWritePendingCount === 0)
   // With zero real locations, Remove has nothing to act on (its only visible
   // dot would be the hidden fallback below) — Add is the sole allowed tool.
   const canRemoveLocation = editingLocationCount > 0
@@ -2116,7 +2138,6 @@ export default function BodyMapScreen() {
   const bodyMapDots = locationEditingCondition
     ? dots.filter((d) => !(d.conditionId === locationEditingCondition.id && d.locationId === null))
     : dots
-  const idb = useOptionalIndexedDb()
   const settingsRequested = useRef(false)
 
   useEffect(() => {
@@ -2270,7 +2291,11 @@ export default function BodyMapScreen() {
     enqueueLocationWrite(async () => {
       await deleteConditionLocation(idb, locationId)
       const remaining = await getConditionLocations(idb, condition.id)
-      refreshDots()
+      // Awaited (not fire-and-forget) so the pending-write guard isn't
+      // released until the refreshed dot count has actually landed in state —
+      // otherwise Done could briefly re-read the stale, pre-deletion count
+      // (Codex review finding).
+      await refreshDots()
       if (remaining.length === 0) setLocationEditMode('add')
     })
   }, [locationEditingCondition, idb, enqueueLocationWrite, refreshDots, setLocationEditMode])
@@ -2577,18 +2602,27 @@ const styles = StyleSheet.create({
   },
   navLocationEdit: {
     flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end',
-    gap: sc(8),
+    gap: sc(6),
   },
-  navLocationEditControls: { flexDirection: 'row', alignItems: 'center', gap: sc(6) },
+  navLocationEditControls: { flexDirection: 'row', alignItems: 'center', gap: sc(4) },
   navLocationEditBtn: {
-    paddingHorizontal: sc(8), paddingVertical: sc(4), borderRadius: sc(12),
+    paddingHorizontal: sc(5), paddingVertical: sc(3), borderRadius: sc(10),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
   },
+  // Icon-only mode (narrow viewports, see NavBar's compactLocationEditBtns):
+  // a tighter, closer-to-square box since there's no label to pad around.
+  navLocationEditBtnCompact: { paddingHorizontal: sc(6), minWidth: sc(24), alignItems: 'center' },
   navLocationEditBtnText: {
     fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(11), color: C.ink, letterSpacing: sc(0.2),
   },
-  navLocationEditBtnDisabled: { opacity: 0.35 },
-  navLocationEditBtnTextDisabled: { color: C.inkMuted },
+  // Disabled state is conveyed through dimmer border/fill + a distinct muted
+  // text color, not a blanket `opacity` on the whole button — opacity would
+  // compound with navLocationEditBtnTextDisabled's already-muted text color
+  // and render it nearly unreadable against the dark nav background.
+  navLocationEditBtnDisabled: {
+    borderColor: 'rgba(255,255,255,0.06)', backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  navLocationEditBtnTextDisabled: { color: 'rgba(255,255,255,0.4)' },
   datePill: {
     paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(14),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
