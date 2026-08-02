@@ -310,10 +310,4 @@ describe('multi-location editing state machine', () => {
     expect(get().preLocationEditSystems).toEqual([])
   })
 
-  it('setLocationEditMessage sets and clears the inline rejection message', () => {
-    get().setLocationEditMessage("Can't remove the last location")
-    expect(get().locationEditMessage).toBe("Can't remove the last location")
-    get().setLocationEditMessage(null)
-    expect(get().locationEditMessage).toBeNull()
-  })
 })

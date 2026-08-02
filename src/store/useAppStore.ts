@@ -59,9 +59,6 @@ type AppState = {
   locationEditingCondition: DesignCondition | null
   locationEditMode: 'add' | 'remove' | null
   preLocationEditSystems: SystemId[]
-  // Brief inline rejection message shown in the nav bar (e.g. "can't remove
-  // the last location") while location-editing is active.
-  locationEditMessage: string | null
   // Upload → pipeline → bodymap plumbing (URI flows via the store, not route params).
   pendingUpload: PendingUpload | null
   pendingDemo: boolean
@@ -124,7 +121,6 @@ type AppActions = {
   startLocationEditing: (c: DesignCondition) => void
   setLocationEditMode: (mode: 'add' | 'remove') => void
   finishLocationEditing: () => void
-  setLocationEditMessage: (message: string | null) => void
   setPendingUpload: (upload: PendingUpload | null) => void
   setPendingDemo: (pending: boolean) => void
   setConditionSource: (source: ConditionSource) => void
@@ -171,7 +167,6 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   locationEditingCondition: null,
   locationEditMode: null,
   preLocationEditSystems: [],
-  locationEditMessage: null,
   pendingUpload: null,
   pendingDemo: false,
   conditionSource: readInitialConditionSource(),
@@ -305,7 +300,6 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     activeSystems: [c.system],
     locationEditingCondition: c,
     locationEditMode: 'remove',
-    locationEditMessage: null,
     sheetOpen: false,
     selectedCondition: null,
   })),
@@ -319,9 +313,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
     locationEditingCondition: null,
     locationEditMode: null,
     preLocationEditSystems: [],
-    locationEditMessage: null,
   })),
-  setLocationEditMessage: (locationEditMessage) => set({ locationEditMessage }),
   setPendingUpload: (pendingUpload) => set({ pendingUpload }),
   setPendingDemo: (pendingDemo) => set({ pendingDemo }),
   setConditionSource: (conditionSource) => {

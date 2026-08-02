@@ -386,27 +386,19 @@ function renderRecordThumbSvg(rec: ConditionRecord, w: number, h: number) {
 
 // ─── Top Bar ─────────────────────────────────────────────────────────────────
 
-function NavBar({ editingLocationCount }: { editingLocationCount: number }) {
+function NavBar({ canFinishLocationEditing }: { canFinishLocationEditing: boolean }) {
   const {
     currentYear, timeDisplayMode, birthYear, birthMonth,
     toggleTimeDisplayMode, toggleSettings, toggleLegend, legendOpen,
     locationEditingCondition, locationEditMode, setLocationEditMode,
-    finishLocationEditing, locationEditMessage, setLocationEditMessage, preferredLanguage,
+    finishLocationEditing, preferredLanguage,
     lastUploadResult, setLastUploadResult, setNavBarHeight,
   } = useAppStore()
-  const canFinishLocationEditing = editingLocationCount > 0
   const uploadMessage = lastUploadResult
     ? lastUploadResult.conditionCount > 0
       ? `${lastUploadResult.conditionCount} condition${lastUploadResult.conditionCount === 1 ? '' : 's'} added`
       : 'No conditions extracted'
     : null
-
-  // Auto-dismiss the removal-rejection message after a brief interval.
-  useEffect(() => {
-    if (!locationEditMessage) return
-    const timer = setTimeout(() => setLocationEditMessage(null), 2200)
-    return () => clearTimeout(timer)
-  }, [locationEditMessage, setLocationEditMessage])
 
   return (
     <View style={styles.nav} onLayout={(e) => setNavBarHeight(e.nativeEvent.layout.height)}>
@@ -429,11 +421,6 @@ function NavBar({ editingLocationCount }: { editingLocationCount: number }) {
         >
           <Text style={styles.navCenterMessageText} numberOfLines={1}>{uploadMessage}</Text>
         </TouchableOpacity>
-      )}
-      {locationEditingCondition && locationEditMessage && (
-        <View style={styles.navCenterMessage} pointerEvents="none">
-          <Text style={styles.navCenterMessageText} numberOfLines={1}>{locationEditMessage}</Text>
-        </View>
       )}
       {locationEditingCondition ? (
         <View style={styles.navLocationEdit}>
@@ -2073,7 +2060,7 @@ export default function BodyMapScreen() {
     activeSystems, selectCondition,
     currentYear, sheetOpen, settingsOpen,
     condDateOverrides, selectedCondition,
-    locationEditingCondition, locationEditMode, setLocationEditMessage,
+    locationEditingCondition, locationEditMode, setLocationEditMode,
     lastUploadResult, setLastUploadResult,
     setCurrentYear, setConditionSource,
     toggleSettings,
@@ -2091,6 +2078,21 @@ export default function BodyMapScreen() {
   const editingLocationCount = locationEditingCondition
     ? dots.filter((d) => d.conditionId === locationEditingCondition.id && d.locationId !== null).length
     : 0
+  // Number of location writes currently in flight (Codex review finding):
+  // editingLocationCount only updates once refreshDots() resolves, so without
+  // this, Done stays enabled for the brief window between an awaited delete
+  // and its refresh — a fast double-press could exit with zero locations.
+  const [locationWritePendingCount, setLocationWritePendingCount] = useState(0)
+  const canFinishLocationEditing = editingLocationCount > 0 && locationWritePendingCount === 0
+  // The synthesized fallback dot (locationId === null) for the condition
+  // currently being edited is hidden from the map/tap targets while editing —
+  // once the user empties a condition's real locations, the map should read
+  // as "no dots" for it, not have an untappable dot reappear (see
+  // handleLocationRemoveAttempt, which switches back to Add mode at the same
+  // moment this dot would otherwise resurface).
+  const bodyMapDots = locationEditingCondition
+    ? dots.filter((d) => !(d.conditionId === locationEditingCondition.id && d.locationId === null))
+    : dots
   const idb = useOptionalIndexedDb()
   const settingsRequested = useRef(false)
 
@@ -2170,10 +2172,15 @@ export default function BodyMapScreen() {
   // below (both the auto-materialize effect and Add-mode taps) through one
   // promise chain, so two near-simultaneous callers can't both observe zero
   // rows and race on the same deterministic `${conditionId}-primary` key,
-  // silently dropping one of them (Codex review finding).
+  // silently dropping one of them (Codex review finding). Also tracks an
+  // in-flight count so Done can be disabled for the duration of any pending
+  // write, not just once editingLocationCount catches up (another Codex
+  // review finding).
   const locationWriteQueueRef = useRef<Promise<void>>(Promise.resolve())
   const enqueueLocationWrite = useCallback((task: () => Promise<void>) => {
-    locationWriteQueueRef.current = locationWriteQueueRef.current.then(task, task)
+    setLocationWritePendingCount((n) => n + 1)
+    const done = () => setLocationWritePendingCount((n) => n - 1)
+    locationWriteQueueRef.current = locationWriteQueueRef.current.then(task, task).then(done, done)
   }, [])
 
   // A legacy/fallback condition with zero real condition_locations rows only
@@ -2187,14 +2194,16 @@ export default function BodyMapScreen() {
   useEffect(() => {
     if (!locationEditingCondition || !idb) return
     const condition = locationEditingCondition
-    enqueueLocationWrite(async () => {
+    // Deferred one microtask so enqueueLocationWrite's setState call doesn't
+    // run synchronously inside this effect's body (react-hooks/set-state-in-effect).
+    Promise.resolve().then(() => enqueueLocationWrite(async () => {
       const existingLocations = await getConditionLocations(idb, condition.id)
       if (existingLocations.length === 0) {
         await updateIndexedConditionPosition(idb, condition.id, condition.cx_percent, condition.cy_percent)
         refreshConditions()
         refreshDots()
       }
-    })
+    }))
   }, [locationEditingCondition, idb, enqueueLocationWrite, refreshConditions, refreshDots])
 
   // Add tool: places a new location for locationEditingCondition at the tapped
@@ -2224,19 +2233,24 @@ export default function BodyMapScreen() {
   }, [locationEditingCondition, idb, enqueueLocationWrite, refreshConditions, refreshDots, updateConditionPositionLocally])
 
   // Remove tool: deletes the tapped location. Removing every real location is
-  // allowed — the nav bar's Done button (canFinishLocationEditing) is what
-  // gates exiting the session on zero locations, not this handler. The only
-  // rejection here is the synthesized fallback dot (locationId === null),
-  // which has no real condition_locations row to delete.
-  const handleLocationRemoveAttempt = useCallback(async (dot: IndexedConditionDot) => {
-    if (!locationEditingCondition || !idb) return
-    if (dot.locationId === null) {
-      setLocationEditMessage('Add a location before removing this one')
-      return
-    }
-    await deleteConditionLocation(idb, dot.locationId)
-    refreshDots()
-  }, [locationEditingCondition, idb, refreshDots, setLocationEditMessage])
+  // allowed. Routed through enqueueLocationWrite so Done stays disabled for
+  // the duration of the delete + refresh, not just once dots catch up
+  // (Codex review finding). bodyMapDots already filters the synthesized
+  // fallback dot (locationId === null) out of the tap targets while editing,
+  // so the null check below is a defensive no-op, not a reachable UI path.
+  // Emptying a condition's locations switches the tool back to Add, at the
+  // same moment the map goes dot-free for it — see bodyMapDots above.
+  const handleLocationRemoveAttempt = useCallback((dot: IndexedConditionDot) => {
+    if (!locationEditingCondition || !idb || dot.locationId === null) return
+    const condition = locationEditingCondition
+    const locationId = dot.locationId
+    enqueueLocationWrite(async () => {
+      await deleteConditionLocation(idb, locationId)
+      const remaining = await getConditionLocations(idb, condition.id)
+      refreshDots()
+      if (remaining.length === 0) setLocationEditMode('add')
+    })
+  }, [locationEditingCondition, idb, enqueueLocationWrite, refreshDots, setLocationEditMode])
 
   const dismissUploadMessage = useCallback(() => {
     if (useAppStore.getState().lastUploadResult) setLastUploadResult(null)
@@ -2422,7 +2436,7 @@ export default function BodyMapScreen() {
       onMoveShouldSetResponderCapture={dismissUploadMessage}
     >
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-        <NavBar editingLocationCount={editingLocationCount} />
+        <NavBar canFinishLocationEditing={canFinishLocationEditing} />
 
         {/* One-time gender prompt when body type couldn't be inferred */}
         {genderPromptNeeded && (
@@ -2449,7 +2463,7 @@ export default function BodyMapScreen() {
               <BodyLayers activeSystems={activeSystems} />
               <BodySvg
                 activeSystems={activeSystems}
-                dots={dots}
+                dots={bodyMapDots}
                 onConditionPress={handleConditionPress}
                 currentYear={currentYear}
                 condDateOverrides={condDateOverrides}
@@ -2457,7 +2471,7 @@ export default function BodyMapScreen() {
                 locationEditingCondition={locationEditingCondition}
               />
               <GhostDots
-                dots={dots}
+                dots={bodyMapDots}
                 conditions={conditions}
                 activeSystems={activeSystems}
                 onPress={handleConditionPress}
@@ -2467,7 +2481,7 @@ export default function BodyMapScreen() {
                 onLocationRemoveAttempt={locationEditMode === 'remove' ? handleLocationRemoveAttempt : undefined}
               />
               <ConditionRipples
-                dots={dots}
+                dots={bodyMapDots}
                 activeSystems={activeSystems}
                 currentYear={currentYear}
                 condDateOverrides={condDateOverrides}
