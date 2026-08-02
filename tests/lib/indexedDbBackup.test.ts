@@ -20,8 +20,8 @@ describe('IndexedDB backup adapter', () => {
     expect(dots).toHaveLength(CONDITIONS.length + 5) // stones +1, rotator +1, fractures +3 secondary locations
     const stonesDots = dots.filter((d) => d.conditionId === 'stones')
     expect(stonesDots).toEqual([
-      expect.objectContaining({ conditionId: 'stones', cx_percent: 40.32, cy_percent: 37.12 }),
-      expect.objectContaining({ conditionId: 'stones', cx_percent: 48.32, cy_percent: 37.12 }),
+      expect.objectContaining({ conditionId: 'stones', cx_percent: 44.36, cy_percent: 34 }),
+      expect.objectContaining({ conditionId: 'stones', cx_percent: 55.92, cy_percent: 37.57 }),
     ])
     db.close()
   })

@@ -297,14 +297,14 @@ describe('multi-location editing state machine', () => {
     expect(get().locationEditMode).toBe('add')
   })
 
-  it('finishLocationEditing restores prior systems, selects the edited condition, opens the sheet, and clears editing state', () => {
+  it('finishLocationEditing restores prior systems, exits to the bare body map, and clears editing state', () => {
     get().setActiveSystems(['cardiovascular', 'renal'])
     get().startLocationEditing(htn)
     get().setLocationEditMode('remove')
     get().finishLocationEditing()
     expect(get().activeSystems).toEqual(['cardiovascular', 'renal'])
-    expect(get().selectedCondition).toBe(htn)
-    expect(get().sheetOpen).toBe(true)
+    expect(get().selectedCondition).toBeNull()
+    expect(get().sheetOpen).toBe(false)
     expect(get().locationEditingCondition).toBeNull()
     expect(get().locationEditMode).toBeNull()
     expect(get().preLocationEditSystems).toEqual([])

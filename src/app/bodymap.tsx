@@ -386,14 +386,15 @@ function renderRecordThumbSvg(rec: ConditionRecord, w: number, h: number) {
 
 // ─── Top Bar ─────────────────────────────────────────────────────────────────
 
-function NavBar() {
+function NavBar({ editingLocationCount }: { editingLocationCount: number }) {
   const {
     currentYear, timeDisplayMode, birthYear, birthMonth,
     toggleTimeDisplayMode, toggleSettings, toggleLegend, legendOpen,
     locationEditingCondition, locationEditMode, setLocationEditMode,
     finishLocationEditing, locationEditMessage, setLocationEditMessage, preferredLanguage,
-    lastUploadResult, setLastUploadResult,
+    lastUploadResult, setLastUploadResult, setNavBarHeight,
   } = useAppStore()
+  const canFinishLocationEditing = editingLocationCount > 0
   const uploadMessage = lastUploadResult
     ? lastUploadResult.conditionCount > 0
       ? `${lastUploadResult.conditionCount} condition${lastUploadResult.conditionCount === 1 ? '' : 's'} added`
@@ -408,7 +409,7 @@ function NavBar() {
   }, [locationEditMessage, setLocationEditMessage])
 
   return (
-    <View style={styles.nav}>
+    <View style={styles.nav} onLayout={(e) => setNavBarHeight(e.nativeEvent.layout.height)}>
       <TouchableOpacity onPress={toggleLegend} hitSlop={12} style={styles.logoRow}>
         <Text style={styles.logoM}>m</Text>
         <Text style={styles.logoAI}>AI</Text>
@@ -461,8 +462,15 @@ function NavBar() {
             >
               <Text style={styles.navLocationEditBtnText}>− Remove</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.navLocationEditBtn} onPress={finishLocationEditing} hitSlop={6}>
-              <Text style={styles.navLocationEditBtnText}>✓ Done</Text>
+            <TouchableOpacity
+              style={[styles.navLocationEditBtn, !canFinishLocationEditing && styles.navLocationEditBtnDisabled]}
+              onPress={canFinishLocationEditing ? finishLocationEditing : undefined}
+              disabled={!canFinishLocationEditing}
+              hitSlop={6}
+            >
+              <Text style={[styles.navLocationEditBtnText, !canFinishLocationEditing && styles.navLocationEditBtnTextDisabled]}>
+                ✓ Done
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1147,7 +1155,7 @@ function ConditionSheet() {
     preferredLanguage, selectedRecords,
     condDateOverrides, editingCondDate, editDateInput,
     startEditDate, setEditDateInput, confirmEditDate, cancelEditDate,
-    startLocationEditing, setOpenSettingsSection, llmTier,
+    startLocationEditing, setOpenSettingsSection, llmTier, navBarHeight,
   } = useAppStore()
 
   const idb = useOptionalIndexedDb()
@@ -1202,9 +1210,11 @@ function ConditionSheet() {
     await putIndexedSetting(idb, 'lmf_nudge_dismissed_at', new Date().toISOString())
   }
 
-  const sheetH = chatOpen
-    ? Math.min(sc(780), SH * 0.92)
-    : Math.min(sc(400), SH * 0.8)
+  // Condition card and chat both fill from 1px below the nav bar's measured
+  // bottom edge down to the screen bottom — same target height for either
+  // mode, no longer two separate fixed sizes.
+  const navBottom = insets.top + navBarHeight
+  const sheetH = navBarHeight > 0 ? SH - navBottom - 1 : Math.min(sc(780), SH * 0.92)
   const translateY = sheetTranslateY.interpolate({
     inputRange: [0, 1],
     outputRange: ['0%', '110%'],
@@ -2070,6 +2080,14 @@ export default function BodyMapScreen() {
 
   const [conditions, refreshConditions, updateConditionPositionLocally] = useConditions(routeConditionSource)
   const [dots, refreshDots] = useConditionDots(routeConditionSource)
+  // Real (DB-backed) location count for the condition currently being edited —
+  // gates the nav bar's Done button (§5.10 amendment: zero locations is a
+  // valid interim state while editing, but Done can't be pressed until at
+  // least one real location exists). Excludes the synthesized fallback dot
+  // (locationId === null), which isn't a real condition_locations row.
+  const editingLocationCount = locationEditingCondition
+    ? dots.filter((d) => d.conditionId === locationEditingCondition.id && d.locationId !== null).length
+    : 0
   const idb = useOptionalIndexedDb()
   const settingsRequested = useRef(false)
 
@@ -2168,18 +2186,15 @@ export default function BodyMapScreen() {
     refreshDots()
   }, [locationEditingCondition, idb, refreshConditions, refreshDots, updateConditionPositionLocally])
 
-  // Remove tool: deletes the tapped location, rejecting an attempt that would
-  // leave the condition with zero locations (§5.10) — this covers both the
-  // synthesized fallback dot (locationId === null) and the last real row.
+  // Remove tool: deletes the tapped location. Removing every real location is
+  // allowed — the nav bar's Done button (canFinishLocationEditing) is what
+  // gates exiting the session on zero locations, not this handler. The only
+  // rejection here is the synthesized fallback dot (locationId === null),
+  // which has no real condition_locations row to delete.
   const handleLocationRemoveAttempt = useCallback(async (dot: IndexedConditionDot) => {
     if (!locationEditingCondition || !idb) return
     if (dot.locationId === null) {
-      setLocationEditMessage("Can't remove the last location")
-      return
-    }
-    const existingLocations = await getConditionLocations(idb, locationEditingCondition.id)
-    if (existingLocations.length <= 1) {
-      setLocationEditMessage("Can't remove the last location")
+      setLocationEditMessage('Add a location before removing this one')
       return
     }
     await deleteConditionLocation(idb, dot.locationId)
@@ -2370,7 +2385,7 @@ export default function BodyMapScreen() {
       onMoveShouldSetResponderCapture={dismissUploadMessage}
     >
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-        <NavBar />
+        <NavBar editingLocationCount={editingLocationCount} />
 
         {/* One-time gender prompt when body type couldn't be inferred */}
         {genderPromptNeeded && (
@@ -2498,6 +2513,8 @@ const styles = StyleSheet.create({
   navLocationEditBtnText: {
     fontFamily: 'BarlowCondensed-SemiBold', fontSize: fs(11), color: C.ink, letterSpacing: sc(0.2),
   },
+  navLocationEditBtnDisabled: { opacity: 0.35 },
+  navLocationEditBtnTextDisabled: { color: C.inkMuted },
   datePill: {
     paddingHorizontal: sc(10), paddingVertical: sc(4), borderRadius: sc(14),
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)',
