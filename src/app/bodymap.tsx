@@ -1822,7 +1822,7 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
 
       <View style={[styles.birthGenderRow, effectiveOpenDropdown === 'month' && styles.birthGenderRowOpen]}>
         <View style={styles.birthCol}>
-          <Text style={styles.settingsSectionLabel}>Birth: Inferred</Text>
+          <Text style={styles.settingsSectionLabel} numberOfLines={1}>Birth: Inferred</Text>
           <View style={styles.dobRow}>
             <TextInput
               style={styles.dobYearInput}
