@@ -318,3 +318,111 @@ Depends on: 2.10, 4.3, 6.1.
 **Task 6.4 — Final acceptance pass**
 Walk every bullet in `userDataReq.md` §10 (Acceptance Criteria) explicitly and confirm pass/fail; file follow-up tasks for anything not met rather than silently deferring.
 Depends on: 6.1, 6.2, 6.3.
+
+---
+
+## Phase 7 — Multi-Location Editing UI
+
+**Status: DONE** (2026-08-01, QA-approved, `doc.userDataFlow/kb4-DONE/p07-multi-location-editing.md`). Tasks 7.1–7.8 implemented and independently verified against source by QAAgent; no blocking defects found. Task 7.9 (manual browser verification) carried forward as a known, documented gap — no browser-automation tool was available to either DevAgent or QAAgent in-session — consistent with how Phase 5's Task 5.7 gap was handled.
+
+Implements `userDataReq.md` §5.10. Ground truth confirmed by direct file reads:
+- `src/lib/db/indexedDb.ts` already has everything the persistence side needs: `putIndexedConditionLocation`, `getConditionLocations`, `deleteConditionLocation` (line ~280), and `getIndexedConditionDots` (line ~643, flattens `condition_locations` into one dot per location, falling back to the condition's own `cx`/`cy` when a condition has zero location rows). `IndexedConditionLocation` (line 64) has `is_primary`. `updateIndexedConditionPosition` (line ~350) shows the existing dual-write pattern (condition's own `cx`/`cy` + its primary location) to mirror for the "first location on a fallback condition" case.
+- `src/store/useAppStore.ts`: today's single-location relocation flow — `relocatingCondition`, `preRelocationSystems`, `startRelocation` (line 288, solos `[c.system]`, closes the sheet), `cancelRelocation` (line 295, restores `activeSystems`) — is the pattern this phase generalizes into an add/remove editing session, then retires.
+- `src/app/bodymap.tsx`: `NavBar` (line 388) renders the relocation banner at ~413-435 (this is where the new Add/Remove/Done controls go); the pencil icon is at ~1246 (`onPress={() => startRelocation(selectedCondition)}`); tap handling flows through `BodySvg`'s `onRelocationPlace`/`pressNearest` (~583-660) into `handleRelocationPlace` (~2092, converts SVG coords to `cx`/`cy` percent — reuse this conversion, don't reimplement it).
+
+**Task 7.1 — `IndexedConditionDot` gains `locationId`**
+Files: `src/lib/db/indexedDb.ts`.
+Add `locationId: string | null` to `IndexedConditionDot`. In `getIndexedConditionDots`, set it to the source `condition_locations` row's `id` for real rows, `null` for the synthesized fallback dot (a condition with zero location rows). The Remove tool (Task 7.6) needs this to know exactly which row to delete, and to detect the no-real-row fallback case.
+Depends on: none.
+
+**Task 7.2 — Store: location-editing state machine**
+Files: `src/store/useAppStore.ts`.
+Remove `relocatingCondition`, `preRelocationSystems`, `startRelocation`, `cancelRelocation`. Add:
+```ts
+locationEditingCondition: DesignCondition | null
+locationEditMode: 'add' | 'remove' | null
+preLocationEditSystems: SystemId[]
+```
+```ts
+startLocationEditing: (c: DesignCondition) => void
+setLocationEditMode: (mode: 'add' | 'remove') => void
+finishLocationEditing: () => void
+```
+`startLocationEditing`: same framing as today's `startRelocation` (`preLocationEditSystems: [...activeSystems]`, `activeSystems: [c.system]`, `sheetOpen: false`, `selectedCondition: null`), plus `locationEditingCondition: c`, `locationEditMode: 'add'` (Add is the default tool, per §5.10).
+`setLocationEditMode`: sets `locationEditMode` to the given value; no other side effects.
+`finishLocationEditing`: restores `activeSystems: [...preLocationEditSystems]`, sets `selectedCondition: locationEditingCondition` and `sheetOpen: true` (Done always lands back on the edited condition's sheet — every add/remove already persisted immediately, so there is no separate cancel/discard path), clears `locationEditingCondition: null`, `locationEditMode: null`, `preLocationEditSystems: []`.
+Depends on: none.
+
+**Task 7.3 — Nav bar Add/Remove/Done controls**
+Files: `src/app/bodymap.tsx` (`NavBar`, ~388-435).
+Replace the `relocatingCondition` block with one keyed on `locationEditingCondition`: keep the existing condition-name label (reuse `navRelocationText` styling, `getLocalName`) so the user still sees which condition they're editing, and add three `TouchableOpacity` controls — `+ Add`, `− Remove`, `✓ Done` — in the center of the nav bar. Add/Remove are toggles: highlighted (using `SYSTEM_META[locationEditingCondition.system]?.color`) when `locationEditMode` matches; pressing either calls `setLocationEditMode('add' | 'remove')`. Done calls `finishLocationEditing()`. Remove now-orphaned styles/handlers tied to the old single-location relocation banner only if nothing else references them.
+Depends on: 7.2.
+
+**Task 7.4 — Pencil icon enters the new flow**
+Files: `src/app/bodymap.tsx` (~1246).
+Change `onPress={() => startRelocation(selectedCondition)}` to `onPress={() => startLocationEditing(selectedCondition)}`.
+Depends on: 7.2.
+
+**Task 7.5 — Add-mode tap handling**
+Files: `src/app/bodymap.tsx` (tap handlers in `BodySvg`, ~583-660; replaces `handleRelocationPlace`, ~2092).
+When `locationEditMode === 'add'`, a tap on the body map converts SVG coords to `cx`/`cy` percent exactly as today's `handleRelocationPlace` does, then calls `putIndexedConditionLocation` with a new `uuid()` id, `condition_id: locationEditingCondition.id`, the tapped `cx`/`cy`, and `is_primary: true` only if the condition currently has zero real location rows (first location on a legacy/fallback condition — in that case also write the condition's own denormalized `cx`/`cy`, mirroring `updateIndexedConditionPosition`'s dual-write, since `getIndexedConditionDots` only uses that field when zero location rows exist). Call `refreshDots()` (and `refreshConditions()` only for that first-location case). Editing mode does **not** auto-exit — the user can place multiple locations in a row while Add stays active.
+Depends on: 7.1, 7.2.
+
+**Task 7.6 — Remove-mode tap handling**
+Files: `src/app/bodymap.tsx`.
+When `locationEditMode === 'remove'`, a tap does nearest-dot hit-testing (reuse the existing `pressNearest` distance-threshold logic) scoped to `dots.filter(d => d.conditionId === locationEditingCondition.id)` only — dots belonging to any other condition must not be tappable while editing this one. If a dot is hit:
+- If the condition has more than 1 location (real rows, or 1 real + the synthesized fallback doesn't count as removable — see below) and `dot.locationId` is non-null, call `deleteConditionLocation(idb, dot.locationId)` then `refreshDots()`.
+- If the hit dot is the synthesized fallback (`dot.locationId === null`, meaning zero real `condition_locations` rows exist) or the condition has exactly 1 real location remaining, reject the removal instead of deleting anything — a condition must always keep at least one location (§5.10). Surface a brief inline message (reuse `navCenterMessage` styling/position) rather than silently no-opping or crashing.
+Depends on: 7.1, 7.2.
+
+**Task 7.7 — Verify Done re-selection**
+Files: `src/app/bodymap.tsx`.
+Confirm `finishLocationEditing()` (7.2) is sufficient to reopen the sheet correctly (selected condition, its records/timeline reloading as needed) — if any other code path currently only re-derives sheet content from a dedicated `selectCondition(c)` call rather than raw `selectedCondition`/`sheetOpen` store fields, call it explicitly from the Done handler instead of relying on the store action alone.
+Depends on: 7.2, 7.3.
+
+**Task 7.8 — Unit tests**
+Files: extend `tests/lib/indexedDb.test.ts`; new or extended store test file for `useAppStore.ts`.
+- `getIndexedConditionDots`: a condition with 2 real `condition_locations` rows returns 2 dots each with a non-null, distinct `locationId`; a condition with zero rows returns 1 dot with `locationId: null`.
+- Store: `startLocationEditing` solos `[c.system]` into `activeSystems`, saves the prior systems, closes the sheet, defaults `locationEditMode` to `'add'`; `setLocationEditMode` switches the mode without other side effects; `finishLocationEditing` restores the prior `activeSystems`, selects the edited condition, opens the sheet, and clears all editing state.
+- Removal guard: a condition with exactly 1 location is rejected; a condition with 2 locations allows removing down to 1 successfully.
+Depends on: 7.1–7.7.
+
+**Task 7.9 — Manual UI verification**
+No new files — verification task.
+In a browser: select a condition, click the pencil, confirm Remove is highlighted by default (see Amendments below); tap an existing dot away in Remove mode and confirm it disappears, including removing every location down to zero; confirm Done grays out and cannot be pressed while zero locations remain; switch to Add, tap the body twice and see two new dots appear, confirming Done re-enables; click Done and confirm it exits to the bare bodymap (not the condition's sheet) with edits persisted; reload the page and confirm all edits persisted through IndexedDB.
+Depends on: 7.1–7.8.
+
+**Amendments (post-DONE, 2026-08-01–02, user feedback after manual testing)**
+
+Phase 7 shipped and moved to `kb4-DONE` with the behavior exactly as speced in Tasks 7.1–7.9 above (Add default, reject-the-last-location guard, Done reopens the sheet). Three rounds of user feedback after hands-on testing changed that shipped behavior; the task text above is left as-is for historical accuracy — this section is the current source of truth for these three points, superseding the corresponding lines above:
+
+1. **Removing every location down to zero is now allowed.** The original Task 7.6 guard (reject removing the last real location, or the synthesized fallback dot) is removed for the last-real-location case — a condition can be edited down to zero real `condition_locations` rows. What still can't be removed is the synthesized fallback dot itself (`locationId === null`), since there's no real row behind it to delete.
+2. **Done is gated on location count, not the removal handler.** Instead of blocking removal at zero, the nav bar's Done button is disabled (grayed out, not pressable) whenever the condition being edited has zero real locations, re-enabling once at least one exists. This replaces Task 7.6's original enforcement point without changing the underlying invariant (a condition can't exit editing with zero locations).
+3. **Done exits to the bare bodymap, not the condition's sheet.** `finishLocationEditing` now sets `selectedCondition: null`, `sheetOpen: false` instead of reopening the sheet on the edited condition — users place/remove dots to see the result on the map itself, not to reopen the card. Task 7.2/7.7's "Done always lands back on the edited condition's sheet" description above is superseded by this.
+4. **Remove, not Add, is the default tool on entry.** `startLocationEditing` now sets `locationEditMode: 'remove'` instead of `'add'`. Rationale (explicit product feedback, not the original design intent): most users opening the location editor are there to fix/erase an existing wrong location first, not to place a brand-new one — erase-first is the more common entry intent. Tasks 7.2, 7.3, 7.8, and 7.9 above all describe Add as the default; treat every such mention as superseded by this.
+
+Implemented directly (not routed through a new kanban card, since these are small, already-QA-covered-pattern amendments to a DONE phase, not new scope) across `src/store/useAppStore.ts` (`startLocationEditing`, `finishLocationEditing`), `src/app/bodymap.tsx` (`NavBar`'s Done button gating, `handleLocationRemoveAttempt`), and their corresponding tests in `__tests__/store/useAppStore.test.ts`.
+
+**Codex automated PR review findings (2026-08-02) and disposition:**
+
+An automated Codex review of PR #2 flagged 2 P1 and 3 P2 findings. Two directly re-asserted the *pre-amendment* Task 7.6/7.2/7.7 text above (reject deleting the last location; reopen the condition's sheet on Done) — both are amendments 1 and 3 above, made on explicit user direction, not bugs. Left as-is; not reverted. The other three were genuine and fixed directly in `src/app/bodymap.tsx`:
+
+5. **Legacy/fallback conditions could permanently disable Done on entry (P1).** `editingLocationCount` only counts real `condition_locations` rows, so a condition that never had any (rendering only its synthesized `locationId: null` fallback dot) hit `editingLocationCount === 0` — and therefore a disabled Done — the instant edit mode opened, with no cancel action to escape. Fixed by materializing a real primary location row (mirroring `handleLocationAdd`'s existing first-location dual-write, at the condition's current position) as soon as `locationEditingCondition` is set, via a new `useEffect` in `BodyMapScreen`. Done is now enabled from the first frame for every condition; amendment 2's "Done disables once the user empties a condition's locations" behavior is unaffected, since it still applies once a condition drops back to zero *within* the current session.
+6. **Rapid double-tap on a legacy condition's first Add could drop a location (P2).** Two near-simultaneous calls into the "zero real locations" branch (of either the new materialize effect or `handleLocationAdd`) could both read zero rows before either write committed, then both write to the same deterministic `${conditionId}-primary` key — the second silently overwrites the first. This was flagged as a known low-severity gap in QA's original Phase 7 pass (`kb4-DONE/p07-multi-location-editing.md`); now fixed by serializing every such write through a single promise-chain queue (`enqueueLocationWrite`) shared by the materialize effect and `handleLocationAdd`.
+7. **Sheet height didn't recompute on viewport resize/rotation (P2).** `ConditionSheet`'s `sheetH` used the module-level `SH` constant (`Dimensions.get('window')`, captured once at load). Fixed by reading height reactively via `useWindowDimensions()` inside `ConditionSheet` instead.
+
+**Round 2 (2026-08-02): one more Codex P2 finding plus a related user-reported UX bug, fixed together**
+
+8. **Done could stay pressable during a pending delete (Codex P2).** After removing the final real location, `editingLocationCount` only reflects the deletion once `refreshDots()` resolves — a fast double-press of Done during that awaited round trip could exit with zero locations, bypassing the amendment-2 invariant. Fixed by tracking in-flight location writes (`locationWritePendingCount`, incremented/decremented by `enqueueLocationWrite`) and gating Done on `editingLocationCount > 0 && locationWritePendingCount === 0`, not the count alone.
+9. **Removing the last location surfaced an untappable "ghost" dot with an unreadable message (user report, same underlying gap as #8).** Once real locations hit zero, `getIndexedConditionDots` synthesizes its usual fallback dot from the condition's own (now-stale) `cx`/`cy` — it looked like a location "popped up out of nowhere" mid-removal, and tapping it in Remove mode surfaced an inline rejection message (`"Add a location before removing this one"`) that rendered visually behind the condition-name label in the nav bar, unreadable. Fixed with two changes: (a) the synthesized fallback dot for the condition currently being edited is filtered out of the map/tap targets (`bodyMapDots`, a `dots` derivative used only for rendering — `editingLocationCount`'s own DB-backed derivation is untouched), so removing the last location leaves the screen visibly free of dots for that condition instead of a ghost reappearing; (b) `handleLocationRemoveAttempt`, on detecting zero remaining real locations after a delete, calls `setLocationEditMode('add')` so the tool auto-switches to Add and highlights it, guiding the user straight to placing a new one. The inline rejection message mechanism (`locationEditMessage`/`setLocationEditMessage`, store + `NavBar`) is removed entirely — it's unreachable now that the fallback dot is never a tap target during editing.
+10. **Remove and Done should both be unavailable at zero locations, not just Done (user follow-up request).** #9's auto-switch-to-Add covered the *mode*, but the Remove button itself remained clickable (and, if pressed, highlightable) with nothing left to remove. Added `canRemoveLocation = editingLocationCount > 0`, disabling/graying out Remove exactly like Done's existing `canFinishLocationEditing` treatment, plus a safety-net `useEffect` that forces `locationEditMode` back to `'add'` if it's ever `'remove'` while `canRemoveLocation` is false (belt-and-suspenders alongside #9's handler-level switch). With zero locations, Add is now the only selectable/highlighted tool.
+
+All of #8–#9 in `src/app/bodymap.tsx` (`enqueueLocationWrite`, the materialize effect, `handleLocationAdd`, `handleLocationRemoveAttempt`, `bodyMapDots`) and `src/store/useAppStore.ts` (removal of `locationEditMessage`/`setLocationEditMessage`), with `__tests__/store/useAppStore.test.ts` updated to drop the removed-message test.
+
+**Round 3 (2026-08-02): two more Codex P2 findings plus UI polish (padding, disabled-state contrast, mobile icon-only buttons)**
+
+11. **`refreshDots()` wasn't actually awaitable, reopening the #8 race (Codex P2).** `useConditionDots()`'s `refresh` fired-and-forgot its fetch (returned `void`), so `handleLocationRemoveAttempt`'s `await refreshDots()` resolved immediately rather than once `dots` actually updated — the pending-write counter from #8 could still be decremented before the refreshed zero-count state landed. Fixed by changing `useConditionDots`'s return type to `[IndexedConditionDot[], () => Promise<void>]` and returning the underlying `.then()`-chain's promise from `refresh`, with `setDots()` calls kept inside the `.then()`/`.catch()` callbacks (not a top-level `async`/`await`) to avoid tripping the `react-hooks/set-state-in-effect` lint rule.
+12. **Location editing had no exit when IndexedDB is unavailable (Codex P2).** The #5 materialize-fallback fix only runs when `idb` is non-null; if IndexedDB failed to open, a fallback condition's `editingLocationCount` stays 0 forever (nothing can persist), permanently disabling Done, while Add also no-ops (its handler requires `idb`) — the user could get stuck in the location editor. Fixed by changing `canFinishLocationEditing` to `!idb || (editingLocationCount > 0 && locationWritePendingCount === 0)`: Done is unconditionally available when there's no database to protect, since nothing can be persisted incorrectly in that state either.
+13. **UI polish (user report after hands-on testing): tighter button padding, unreadable disabled-state contrast, and no mobile-compact mode.** The Add/Remove/Done nav-bar buttons had too much horizontal padding and gap; the disabled (grayed-out) Remove/Done buttons combined a whole-button `opacity: 0.35` with the already-muted `C.inkMuted` text color, compounding into near-invisible text against the dark nav background; and the buttons kept their full text labels ("+ Add", "− Remove", "✓ Done") at all viewport widths, which could crowd out the condition name on narrow screens. Fixed by (a) reducing `navLocationEdit`/`navLocationEditControls` gaps and `navLocationEditBtn` padding/border-radius; (b) replacing the compounding-opacity disabled style with distinct dim border/background colors (`navLocationEditBtnDisabled`) plus a fixed-alpha readable text color (`navLocationEditBtnTextDisabled`), so disabled state no longer relies on multiplying two dimming effects; (c) adding a `compactLocationEditBtns` boolean (`useWindowDimensions().width < 480`, read reactively so it responds to in-session resize) that swaps the three buttons to bare symbols (`+`, `−`, `✓`) with a tighter icon-only style (`navLocationEditBtnCompact`) below that breakpoint.
+
+Implemented in `src/hooks/useConditions.ts` (`useConditionDots`'s `refresh`) and `src/app/bodymap.tsx` (`idb` hoisted earlier in `BodyMapScreen` and deduplicated, `canFinishLocationEditing`, `handleLocationRemoveAttempt`'s `await refreshDots()`, `NavBar`'s button styles/compact-mode logic).

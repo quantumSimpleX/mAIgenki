@@ -10,9 +10,9 @@ The existing pipeline (`processHealthRecord` in `src/lib/pipeline.ts`) fails on 
 
 ## 2. Scope
 
-**In scope**: text extraction page-boundary plumbing; a structure/hierarchy analysis stage; chunked, concurrency-bounded LLM enrichment with partial-failure tolerance; structurally-inferred-field provenance; provider-attribution accuracy; multi-location condition support; per-condition image/chart capture and storage; export/import (backup) integrity for binary data; bodymap rendering of multi-location dots and a persistent per-condition image timeline; migrating the persistence layer from the project's original `expo-sqlite` design to IndexedDB.
+**In scope**: text extraction page-boundary plumbing; a structure/hierarchy analysis stage; chunked, concurrency-bounded LLM enrichment with partial-failure tolerance; structurally-inferred-field provenance; provider-attribution accuracy; multi-location condition support; a multi-location editing UI (add/remove locations for a condition, §5.10); per-condition image/chart capture and storage; export/import (backup) integrity for binary data; bodymap rendering of multi-location dots and a persistent per-condition image timeline; migrating the persistence layer from the project's original `expo-sqlite` design to IndexedDB.
 
-**Out of scope**: chat UI/session-only chat behavior (unchanged, still governed by existing hard constraints); OCR image-upload path (no web replacement is lined up yet — see `CLAUDE.md`); storing the whole original PDF file (explicitly rejected — see §5.7); editing non-primary condition locations via the relocation UI (view-only this phase); any cloud sync/account system.
+**Out of scope**: chat UI/session-only chat behavior (unchanged, still governed by existing hard constraints); OCR image-upload path (no web replacement is lined up yet — see `CLAUDE.md`); storing the whole original PDF file (explicitly rejected — see §5.7); repositioning an existing location in place (§5.10 only supports add/remove — a move is expressed as remove-then-add); any cloud sync/account system.
 
 ## 2a. Demo Data Principle
 
@@ -85,7 +85,7 @@ Unchanged. `applyInferenceRules` continues to run once on the fully merged `cond
 - A condition is one entity (one set of dates/evidence/status) that may have **multiple location records**: e.g. bilateral kidney stones, a fracture at several points along a limb.
 - Each location independently renders a hotspot dot on the bodymap; tapping any dot opens the same condition detail/timeline (not a separate condition).
 - Legacy/demo conditions with no explicit multi-location data render exactly as they do today (single dot, synthesized from the condition's own position).
-- Editing a location's position via the existing relocation gesture applies to the primary location only this phase; editing additional locations is future work.
+- Adding and removing locations for a condition is supported via the editing UI in §5.10. Repositioning an existing location in place is not — a move is expressed as removing the old location and adding a new one.
 
 ### 5.7 Image/chart capture and storage
 
@@ -106,6 +106,20 @@ Unchanged. `applyInferenceRules` continues to run once on the fully merged `cond
 - Hotspot dot rendering (`GhostDots`, `BodySvg`, `ConditionRipples` in `src/app/bodymap.tsx`) reads from a flattened per-location dot list (one entry per condition-location) instead of one dot per condition — multi-location conditions render multiple dots, all resolving back to the same condition on tap.
 - The per-condition image/chart timeline (`RecordsCarousel`, already built but currently only rendered inside the chat view) becomes its own persistent section, visible whenever a condition is selected — not gated on chat being open. It sits alongside, not merged into, the existing session-only chat.
 - Thumbnails render the real stored (compressed) image when present, lazily fetched, falling back to today's placeholder art while loading or if absent.
+
+### 5.10 Multi-location editing UI
+
+A condition may affect the body at more than one point (bilateral kidney stones, fractures at several points along a limb, §5.6). This section defines the UI that lets a user add and remove those locations directly on the bodymap, replacing today's single-location relocation gesture.
+
+- **Entry point**: the pencil (edit) icon on a condition's card (`src/app/bodymap.tsx`, sheet header, next to the organ-system label) enters location-editing mode for that condition instead of today's single-location relocation. The sheet closes and the body map solos the condition's own organ system, same framing today's relocation gesture already uses.
+- **Nav bar controls**: while editing, the center of the top nav bar (`NavBar`, where the existing "Tap to place · {condition}" relocation banner sits today) shows three controls instead: **`[+ Add]` `[− Remove]` `[✓ Done]`**. Exactly one of Add/Remove is the active tool at a time, shown highlighted; Done is not a toggle, it's an exit action.
+- **Default state**: entering edit mode selects **Remove** by default (highlighted), not Add. Revised from the original design (which defaulted to Add) based on product feedback: most users editing a condition's locations are there to erase a wrong one first, not to place a new one — see `userDataTask.md` Phase 7's amendment note.
+- **Add mode**: tapping/clicking anywhere on the body map creates a new location for the condition being edited (one more hotspot dot) at the tapped coordinates and renders it immediately. The user may place any number of locations in a row without leaving Add mode. Tapping in Add mode never affects any other condition's dots.
+- **Remove mode**: selecting Remove highlights that control; while active, tapping/clicking an existing dot belonging to the condition being edited removes that location. Dots belonging to other conditions are not interactive while editing this condition. Removing every location down to zero is allowed — the constraint that a condition must have at least one location is enforced by graying out and disabling Done (see below), not by blocking the removal itself.
+- **Switching tools**: the user may switch between Add and Remove any number of times before finishing; each tap always acts according to the currently-highlighted tool.
+- **Done**: disabled (grayed out, not pressable) whenever the condition being edited currently has zero real locations — the user must Add at least one before finishing. Once enabled, tapping the checkmark exits location-editing mode and returns to the bare bodymap view (not the condition's sheet) with all edits already persisted.
+- **Persistence**: every add/remove is written to `condition_locations` immediately (via `putIndexedConditionLocation`/`deleteConditionLocation`, already present in `src/lib/db/indexedDb.ts`) — there is no separate "save" step; Done only ends the editing session, it does not batch-commit.
+- **First location on a legacy/fallback condition**: a condition with zero `condition_locations` rows today renders one dot synthesized from its own `cx`/`cy` (§5.6, §7). The first Add in this flow for such a condition, or the guard that blocks removing that synthesized dot as "the last location," must be handled without special-casing the UI — see `userDataTask.md` Phase 7 for the exact mechanics.
 
 ## 6. Data Model (IndexedDB)
 
@@ -181,10 +195,11 @@ New functions needed in `src/lib/db/indexedDb.ts` (mirroring the existing `putIn
 - A bilateral/multi-point condition renders multiple hotspot dots, all opening the same condition sheet.
 - A stored image survives export → reimport with byte-identical content.
 - Demo-data flow (unchanged inputs) renders visually identical to today post-migration.
+- From a condition's edit (pencil) icon, a user can add multiple locations to the body map in Add mode, remove any of them (except the last) in Remove mode, and Done returns to the condition sheet with all edits persisted in `condition_locations`.
 
 ## 11. Out of Scope / Future Work
 
-- Editing non-primary condition locations from the UI.
+- Repositioning an existing location in place (§5.10 supports add/remove only — a move is remove-then-add).
 - Surfacing `inferred_fields` provenance visually to the user (data is captured this phase; UI treatment is future work).
 - OCR-sourced (photo upload) image capture — no web-compatible OCR library is chosen yet; this PRD covers the PDF path only.
 
@@ -197,5 +212,6 @@ New functions needed in `src/lib/db/indexedDb.ts` (mirroring the existing `putIn
 5. **Phase 4**: image capture (§5.7), depends on Phase 0's Canvas/Blob confirmation and Phase 3's `imageWorthy` flags.
 6. **Phase 5**: bodymap UI wiring (§5.9), depends on Phase 2's queries and Phase 4's real images.
 7. **Phase 6**: full verification pass.
+8. **Phase 7**: multi-location editing UI (§5.10), depends on Phase 2's `condition_locations` store/functions and Phase 5's dot-rendering refactor (`useConditionDots`, flattened dot list) — both already shipped.
 
 The provider-attribution fix (§5.5) already shipped ahead of the rest, as planned.

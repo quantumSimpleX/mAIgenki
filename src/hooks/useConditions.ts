@@ -13,8 +13,8 @@ import { useAppStore, type ConditionSource } from '@/store/useAppStore'
 // location per condition) — mirrors the shape getIndexedConditionDots returns.
 function conditionsToDots(conditions: DesignCondition[]): IndexedConditionDot[] {
   return conditions.map((c) => ({
-    conditionId: c.id, system: c.system, cx_percent: c.cx_percent, cy_percent: c.cy_percent, yearFrac: c.yearFrac,
-    status: c.status ?? 'documented',
+    conditionId: c.id, locationId: null, system: c.system, cx_percent: c.cx_percent, cy_percent: c.cy_percent,
+    yearFrac: c.yearFrac, status: c.status ?? 'documented',
   }))
 }
 
@@ -95,21 +95,28 @@ export function useConditions(sourceOverride?: ConditionSource): [
 // state seeded with a safe fallback, DB-access hook + effect — but returns a
 // [dots, refresh] tuple (rather than a bare array) so callers can re-fetch
 // after a relocation or upload, same as useConditions()'s own refresh.
-export function useConditionDots(sourceOverride?: ConditionSource): [IndexedConditionDot[], () => void] {
+export function useConditionDots(sourceOverride?: ConditionSource): [IndexedConditionDot[], () => Promise<void>] {
   const [dots, setDots] = useState<IndexedConditionDot[]>(() => conditionsToDots(CONDITIONS))
   const db = useOptionalIndexedDb()
   const conditionSource = useAppStore((s) => s.conditionSource)
   const effectiveSource = sourceOverride ?? conditionSource
 
-  const refresh = useCallback(() => {
-    if (!db) return // initial/current state already holds the fallback
-    getIndexedConditionDots(db, effectiveSource)
- .then(async (rows) => {
- const hasUserRecords = rows.length === 0 && effectiveSource === 'auto'
- ? await hasIndexedUserRecords(db)
- : false
- setDots(rows.length > 0 || hasUserRecords ? rows : conditionsToDots(CONDITIONS))
- })
+  // Returns the in-flight promise (rather than firing-and-forgetting) so
+  // callers that need to know the refreshed dots have actually landed in
+  // state before proceeding — e.g. re-enabling a "Done" button only once a
+  // deletion's effect on the dot count is visible — can await it. The setDots
+  // calls stay inside the .then()/.catch() callbacks (not the top level of an
+  // async refresh function) so this reads the same to the set-state-in-effect
+  // lint rule as before this function became awaitable.
+  const refresh = useCallback((): Promise<void> => {
+    if (!db) return Promise.resolve() // initial/current state already holds the fallback
+    return getIndexedConditionDots(db, effectiveSource)
+      .then(async (rows) => {
+        const hasUserRecords = rows.length === 0 && effectiveSource === 'auto'
+          ? await hasIndexedUserRecords(db)
+          : false
+        setDots(rows.length > 0 || hasUserRecords ? rows : conditionsToDots(CONDITIONS))
+      })
       .catch(() => setDots(conditionsToDots(CONDITIONS)))
   }, [db, effectiveSource])
 

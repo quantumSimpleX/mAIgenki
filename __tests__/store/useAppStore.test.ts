@@ -251,3 +251,63 @@ describe('removed bodyMapMode API', () => {
     expect((get() as any).setBodyMapMode).toBeUndefined()
   })
 })
+
+describe('removed single-location relocation API (Phase 7)', () => {
+  it('relocatingCondition does not exist', () => {
+    expect((get() as any).relocatingCondition).toBeUndefined()
+  })
+  it('preRelocationSystems does not exist', () => {
+    expect((get() as any).preRelocationSystems).toBeUndefined()
+  })
+  it('startRelocation does not exist', () => {
+    expect((get() as any).startRelocation).toBeUndefined()
+  })
+  it('cancelRelocation does not exist', () => {
+    expect((get() as any).cancelRelocation).toBeUndefined()
+  })
+})
+
+describe('multi-location editing state machine', () => {
+  it('starts with no location editing in progress', () => {
+    expect(get().locationEditingCondition).toBeNull()
+    expect(get().locationEditMode).toBeNull()
+    expect(get().preLocationEditSystems).toEqual([])
+  })
+
+  it('startLocationEditing solos the condition system, saves prior systems, closes the sheet, and defaults to remove', () => {
+    get().setActiveSystems(['cardiovascular', 'renal'])
+    get().selectCondition(htn)
+    get().startLocationEditing(htn)
+    expect(get().activeSystems).toEqual([htn.system])
+    expect(get().preLocationEditSystems).toEqual(['cardiovascular', 'renal'])
+    expect(get().locationEditingCondition).toBe(htn)
+    expect(get().locationEditMode).toBe('remove')
+    expect(get().sheetOpen).toBe(false)
+    expect(get().selectedCondition).toBeNull()
+  })
+
+  it('setLocationEditMode switches the mode without other side effects', () => {
+    get().setActiveSystems(['cardiovascular', 'renal'])
+    get().startLocationEditing(htn)
+    get().setLocationEditMode('remove')
+    expect(get().locationEditMode).toBe('remove')
+    expect(get().locationEditingCondition).toBe(htn)
+    expect(get().preLocationEditSystems).toEqual(['cardiovascular', 'renal'])
+    get().setLocationEditMode('add')
+    expect(get().locationEditMode).toBe('add')
+  })
+
+  it('finishLocationEditing restores prior systems, exits to the bare body map, and clears editing state', () => {
+    get().setActiveSystems(['cardiovascular', 'renal'])
+    get().startLocationEditing(htn)
+    get().setLocationEditMode('remove')
+    get().finishLocationEditing()
+    expect(get().activeSystems).toEqual(['cardiovascular', 'renal'])
+    expect(get().selectedCondition).toBeNull()
+    expect(get().sheetOpen).toBe(false)
+    expect(get().locationEditingCondition).toBeNull()
+    expect(get().locationEditMode).toBeNull()
+    expect(get().preLocationEditSystems).toEqual([])
+  })
+
+})

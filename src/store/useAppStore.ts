@@ -56,8 +56,9 @@ type AppState = {
   editDateInput: string
   dragging: boolean
   uploadBtnsHovered: boolean
-  relocatingCondition: DesignCondition | null
-  preRelocationSystems: SystemId[]
+  locationEditingCondition: DesignCondition | null
+  locationEditMode: 'add' | 'remove' | null
+  preLocationEditSystems: SystemId[]
   // Upload → pipeline → bodymap plumbing (URI flows via the store, not route params).
   pendingUpload: PendingUpload | null
   pendingDemo: boolean
@@ -74,6 +75,9 @@ type AppState = {
   // Set by an upgrade-nudge CTA to tell the SettingsSheet which section to
   // open/scroll to on next render; the sheet clears it after reacting.
   openSettingsSection: 'provider' | null
+  // Measured (onLayout) rendered height of the top nav bar, so the condition
+  // sheet/chat panel can size itself to start exactly 1px below it.
+  navBarHeight: number
 }
 
 type AppActions = {
@@ -114,8 +118,9 @@ type AppActions = {
   setDragging: (d: boolean) => void
   startAnalyze: () => void
   startDemoAnalyze: () => void
-  startRelocation: (c: DesignCondition) => void
-  cancelRelocation: () => void
+  startLocationEditing: (c: DesignCondition) => void
+  setLocationEditMode: (mode: 'add' | 'remove') => void
+  finishLocationEditing: () => void
   setPendingUpload: (upload: PendingUpload | null) => void
   setPendingDemo: (pending: boolean) => void
   setConditionSource: (source: ConditionSource) => void
@@ -126,6 +131,7 @@ type AppActions = {
   setLlmStatus: (status: 'ok' | 'degraded' | 'exhausted') => void
   setLastLlmFailureKind: (kind: LMFErrorKind | null) => void
   setOpenSettingsSection: (section: 'provider' | null) => void
+  setNavBarHeight: (height: number) => void
 }
 
 export const useAppStore = create<AppState & AppActions>((set, get) => ({
@@ -143,10 +149,10 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   timeRailDragging: false,
   settingsOpen: false,
   uploadPanelOpen: true,
-  birthYear: 1985,
-  birthMonth: 'JAN',
+  birthYear: 1963,
+  birthMonth: 'FEB',
   gender: 'female',
-  preferredLanguage: 'ja',
+  preferredLanguage: 'en',
   chatOpen: false,
   chatMessages: [],
   chatInputVal: '',
@@ -158,8 +164,9 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   editDateInput: '',
   dragging: false,
   uploadBtnsHovered: false,
-  relocatingCondition: null,
-  preRelocationSystems: [],
+  locationEditingCondition: null,
+  locationEditMode: null,
+  preLocationEditSystems: [],
   pendingUpload: null,
   pendingDemo: false,
   conditionSource: readInitialConditionSource(),
@@ -170,6 +177,7 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   llmStatus: 'ok',
   lastLlmFailureKind: null,
   openSettingsSection: null,
+  navBarHeight: 0,
 
   setScreen: (screen) => set({ screen }),
   setDragOver: (dragOver) => set({ dragOver }),
@@ -285,17 +293,26 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
       pipelineError: null,
     })
   },
-  startRelocation: (c) => set((s) => ({
-    preRelocationSystems: [...s.activeSystems],
+  // Remove is the default tool on entry, not Add — most users editing
+  // locations want to erase a wrong one first (userDataReq.md §5.10).
+  startLocationEditing: (c) => set((s) => ({
+    preLocationEditSystems: [...s.activeSystems],
     activeSystems: [c.system],
-    relocatingCondition: c,
+    locationEditingCondition: c,
+    locationEditMode: 'remove',
     sheetOpen: false,
     selectedCondition: null,
   })),
-  cancelRelocation: () => set((s) => ({
-    activeSystems: [...s.preRelocationSystems],
-    relocatingCondition: null,
-    preRelocationSystems: [],
+  setLocationEditMode: (locationEditMode) => set({ locationEditMode }),
+  // Done exits back to the bare body map, not the condition's sheet — the
+  // user places/removes dots to see the map, not to reopen the card.
+  finishLocationEditing: () => set((s) => ({
+    activeSystems: [...s.preLocationEditSystems],
+    selectedCondition: null,
+    sheetOpen: false,
+    locationEditingCondition: null,
+    locationEditMode: null,
+    preLocationEditSystems: [],
   })),
   setPendingUpload: (pendingUpload) => set({ pendingUpload }),
   setPendingDemo: (pendingDemo) => set({ pendingDemo }),
@@ -310,4 +327,5 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
   setLlmStatus: (llmStatus) => set({ llmStatus }),
   setLastLlmFailureKind: (lastLlmFailureKind) => set({ lastLlmFailureKind }),
   setOpenSettingsSection: (openSettingsSection) => set({ openSettingsSection }),
+  setNavBarHeight: (navBarHeight) => set({ navBarHeight }),
 }))

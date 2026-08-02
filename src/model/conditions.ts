@@ -194,11 +194,11 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Rotator cuff tear',
     medName: 'Partial-thickness supraspinatus tear',
     localNames: { ja: '腱板断裂', es: 'Desgarro del manguito rotador', 'zh-TW': '旋轉肌袖撕裂' },
-    date: '1996-SEP-13', yearFrac: parseDateFrac('1996-SEP-13'), cx_percent: 64.83, cy_percent: 22.62,
+    date: '1996-SEP-13', yearFrac: parseDateFrac('1996-SEP-13'), cx_percent: 65.18, cy_percent: 23.36,
     note: 'Partial thickness supraspinatus tear confirmed on MRI. Conservative management — physiotherapy ongoing.',
     evidence: 'Dr. James Nguyen & Dr. Elena Ruiz · Virginia Mason Medical Center / Seattle Sports & Spine · Seattle, WA, US',
     locations: [
-      { cx_percent: 35.17, cy_percent: 22.62, anatomical_location: 'left shoulder', laterality: 'left' },
+      { cx_percent: 36.03, cy_percent: 21.79, anatomical_location: 'left shoulder', laterality: 'left' },
     ],
   },
   {
@@ -222,13 +222,13 @@ export const CONDITIONS: DesignCondition[] = [
   {
     id: 'fractures', system: 'skeletal', label: 'Multiple limb fractures', medName: 'Healed multi-limb fractures after high-energy trauma',
     localNames: { ja: '複数肢骨折', es: 'Fracturas múltiples de extremidades', 'zh-TW': '多處肢體骨折' },
-    date: '1979-JUL-06', yearFrac: parseDateFrac('1979-JUL-06'), cx_percent: 37.50, cy_percent: 45.50,
+    date: '1979-JUL-06', yearFrac: parseDateFrac('1979-JUL-06'), cx_percent: 26.16, cy_percent: 45.68,
     note: 'Multiple fractures of both forearms and lower legs after a high-energy accident at age 17. Healed with residual hardware and intermittent stiffness.',
     evidence: 'Dr. Elena Ruiz & Dr. Marcus Bell · Children’s Regional Trauma Center / North County Orthopedics · San Diego, CA, US',
     locations: [
-      { cx_percent: 62.50, cy_percent: 45.50, anatomical_location: 'right forearm', laterality: 'right' },
-      { cx_percent: 45.50, cy_percent: 78.00, anatomical_location: 'left lower leg', laterality: 'left' },
-      { cx_percent: 54.50, cy_percent: 78.00, anatomical_location: 'right lower leg', laterality: 'right' },
+      { cx_percent: 74.24, cy_percent: 39.14, anatomical_location: 'right forearm', laterality: 'right' },
+      { cx_percent: 41.73, cy_percent: 85.43, anatomical_location: 'left lower leg', laterality: 'left' },
+      { cx_percent: 38.96, cy_percent: 86.30, anatomical_location: 'right lower leg', laterality: 'right' },
     ],
   },
   {
@@ -326,12 +326,12 @@ export const CONDITIONS: DesignCondition[] = [
     label: 'Kidney stones',
     medName: 'Calcium oxalate nephrolithiasis',
     localNames: { ja: '尿路結石', es: 'Litiasis renal', 'zh-TW': '腎結石' },
-    date: '2016-SEP-05', yearFrac: parseDateFrac('2016-SEP-05'), cx_percent: 44.32, cy_percent: 37.12,
+    date: '2016-SEP-05', yearFrac: parseDateFrac('2016-SEP-05'), cx_percent: 50.14, cy_percent: 35.78,
     note: '4mm left ureteral calculus — calcium oxalate. Passed spontaneously. Low-oxalate diet commenced.',
     evidence: 'Dr. Kevin Williams · Northwestern Memorial Hospital · Chicago, IL, US',
     locations: [
-      { cx_percent: 40.32, cy_percent: 37.12, anatomical_location: 'left kidney', laterality: 'left' },
-      { cx_percent: 48.32, cy_percent: 37.12, anatomical_location: 'right kidney', laterality: 'right' },
+      { cx_percent: 44.36, cy_percent: 34.00, anatomical_location: 'left kidney', laterality: 'left' },
+      { cx_percent: 55.92, cy_percent: 37.57, anatomical_location: 'right kidney', laterality: 'right' },
     ],
   },
   {
