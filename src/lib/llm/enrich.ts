@@ -155,6 +155,39 @@ type ChunkExtractionResult = {
   measurements: MeasurementInput[]
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isNullableString(value: unknown): value is string | null {
+  return value === null || typeof value === 'string'
+}
+
+export function isValidProviderInput(value: unknown): value is ProviderInput {
+  if (!isRecord(value)) return false
+  return typeof value.name === 'string'
+    && isNullableString(value.specialty)
+    && isNullableString(value.email)
+    && isNullableString(value.phone)
+    && isNullableString(value.evidence)
+}
+
+export function isValidCareEventInput(value: unknown): value is CareEventInput {
+  if (!isRecord(value)) return false
+  const eventTypes = ['diagnosed', 'revisited', 'treated', 'monitored', 'referred', 'other']
+  return typeof value.event_type === 'string'
+    && eventTypes.includes(value.event_type)
+    && typeof value.date === 'string'
+    && isValidProviderInput(value.provider)
+    && (value.facility === null || (isRecord(value.facility)
+      && typeof value.facility.name === 'string'
+      && isNullableString(value.facility.address)
+      && isNullableString(value.facility.city)
+      && isNullableString(value.facility.state)
+      && isNullableString(value.facility.country)))
+    && isNullableString(value.evidence)
+}
+
 const CHUNK_EXTRACTION_PROMPT = `You are a clinical data extraction assistant. Your task is to extract structured medical information from one section of a health record written in any language (English, Traditional Chinese, Japanese, or others).
 
 The user message tells you which section this is (a heading, its type, and its inferred date) followed by that section's text only — not the whole record. Use the section context to fill fields the section's own text doesn't restate (e.g. a date given only in the heading), and list any field you filled that way in "inferred_from_structure" (an array of field names, e.g. ["date_diagnosed"]) on that condition or measurement. Leave it empty/omitted when every field came directly from the section's own text.
@@ -213,8 +246,20 @@ function parseChunkExtraction(content: string): ChunkExtractionResult | null {
     const cleaned = content.replace(/```(?:json)?\n?|\n?```/g, '').trim()
     const parsed = JSON.parse(cleaned) as Record<string, unknown>
     if (Array.isArray(parsed.conditions) && Array.isArray(parsed.measurements)) {
+      const conditions = parsed.conditions.filter(isRecord).map((raw) => {
+        const condition = { ...raw } as unknown as ConditionInput
+        if (Array.isArray(condition.care_events)) {
+          condition.care_events = condition.care_events.filter(isValidCareEventInput)
+        } else if (condition.care_events != null) {
+          condition.care_events = []
+        }
+        if (condition.provider != null && !isValidProviderInput(condition.provider)) {
+          condition.provider = null
+        }
+        return condition
+      })
       return {
-        conditions: parsed.conditions as ConditionInput[],
+        conditions,
         measurements: parsed.measurements as MeasurementInput[],
       }
     }
@@ -254,7 +299,11 @@ function normalizedKey(value: string): string {
 }
 
 export function conditionKey(c: ConditionInput): string {
-  return [normalizedKey(c.name_medical), normalizedKey(c.organ ?? ''), normalizedKey(c.anatomical_location ?? '')].join('|')
+  // An explicit locations array represents one condition with multiple sites
+  // (for example left and right kidneys). Do not split those occurrences into
+  // separate conditions based on their section-level location labels.
+  const locationKey = c.locations && c.locations.length > 0 ? '' : normalizedKey(c.anatomical_location ?? '')
+  return [normalizedKey(c.name_medical), normalizedKey(c.organ ?? ''), locationKey].join('|')
 }
 
 function earlierDate(a: string | null | undefined, b: string | null | undefined): string | null {
@@ -265,6 +314,30 @@ function earlierDate(a: string | null | undefined, b: string | null | undefined)
 
 function firstNonNull<T>(a: T | null | undefined, b: T | null | undefined): T | null {
   return a ?? b ?? null
+}
+
+function mergeConditionLocations(
+  locations: ConditionInputLocation[],
+): ConditionInputLocation[] {
+  const merged = new Map<string, ConditionInputLocation>()
+  for (const location of locations) {
+    const labelKey = [
+      normalizedKey(location.anatomical_location ?? ''),
+      normalizedKey(location.laterality ?? ''),
+    ].join('|')
+    const coordinateKey = `${location.cx ?? ''}|${location.cy ?? ''}`
+    const key = labelKey === '|' ? coordinateKey : labelKey
+    const previous = merged.get(key)
+    merged.set(key, previous
+      ? {
+        ...previous,
+        cx: firstNonNull(previous.cx, location.cx),
+        cy: firstNonNull(previous.cy, location.cy),
+        evidence: firstNonNull(previous.evidence, location.evidence),
+      }
+      : location)
+  }
+  return Array.from(merged.values())
 }
 
 function latestConditionStatus(a: ConditionInput, b: ConditionInput): ConditionInput['status'] {
@@ -309,7 +382,7 @@ function mergeTwoConditions(a: ConditionInput, b: ConditionInput): ConditionInpu
     care_events: [...(a.care_events ?? []), ...(b.care_events ?? [])],
     cx: a.cx ?? b.cx,
     cy: a.cy ?? b.cy,
-    locations: [...(a.locations ?? []), ...(b.locations ?? [])],
+    locations: mergeConditionLocations([...(a.locations ?? []), ...(b.locations ?? [])]),
     inferred_from_structure: Array.from(new Set([...(a.inferred_from_structure ?? []), ...(b.inferred_from_structure ?? [])])),
   }
 }

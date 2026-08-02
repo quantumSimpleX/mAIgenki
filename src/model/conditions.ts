@@ -13,8 +13,14 @@ export type DesignCondition = {
   system: SystemId
   label: string
   medName: string
+  organ?: string | null
+  anatomical_location?: string | null
   localNames: Partial<Record<SupportedLang, string>>
   date: string
+  dateOnset?: string | null
+  dateDiagnosed?: string | null
+  severity?: string | null
+  certainty?: string | null
   yearFrac: number
   cx_percent: number
   cy_percent: number

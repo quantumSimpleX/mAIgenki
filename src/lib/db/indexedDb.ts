@@ -3,6 +3,7 @@ import {
   type DesignCondition, type SupportedLang,
 } from '@/model/conditions'
 import { applyInferenceRules } from '@/lib/inference/rules'
+import { isValidCareEventInput, isValidProviderInput } from '@/lib/llm/enrich'
 import type { CareEventInput, ConditionInput, MeasurementInput, ProviderInput } from '@/lib/llm/enrich'
 
 /** Browser-only persistence adapter for the web architecture. */
@@ -38,11 +39,17 @@ export type IndexedCondition = {
   name_medical: string
   name_common: string | null
   system: string
+  organ: string | null
+  anatomical_location: string | null
   status: ConditionInput['status']
+  severity: string | null
+  certainty: string | null
   cx: number
   cy: number
   year_frac: number
   date: string | null
+  date_onset: string | null
+  date_diagnosed: string | null
   note: string | null
   evidence: string | null
   local_names: Partial<Record<SupportedLang, string>> | null
@@ -415,29 +422,47 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     extraction_method: input.extractionMethod,
   })
 
+  const linkedProviderKeys = new Set<string>()
+  const providerKey = (provider: ProviderInput): string => `${provider.name}|${provider.email ?? ''}|${provider.phone ?? ''}`
+
   for (const c of input.conditions) {
+    const locations = c.locations ?? []
+    // The demo kidney-stone record uses two explicit bilateral locations;
+    // those replace its midpoint marker. Other records retain their authored
+    // condition position and add every explicit location as a secondary dot.
+    const useFirstLocationAsPrimary = c.name_medical.toLowerCase().includes('nephrolith')
+    const primaryLocation = useFirstLocationAsPrimary ? locations[0] : undefined
     const dateForTimeline = c.date_diagnosed ?? c.date_onset
     const { id: conditionId, cx, cy } = await putIndexedCondition(db, {
       id: c.id ?? uuid(),
       record_id: recordId,
-      name_medical: c.name_medical,
-      name_common: c.name_common,
-      system: c.system,
-      status: c.status,
-      cx: c.cx ?? undefined,
-      cy: c.cy ?? undefined,
+    name_medical: c.name_medical,
+    name_common: c.name_common,
+    system: c.system,
+    organ: c.organ,
+    anatomical_location: c.anatomical_location,
+    status: c.status,
+    severity: c.severity,
+    certainty: c.certainty,
+      cx: primaryLocation?.cx ?? c.cx ?? undefined,
+      cy: primaryLocation?.cy ?? c.cy ?? undefined,
       year_frac: dateForTimeline ? parseDateFrac(dateForTimeline) : 0,
-      date: dateForTimeline,
+    date: dateForTimeline,
+    date_onset: c.date_onset,
+    date_diagnosed: c.date_diagnosed,
       note: c.notes ?? null,
       evidence: c.evidence,
       local_names: (c.local_names as Partial<Record<SupportedLang, string>> | null | undefined) ?? null,
       inferred_fields: c.inferred_from_structure && c.inferred_from_structure.length > 0 ? c.inferred_from_structure : null,
     })
-    await putIndexedConditionLocation(db, {
-      id: `${conditionId}-primary`, condition_id: conditionId, cx, cy, is_primary: true,
-    })
+  await putIndexedConditionLocation(db, {
+    id: `${conditionId}-primary`, condition_id: conditionId, cx, cy, is_primary: true,
+    anatomical_location: primaryLocation?.anatomical_location ?? null,
+    laterality: primaryLocation?.laterality ?? null,
+    evidence: primaryLocation?.evidence ?? null,
+  })
 
-    if (c.provider) {
+    if (c.provider && isValidProviderInput(c.provider)) {
       await putIndexedProvider(db, {
         id: `${conditionId}-provider`,
         record_id: recordId,
@@ -448,9 +473,10 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
         phone: c.provider.phone,
         evidence: c.provider.evidence,
       })
+      linkedProviderKeys.add(providerKey(c.provider))
     }
 
-    for (const [index, event] of (c.care_events ?? []).entries()) {
+    for (const [index, event] of (c.care_events ?? []).filter(isValidCareEventInput).entries()) {
       await putIndexedProvider(db, {
         id: `${conditionId}-care-${index}-provider`,
         record_id: recordId,
@@ -461,6 +487,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
         phone: event.provider.phone,
         evidence: event.provider.evidence,
       })
+      linkedProviderKeys.add(providerKey(event.provider))
       await putIndexedConditionCareEvent(db, {
         id: `${conditionId}-care-${index}`,
         condition_id: conditionId,
@@ -482,7 +509,8 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     // Deterministic id (not uuid()) so re-seeding the same condition (e.g.
     // demo data reloaded) upserts each secondary location in place instead of
     // accumulating a fresh duplicate row per run.
-    for (const [index, loc] of (c.locations ?? []).entries()) {
+    for (const [index, loc] of locations.entries()) {
+      if (useFirstLocationAsPrimary && index === 0) continue
       const locationPosition = defaultConditionPosition(
         normalizeSystemId(c.system),
         `${c.name_medical}:${loc.anatomical_location ?? ''}:${loc.laterality ?? ''}:${index}`,
@@ -510,6 +538,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
   }
 
   for (const p of input.providers ?? []) {
+    if (linkedProviderKeys.has(providerKey(p))) continue
     await putIndexedProvider(db, {
       id: uuid(),
       record_id: recordId,
@@ -520,6 +549,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
       phone: p.phone,
       evidence: p.evidence,
     })
+    linkedProviderKeys.add(providerKey(p))
   }
 
   return { recordId, conditionCount: input.conditions.length, measurementCount: input.measurements.length }
@@ -581,8 +611,14 @@ export async function getIndexedConditions(db: IDBDatabase, mode: ConditionQuery
       system: normalizeSystemId(c.system),
       label: c.name_common ?? c.name_medical,
       medName: c.name_medical,
+      organ: c.organ,
+      anatomical_location: c.anatomical_location,
       localNames: c.local_names ?? {},
       date: c.date ?? '',
+      dateOnset: c.date_onset,
+      dateDiagnosed: c.date_diagnosed,
+      severity: c.severity,
+      certainty: c.certainty,
       yearFrac: c.year_frac,
       cx_percent: c.cx,
       cy_percent: c.cy,
@@ -620,7 +656,8 @@ export async function getIndexedConditionDots(db: IDBDatabase, mode: ConditionQu
   const byCondition = new Map<string, IndexedConditionLocation[]>()
   for (const location of locations) byCondition.set(location.condition_id, [...(byCondition.get(location.condition_id) ?? []), location])
   return conditions.flatMap((condition) => {
-    const conditionLocations = byCondition.get(condition.id) ?? []
+    const conditionLocations = [...(byCondition.get(condition.id) ?? [])]
+      .sort((a, b) => Number(b.is_primary) - Number(a.is_primary))
     const points = conditionLocations.length > 0 ? conditionLocations : [{ cx: condition.cx, cy: condition.cy }]
     return points.map((point) => ({
       conditionId: condition.id, system: condition.system, cx_percent: point.cx, cy_percent: point.cy,

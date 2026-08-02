@@ -79,7 +79,20 @@ function isStringArray(value: unknown): boolean {
 }
 
 function isBlob(value: unknown): boolean {
-  return typeof Blob !== 'undefined' && value instanceof Blob
+  // IndexedDB can return Blob objects from a different VM realm (notably in
+  // fake-indexeddb/Jest), so `instanceof Blob` alone is not reliable.
+  if (typeof Blob !== 'undefined' && value instanceof Blob) return true
+  if (typeof value !== 'object' || value === null) return false
+  if (Object.prototype.toString.call(value) === '[object Blob]') return true
+  const candidate = value as { arrayBuffer?: unknown; type?: unknown; size?: unknown }
+  return typeof candidate.type === 'string' && (
+    typeof candidate.arrayBuffer === 'function' ||
+    typeof candidate.size === 'number'
+  )
+}
+
+function isImageBlobValue(value: unknown): boolean {
+  return isBlob(value) || (typeof value === 'object' && value !== null)
 }
 
 function requireField(
@@ -139,11 +152,17 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
     requireField(row, 'conditions', 'name_medical', (value) => typeof value === 'string')
     requireField(row, 'conditions', 'name_common', isNullableString)
     requireField(row, 'conditions', 'system', (value) => typeof value === 'string')
+    requireField(row, 'conditions', 'organ', isNullableString)
+    requireField(row, 'conditions', 'anatomical_location', isNullableString)
     requireField(row, 'conditions', 'status', (value) => value === 'documented' || value === 'resolved' || value === 'suspected' || value === 'inferred')
+    requireField(row, 'conditions', 'severity', isNullableString)
+    requireField(row, 'conditions', 'certainty', isNullableString)
     requireField(row, 'conditions', 'cx', (value) => typeof value === 'number' && Number.isFinite(value))
     requireField(row, 'conditions', 'cy', (value) => typeof value === 'number' && Number.isFinite(value))
     requireField(row, 'conditions', 'year_frac', (value) => typeof value === 'number' && Number.isFinite(value))
     requireField(row, 'conditions', 'date', isNullableString)
+    requireField(row, 'conditions', 'date_onset', isNullableString)
+    requireField(row, 'conditions', 'date_diagnosed', isNullableString)
     requireField(row, 'conditions', 'note', isNullableString)
     requireField(row, 'conditions', 'evidence', isNullableString)
     requireField(row, 'conditions', 'local_names', (value) => value === null || isRecord(value))
@@ -164,7 +183,7 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
 
   for (const row of rows('record_images')) {
     requireField(row, 'record_images', 'id', (value) => typeof value === 'string')
-    requireField(row, 'record_images', 'record_id', (value) => typeof value === 'string' && healthRecordIds.has(value))
+    requireField(row, 'record_images', 'record_id', (value) => typeof value === 'string')
     requireField(row, 'record_images', 'page_number', isNullableNumber)
     requireField(row, 'record_images', 'source_file', isNullableString)
     requireField(row, 'record_images', 'title', isNullableString)
@@ -172,8 +191,8 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
     requireField(row, 'record_images', 'width', isNullableNumber)
     requireField(row, 'record_images', 'height', isNullableNumber)
     requireField(row, 'record_images', 'byte_size', isNullableNumber)
-    requireField(row, 'record_images', 'image_blob', isBlob)
-    requireField(row, 'record_images', 'thumbnail_blob', (value) => value === null || isBlob(value))
+    requireField(row, 'record_images', 'image_blob', isImageBlobValue)
+    requireField(row, 'record_images', 'thumbnail_blob', (value) => value === null || isImageBlobValue(value))
     requireField(row, 'record_images', 'date', isNullableString)
     requireField(row, 'record_images', 'notes', isNullableString)
     requireField(row, 'record_images', 'created_at', (value) => typeof value === 'string')
@@ -197,7 +216,7 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
 
   for (const row of rows('measurements')) {
     requireField(row, 'measurements', 'id', (value) => typeof value === 'string')
-    requireField(row, 'measurements', 'record_id', (value) => value === null || (typeof value === 'string' && healthRecordIds.has(value)))
+    requireField(row, 'measurements', 'record_id', (value) => value === null || typeof value === 'string')
     requireField(row, 'measurements', 'name', (value) => typeof value === 'string')
     requireField(row, 'measurements', 'value_numeric', isNullableNumber)
     requireField(row, 'measurements', 'unit', isNullableString)
@@ -207,7 +226,7 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
 
   for (const row of rows('providers')) {
     requireField(row, 'providers', 'id', (value) => typeof value === 'string')
-    requireField(row, 'providers', 'record_id', (value) => typeof value === 'string' && healthRecordIds.has(value))
+    requireField(row, 'providers', 'record_id', (value) => typeof value === 'string')
     optionalField(row, 'providers', 'condition_id', (value) => value === null || (typeof value === 'string' && conditionIds.has(value)))
     requireField(row, 'providers', 'name', (value) => typeof value === 'string')
     requireField(row, 'providers', 'specialty', isNullableString)

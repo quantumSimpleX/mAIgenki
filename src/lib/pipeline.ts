@@ -1,6 +1,12 @@
 import { extractTextFromPDF } from './pdf/extract'
 import { extractTextFromImage } from './ocr/extract'
-import { enrichFromText, conditionKey } from './llm/enrich'
+import {
+  enrichFromText,
+  conditionKey,
+  type ConditionInput,
+  type CareEventInput,
+  type ProviderInput,
+} from './llm/enrich'
 import { applyInferenceRules } from './inference/rules'
 import { getModelChain, type LLMTraceEvent } from './llm/client'
 import { loadProfile } from './llm/profile'
@@ -160,12 +166,10 @@ async function captureRecordImages(
 
   const pageNumbers = [...pages.keys()].sort((a, b) => a - b)
   try {
-    await renderPagesToCanvas(
-      uri,
-      pageNumbers,
-      async (pageNumber, canvas) => {
+    const canvases = await renderPagesToCanvas(uri, pageNumbers)
+    for (const [pageNumber, canvas] of canvases) {
       const capture = pages.get(pageNumber)
-      if (!capture) return
+      if (!capture) continue
       try {
         const { blob, byteSize } = await compressToTarget(canvas, MAX_IMAGE_BYTES)
         const thumbnailBlob = await createThumbnailBlob(canvas)
@@ -211,17 +215,76 @@ async function captureRecordImages(
           page: pageNumber, section: capture.heading, error: err instanceof Error ? err.message : String(err),
         })
       }
-      },
-      (pageNumber, err) => trace('image-capture-failed', {
-        page: pageNumber, error: err instanceof Error ? err.message : String(err),
-      }),
-    )
+    }
   } catch (err) {
     trace('image-capture-failed', {
       pages: pageNumbers,
       error: err instanceof Error ? err.message : String(err),
     })
   }
+}
+
+function hasProviderShape(value: unknown): value is ProviderInput {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const provider = value as Record<string, unknown>
+  const nullableString = (field: unknown): boolean => field === null || typeof field === 'string'
+  return typeof provider.name === 'string'
+    && nullableString(provider.specialty)
+    && nullableString(provider.email)
+    && nullableString(provider.phone)
+    && nullableString(provider.evidence)
+}
+
+function hasCareEventShape(value: unknown): value is CareEventInput {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
+  const event = value as Record<string, unknown>
+  const eventTypes = ['diagnosed', 'revisited', 'treated', 'monitored', 'referred', 'other']
+  const nullableString = (field: unknown): boolean => field === null || typeof field === 'string'
+  return typeof event.event_type === 'string'
+    && eventTypes.includes(event.event_type)
+    && typeof event.date === 'string'
+    && hasProviderShape(event.provider)
+    && (event.facility === null || (typeof event.facility === 'object' && event.facility !== null
+      && !Array.isArray(event.facility)
+      && typeof (event.facility as Record<string, unknown>).name === 'string'
+      && nullableString((event.facility as Record<string, unknown>).address)
+      && nullableString((event.facility as Record<string, unknown>).city)
+      && nullableString((event.facility as Record<string, unknown>).state)
+      && nullableString((event.facility as Record<string, unknown>).country)))
+    && nullableString(event.evidence)
+}
+
+function rehydrateProviderContact(
+  provider: ProviderInput,
+  index: number,
+  contacts: ReturnType<typeof extractProviderContacts>,
+): ProviderInput {
+  const normalizedName = String(provider.name ?? '').trim()
+  const local = contactForProvider(normalizedName, index, contacts)
+  return {
+    ...provider,
+    name: normalizedName,
+    email: provider.email ?? local?.email ?? null,
+    phone: provider.phone ?? local?.phone ?? null,
+    evidence: provider.evidence ?? local?.evidence ?? null,
+  }
+}
+
+function rehydrateConditionContacts(
+  condition: ConditionInput,
+  conditionIndex: number,
+  contacts: ReturnType<typeof extractProviderContacts>,
+): ConditionInput {
+  const provider = condition.provider && hasProviderShape(condition.provider)
+    ? rehydrateProviderContact(condition.provider, conditionIndex, contacts)
+    : condition.provider
+  const care_events = (condition.care_events ?? [])
+    .filter(hasCareEventShape)
+    .map((event, eventIndex) => ({
+      ...event,
+      provider: rehydrateProviderContact(event.provider, conditionIndex + eventIndex, contacts),
+    }))
+  return { ...condition, provider, care_events }
 }
 
 // ── Pipeline ──────────────────────────────────────────────────────────────────
@@ -394,17 +457,20 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
       evidence: provider.evidence ?? local?.evidence ?? null,
     }
   })
+  const hydratedConditions = llmConditions.map((condition, index) => (
+    rehydrateConditionContacts(condition, index, localProviderContacts)
+  ))
 
   // Step 4 — apply threshold inference rules
   report(2, 0.75)
-  const inferredConditions = applyInferenceRules(measurements, llmConditions, sex)
+  const inferredConditions = applyInferenceRules(measurements, hydratedConditions, sex)
   // Assign a stable id to every LLM-extracted condition up front (Task 4.3):
   // persistEnrichmentResult reuses `c.id` verbatim when present, so fixing it
   // here means the image-capture step below can link a condition_records row
   // to the exact id that ends up stored, without persistEnrichmentResult
   // having to return per-condition ids itself. Inferred conditions never
   // originate from a chunk, so they're never image-linked and don't need this.
-  const llmConditionsWithIds = llmConditions.map((c) => ({ ...c, id: c.id ?? uuid() }))
+  const llmConditionsWithIds = hydratedConditions.map((c) => ({ ...c, id: c.id ?? uuid() }))
   const allConditions = [...llmConditionsWithIds, ...inferredConditions]
   trace('inference-completed', { llmConditions: llmConditions.length, inferredConditions: inferredConditions.length })
 
