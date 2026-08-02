@@ -403,8 +403,13 @@ function NavBar({
   // their symbols so the row fits alongside the condition name. Read
   // reactively (not the module-level IS_DESKTOP snapshot) so it responds to
   // an in-session resize/rotation, not just the width at initial load.
+  // Scaled by S (the module-level scale factor, frozen at whatever width the
+  // page loaded at — see lib/scale.ts) since the buttons/text themselves are
+  // sized by that same frozen S: a page loaded wide (S near 2) still renders
+  // ~2x-sized buttons after the window shrinks, so the row needs proportionally
+  // more width before the full labels actually start crowding the name.
   const { width: navWinW } = useWindowDimensions()
-  const compactLocationEditBtns = navWinW < 480
+  const compactLocationEditBtns = navWinW < 480 * S
   const uploadMessage = lastUploadResult
     ? lastUploadResult.conditionCount > 0
       ? `${lastUploadResult.conditionCount} condition${lastUploadResult.conditionCount === 1 ? '' : 's'} added`
