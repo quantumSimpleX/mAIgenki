@@ -1629,7 +1629,7 @@ function MonthDropdown({
         options={MONTHS_SHORT}
         optionKey={(mo) => mo}
         optionLabel={(mo) => mo}
-        value={<Text style={styles.monthDdValue}>{value}</Text>}
+        value={<Text style={styles.monthDdValue} numberOfLines={1}>{value}</Text>}
         renderOption={(mo, active) => (
           <Text style={[styles.monthDdItemText, active && styles.monthDdItemTextActive]}>{mo}</Text>
         )}
