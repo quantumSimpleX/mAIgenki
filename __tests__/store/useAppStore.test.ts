@@ -274,14 +274,14 @@ describe('multi-location editing state machine', () => {
     expect(get().preLocationEditSystems).toEqual([])
   })
 
-  it('startLocationEditing solos the condition system, saves prior systems, closes the sheet, and defaults to add', () => {
+  it('startLocationEditing solos the condition system, saves prior systems, closes the sheet, and defaults to remove', () => {
     get().setActiveSystems(['cardiovascular', 'renal'])
     get().selectCondition(htn)
     get().startLocationEditing(htn)
     expect(get().activeSystems).toEqual([htn.system])
     expect(get().preLocationEditSystems).toEqual(['cardiovascular', 'renal'])
     expect(get().locationEditingCondition).toBe(htn)
-    expect(get().locationEditMode).toBe('add')
+    expect(get().locationEditMode).toBe('remove')
     expect(get().sheetOpen).toBe(false)
     expect(get().selectedCondition).toBeNull()
   })

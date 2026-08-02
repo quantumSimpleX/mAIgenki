@@ -298,11 +298,13 @@ export const useAppStore = create<AppState & AppActions>((set, get) => ({
       pipelineError: null,
     })
   },
+  // Remove is the default tool on entry, not Add — most users editing
+  // locations want to erase a wrong one first (userDataReq.md §5.10).
   startLocationEditing: (c) => set((s) => ({
     preLocationEditSystems: [...s.activeSystems],
     activeSystems: [c.system],
     locationEditingCondition: c,
-    locationEditMode: 'add',
+    locationEditMode: 'remove',
     locationEditMessage: null,
     sheetOpen: false,
     selectedCondition: null,
