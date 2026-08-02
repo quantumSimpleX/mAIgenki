@@ -1148,6 +1148,9 @@ function RecordsCarousel({ records }: { records: ConditionRecord[] }) {
 
 function ConditionSheet() {
   const insets = useSafeAreaInsets()
+  // Reactive viewport height (not the module-level SH snapshot) so the sheet
+  // recomputes on rotation/window resize instead of retaining a stale size.
+  const { height: winH } = useWindowDimensions()
   const {
     selectedCondition, sheetOpen, closeSheet,
     chatOpen, setChatOpen, chatMessages, addChatMessage,
@@ -1214,7 +1217,7 @@ function ConditionSheet() {
   // bottom edge down to the screen bottom — same target height for either
   // mode, no longer two separate fixed sizes.
   const navBottom = insets.top + navBarHeight
-  const sheetH = navBarHeight > 0 ? SH - navBottom - 1 : Math.min(sc(780), SH * 0.92)
+  const sheetH = navBarHeight > 0 ? winH - navBottom - 1 : Math.min(sc(780), winH * 0.92)
   const translateY = sheetTranslateY.interpolate({
     inputRange: [0, 1],
     outputRange: ['0%', '110%'],
@@ -2163,28 +2166,62 @@ export default function BodyMapScreen() {
     selectCondition(c)
   }, [selectCondition])
 
+  // Serializes every write that can take the "zero real locations" branch
+  // below (both the auto-materialize effect and Add-mode taps) through one
+  // promise chain, so two near-simultaneous callers can't both observe zero
+  // rows and race on the same deterministic `${conditionId}-primary` key,
+  // silently dropping one of them (Codex review finding).
+  const locationWriteQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const enqueueLocationWrite = useCallback((task: () => Promise<void>) => {
+    locationWriteQueueRef.current = locationWriteQueueRef.current.then(task, task)
+  }, [])
+
+  // A legacy/fallback condition with zero real condition_locations rows only
+  // ever renders its synthesized dot (locationId: null), which doesn't count
+  // toward editingLocationCount — so entering edit mode on one would disable
+  // Done immediately, with no Add tap yet made and no cancel action to escape
+  // (Codex review finding). Materializing a real primary row at the
+  // condition's current position as soon as editing starts avoids the trap:
+  // Done is enabled from the first frame, and the "removing every location
+  // disables Done" behavior still applies once the user actively empties it.
+  useEffect(() => {
+    if (!locationEditingCondition || !idb) return
+    const condition = locationEditingCondition
+    enqueueLocationWrite(async () => {
+      const existingLocations = await getConditionLocations(idb, condition.id)
+      if (existingLocations.length === 0) {
+        await updateIndexedConditionPosition(idb, condition.id, condition.cx_percent, condition.cy_percent)
+        refreshConditions()
+        refreshDots()
+      }
+    })
+  }, [locationEditingCondition, idb, enqueueLocationWrite, refreshConditions, refreshDots])
+
   // Add tool: places a new location for locationEditingCondition at the tapped
   // coordinates. A condition with zero real condition_locations rows (a
   // legacy/fallback condition rendering its synthesized dot) dual-writes the
   // condition's own cx/cy via updateIndexedConditionPosition, mirroring the
   // pre-existing relocation dual-write pattern, so getIndexedConditionDots
   // stops falling back once a real location exists.
-  const handleLocationAdd = useCallback(async (cx: number, cy: number) => {
+  const handleLocationAdd = useCallback((cx: number, cy: number) => {
     if (!locationEditingCondition || !idb) return
+    const condition = locationEditingCondition
     const cxPercent = (cx / 260) * 100
     const cyPercent = (cy / 460) * 100
-    const existingLocations = await getConditionLocations(idb, locationEditingCondition.id)
-    if (existingLocations.length === 0) {
-      updateConditionPositionLocally(locationEditingCondition.id, cxPercent, cyPercent)
-      await updateIndexedConditionPosition(idb, locationEditingCondition.id, cxPercent, cyPercent)
-      refreshConditions()
-    } else {
-      await putIndexedConditionLocation(idb, {
-        id: uuid(), condition_id: locationEditingCondition.id, cx: cxPercent, cy: cyPercent, is_primary: false,
-      })
-    }
-    refreshDots()
-  }, [locationEditingCondition, idb, refreshConditions, refreshDots, updateConditionPositionLocally])
+    enqueueLocationWrite(async () => {
+      const existingLocations = await getConditionLocations(idb, condition.id)
+      if (existingLocations.length === 0) {
+        updateConditionPositionLocally(condition.id, cxPercent, cyPercent)
+        await updateIndexedConditionPosition(idb, condition.id, cxPercent, cyPercent)
+        refreshConditions()
+      } else {
+        await putIndexedConditionLocation(idb, {
+          id: uuid(), condition_id: condition.id, cx: cxPercent, cy: cyPercent, is_primary: false,
+        })
+      }
+      refreshDots()
+    })
+  }, [locationEditingCondition, idb, enqueueLocationWrite, refreshConditions, refreshDots, updateConditionPositionLocally])
 
   // Remove tool: deletes the tapped location. Removing every real location is
   // allowed — the nav bar's Done button (canFinishLocationEditing) is what
