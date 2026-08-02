@@ -411,9 +411,8 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   // Step 5 — persist through the shared IndexedDB write path (Task 2.15): the
   // same persistEnrichmentResult function seedIndexedDbDemoData uses, so demo
   // and real uploads share one persistence codepath from here on (userDataReq.md
-  // §2a). `providers` is written to the record-scoped `providers` store.
-  // Facility and per-condition care-event detail (IndexedDB has no stores for
-  // those yet) are still not persisted. Providers must only ever be surfaced
+  // §2a). Record-scoped providers and condition-specific care events are
+  // persisted by `persistEnrichmentResult`. Providers must only ever be surfaced
   // when a condition carries direct evidence — never attach every provider
   // found elsewhere in the record, which would create false clinical
   // attribution for otherwise unrelated care (local contact info is already

@@ -16,6 +16,7 @@ export const INDEXED_DB_BACKUP_STORES = [
   'condition_records',
   'measurements',
   'providers',
+  'condition_care_events',
   'settings',
 ] as const
 
@@ -138,7 +139,7 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
     requireField(row, 'conditions', 'name_medical', (value) => typeof value === 'string')
     requireField(row, 'conditions', 'name_common', isNullableString)
     requireField(row, 'conditions', 'system', (value) => typeof value === 'string')
-    requireField(row, 'conditions', 'status', (value) => value === 'documented' || value === 'resolved' || value === 'inferred')
+    requireField(row, 'conditions', 'status', (value) => value === 'documented' || value === 'resolved' || value === 'suspected' || value === 'inferred')
     requireField(row, 'conditions', 'cx', (value) => typeof value === 'number' && Number.isFinite(value))
     requireField(row, 'conditions', 'cy', (value) => typeof value === 'number' && Number.isFinite(value))
     requireField(row, 'conditions', 'year_frac', (value) => typeof value === 'number' && Number.isFinite(value))
@@ -207,11 +208,30 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
   for (const row of rows('providers')) {
     requireField(row, 'providers', 'id', (value) => typeof value === 'string')
     requireField(row, 'providers', 'record_id', (value) => typeof value === 'string' && healthRecordIds.has(value))
+    optionalField(row, 'providers', 'condition_id', (value) => value === null || (typeof value === 'string' && conditionIds.has(value)))
     requireField(row, 'providers', 'name', (value) => typeof value === 'string')
     requireField(row, 'providers', 'specialty', isNullableString)
     requireField(row, 'providers', 'email', isNullableString)
     requireField(row, 'providers', 'phone', isNullableString)
     requireField(row, 'providers', 'evidence', isNullableString)
+  }
+
+  for (const row of rows('condition_care_events')) {
+    requireField(row, 'condition_care_events', 'id', (value) => typeof value === 'string')
+    requireField(row, 'condition_care_events', 'condition_id', (value) => typeof value === 'string' && conditionIds.has(value))
+    requireField(row, 'condition_care_events', 'event_type', (value) => value === 'diagnosed' || value === 'revisited' || value === 'treated' || value === 'monitored' || value === 'referred' || value === 'other')
+    requireField(row, 'condition_care_events', 'date', (value) => typeof value === 'string')
+    requireField(row, 'condition_care_events', 'provider_name', (value) => typeof value === 'string')
+    requireField(row, 'condition_care_events', 'provider_specialty', isNullableString)
+    requireField(row, 'condition_care_events', 'provider_email', isNullableString)
+    requireField(row, 'condition_care_events', 'provider_phone', isNullableString)
+    requireField(row, 'condition_care_events', 'provider_evidence', isNullableString)
+    requireField(row, 'condition_care_events', 'facility_name', isNullableString)
+    requireField(row, 'condition_care_events', 'facility_address', isNullableString)
+    requireField(row, 'condition_care_events', 'facility_city', isNullableString)
+    requireField(row, 'condition_care_events', 'facility_state', isNullableString)
+    requireField(row, 'condition_care_events', 'facility_country', isNullableString)
+    requireField(row, 'condition_care_events', 'evidence', isNullableString)
   }
 
   for (const row of rows('settings')) {

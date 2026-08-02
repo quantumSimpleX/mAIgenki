@@ -3,7 +3,7 @@ import {
   type DesignCondition, type SupportedLang,
 } from '@/model/conditions'
 import { applyInferenceRules } from '@/lib/inference/rules'
-import type { ConditionInput, MeasurementInput, ProviderInput } from '@/lib/llm/enrich'
+import type { CareEventInput, ConditionInput, MeasurementInput, ProviderInput } from '@/lib/llm/enrich'
 
 /** Browser-only persistence adapter for the web architecture. */
 export const INDEXED_DB_NAME = 'maigenki'
@@ -11,7 +11,8 @@ export const INDEXED_DB_NAME = 'maigenki'
 // bumped so onupgradeneeded re-fires for databases already created at v1.
 // v3 adds the `providers` store, so structured provider data from real
 // uploads (previously discarded) is retained.
-export const INDEXED_DB_VERSION = 3
+// v4 adds condition-specific care events (provider/facility/date/type).
+export const INDEXED_DB_VERSION = 4
 
 export const DEMO_RECORD_ID = 'demo-record'
 const DEMO_IMAGE_ID = 'demo-image-stones-kub'
@@ -118,10 +119,29 @@ export type IndexedMeasurement = {
 export type IndexedProvider = {
   id: string
   record_id: string
+  condition_id?: string | null
   name: string
   specialty: string | null
   email: string | null
   phone: string | null
+  evidence: string | null
+}
+
+export type IndexedConditionCareEvent = {
+  id: string
+  condition_id: string
+  event_type: CareEventInput['event_type']
+  date: string
+  provider_name: string
+  provider_specialty: string | null
+  provider_email: string | null
+  provider_phone: string | null
+  provider_evidence: string | null
+  facility_name: string | null
+  facility_address: string | null
+  facility_city: string | null
+  facility_state: string | null
+  facility_country: string | null
   evidence: string | null
 }
 
@@ -158,9 +178,10 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
       ['condition_locations', { keyPath: 'id' }],
       ['record_images', { keyPath: 'id' }],
       ['condition_records', { keyPath: 'id' }],
-      ['measurements', { keyPath: 'id' }],
-      ['providers', { keyPath: 'id' }],
-      ['settings', { keyPath: 'key' }],
+    ['measurements', { keyPath: 'id' }],
+    ['providers', { keyPath: 'id' }],
+    ['condition_care_events', { keyPath: 'id' }],
+    ['settings', { keyPath: 'key' }],
     ]
     for (const [storeName, options] of stores) {
       if (!database.objectStoreNames.contains(storeName)) database.createObjectStore(storeName, options)
@@ -173,8 +194,10 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
     if (images && !images.indexNames.contains('record_id')) images.createIndex('record_id', 'record_id')
     const measurements = request.transaction?.objectStore('measurements')
     if (measurements && !measurements.indexNames.contains('record_id')) measurements.createIndex('record_id', 'record_id')
-    const providers = request.transaction?.objectStore('providers')
-    if (providers && !providers.indexNames.contains('record_id')) providers.createIndex('record_id', 'record_id')
+  const providers = request.transaction?.objectStore('providers')
+  if (providers && !providers.indexNames.contains('record_id')) providers.createIndex('record_id', 'record_id')
+  const careEvents = request.transaction?.objectStore('condition_care_events')
+  if (careEvents && !careEvents.indexNames.contains('condition_id')) careEvents.createIndex('condition_id', 'condition_id')
   }
   return requestToPromise(request)
 }
@@ -297,6 +320,21 @@ export async function getProvidersForRecord(db: IDBDatabase, recordId: string): 
   return rows
 }
 
+export async function putIndexedConditionCareEvent(db: IDBDatabase, event: IndexedConditionCareEvent): Promise<void> {
+  const transaction = db.transaction('condition_care_events', 'readwrite')
+  transaction.objectStore('condition_care_events').put(event)
+  await transactionToPromise(transaction)
+}
+
+export async function getConditionCareEvents(db: IDBDatabase, conditionId: string): Promise<IndexedConditionCareEvent[]> {
+  const transaction = db.transaction('condition_care_events', 'readonly')
+  const rows = await requestToPromise(
+    transaction.objectStore('condition_care_events').index('condition_id').getAll(conditionId),
+  ) as IndexedConditionCareEvent[]
+  await transactionToPromise(transaction)
+  return rows
+}
+
 // Updates a condition's own position and its primary condition_locations
 // record together, so getIndexedConditionDots (which prefers stored locations
 // over the condition's own cx/cy once any location exists) reflects the move.
@@ -352,10 +390,9 @@ export async function deleteIndexedSetting(db: IDBDatabase, key: string): Promis
 // userDataReq.md §2a, everything from inference rules onward must be identical
 // for demo and real data, not just similar.
 //
-// Known gap: IndexedDB has no facilities/condition_care_events stores yet
-// (Phase 2's task list never defines them), so only the flat `providers` list
-// (name/specialty/contact/evidence, record-scoped) is persisted — facility and
-// per-condition care-event detail is still discarded, tracked as a follow-up.
+// Providers are retained at record scope and, when directly attributed, at condition scope.
+// Care events retain their provider, facility, date, and event type in the
+// condition_care_events store.
 export type EnrichedInput = {
   filename: string
   pageCount: number | null
@@ -399,6 +436,49 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     await putIndexedConditionLocation(db, {
       id: `${conditionId}-primary`, condition_id: conditionId, cx, cy, is_primary: true,
     })
+
+    if (c.provider) {
+      await putIndexedProvider(db, {
+        id: `${conditionId}-provider`,
+        record_id: recordId,
+        condition_id: conditionId,
+        name: c.provider.name,
+        specialty: c.provider.specialty,
+        email: c.provider.email,
+        phone: c.provider.phone,
+        evidence: c.provider.evidence,
+      })
+    }
+
+    for (const [index, event] of (c.care_events ?? []).entries()) {
+      await putIndexedProvider(db, {
+        id: `${conditionId}-care-${index}-provider`,
+        record_id: recordId,
+        condition_id: conditionId,
+        name: event.provider.name,
+        specialty: event.provider.specialty,
+        email: event.provider.email,
+        phone: event.provider.phone,
+        evidence: event.provider.evidence,
+      })
+      await putIndexedConditionCareEvent(db, {
+        id: `${conditionId}-care-${index}`,
+        condition_id: conditionId,
+        event_type: event.event_type,
+        date: event.date,
+        provider_name: event.provider.name,
+        provider_specialty: event.provider.specialty,
+        provider_email: event.provider.email,
+        provider_phone: event.provider.phone,
+        provider_evidence: event.provider.evidence,
+        facility_name: event.facility?.name ?? null,
+        facility_address: event.facility?.address ?? null,
+        facility_city: event.facility?.city ?? null,
+        facility_state: event.facility?.state ?? null,
+        facility_country: event.facility?.country ?? null,
+        evidence: event.evidence,
+      })
+    }
     // Deterministic id (not uuid()) so re-seeding the same condition (e.g.
     // demo data reloaded) upserts each secondary location in place instead of
     // accumulating a fresh duplicate row per run.
@@ -433,6 +513,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     await putIndexedProvider(db, {
       id: uuid(),
       record_id: recordId,
+      condition_id: null,
       name: p.name,
       specialty: p.specialty,
       email: p.email,
