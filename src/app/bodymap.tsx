@@ -386,7 +386,12 @@ function renderRecordThumbSvg(rec: ConditionRecord, w: number, h: number) {
 
 // ─── Top Bar ─────────────────────────────────────────────────────────────────
 
-function NavBar({ canFinishLocationEditing }: { canFinishLocationEditing: boolean }) {
+function NavBar({
+  canFinishLocationEditing, canRemoveLocation,
+}: {
+  canFinishLocationEditing: boolean
+  canRemoveLocation: boolean
+}) {
   const {
     currentYear, timeDisplayMode, birthYear, birthMonth,
     toggleTimeDisplayMode, toggleSettings, toggleLegend, legendOpen,
@@ -441,13 +446,20 @@ function NavBar({ canFinishLocationEditing }: { canFinishLocationEditing: boolea
               <Text style={styles.navLocationEditBtnText}>+ Add</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.navLocationEditBtn, locationEditMode === 'remove' && {
-                backgroundColor: SYSTEM_META[locationEditingCondition.system]?.color ?? C.aqua,
-              }]}
-              onPress={() => setLocationEditMode('remove')}
+              style={[
+                styles.navLocationEditBtn,
+                locationEditMode === 'remove' && canRemoveLocation && {
+                  backgroundColor: SYSTEM_META[locationEditingCondition.system]?.color ?? C.aqua,
+                },
+                !canRemoveLocation && styles.navLocationEditBtnDisabled,
+              ]}
+              onPress={canRemoveLocation ? () => setLocationEditMode('remove') : undefined}
+              disabled={!canRemoveLocation}
               hitSlop={6}
             >
-              <Text style={styles.navLocationEditBtnText}>− Remove</Text>
+              <Text style={[styles.navLocationEditBtnText, !canRemoveLocation && styles.navLocationEditBtnTextDisabled]}>
+                − Remove
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[styles.navLocationEditBtn, !canFinishLocationEditing && styles.navLocationEditBtnDisabled]}
@@ -2084,6 +2096,17 @@ export default function BodyMapScreen() {
   // and its refresh — a fast double-press could exit with zero locations.
   const [locationWritePendingCount, setLocationWritePendingCount] = useState(0)
   const canFinishLocationEditing = editingLocationCount > 0 && locationWritePendingCount === 0
+  // With zero real locations, Remove has nothing to act on (its only visible
+  // dot would be the hidden fallback below) — Add is the sole allowed tool.
+  const canRemoveLocation = editingLocationCount > 0
+  // Safety net alongside handleLocationRemoveAttempt's own switch-to-Add:
+  // if the mode is ever 'remove' while there's nothing left to remove, force
+  // it back to 'add' rather than leaving an inert/impossible tool selected.
+  useEffect(() => {
+    if (locationEditingCondition && locationEditMode === 'remove' && !canRemoveLocation) {
+      setLocationEditMode('add')
+    }
+  }, [locationEditingCondition, locationEditMode, canRemoveLocation, setLocationEditMode])
   // The synthesized fallback dot (locationId === null) for the condition
   // currently being edited is hidden from the map/tap targets while editing —
   // once the user empties a condition's real locations, the map should read
@@ -2436,7 +2459,7 @@ export default function BodyMapScreen() {
       onMoveShouldSetResponderCapture={dismissUploadMessage}
     >
       <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
-        <NavBar canFinishLocationEditing={canFinishLocationEditing} />
+        <NavBar canFinishLocationEditing={canFinishLocationEditing} canRemoveLocation={canRemoveLocation} />
 
         {/* One-time gender prompt when body type couldn't be inferred */}
         {genderPromptNeeded && (
