@@ -90,6 +90,7 @@ describe('connectOpenRouter success', () => {
     expect(profile.tier).toBe(1)
     expect(profile.activeProviderId).toBe('openrouter')
     expect(profile.keySource).toBe('oauth')
+    expect(profile.verifiedAt).toEqual(expect.any(String))
 
     // Pending verifier deleted after the exchange completes.
     expect(await getPendingVerifier(db)).toBeNull()

@@ -57,7 +57,7 @@ export async function completeOAuthExchange(
   await keyStore.set('openrouter', exchangeResult.key)
 
   const profile = await loadProfile(db)
-  await saveProfile(db, { ...profile, tier: 1, activeProviderId: 'openrouter', keySource: 'oauth' })
+ await saveProfile(db, { ...profile, tier: 1, activeProviderId: 'openrouter', keySource: 'oauth', verifiedAt: new Date().toISOString() })
 
   // Background sanity check — never blocks the caller and never throws.
   validateKey(OPENROUTER_SPEC, exchangeResult.key).catch(() => {})
