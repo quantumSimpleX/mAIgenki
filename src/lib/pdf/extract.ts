@@ -1,4 +1,5 @@
 import { Platform } from 'react-native'
+import { debugError, startPipelineDebugRun } from '../debug/pipelineDebug'
 
 // Minimum characters per page to be considered a text-based PDF.
 // Below this threshold the PDF is treated as scanned (image-only pages).
@@ -49,7 +50,16 @@ function classify(text: string, pageCount: number, pageBreaks: number[], pageCha
 }
 
 export async function extractTextFromPDF(uri: string): Promise<ExtractionResult> {
-  return Platform.OS === 'web' ? extractOnWeb(uri) : extractOnNative(uri)
+const run = startPipelineDebugRun()
+run.log('debug', 'pdf', 'extract-started', { platform: Platform.OS })
+try {
+const result = await (Platform.OS === 'web' ? extractOnWeb(uri, run) : extractOnNative(uri))
+ run.log('info', 'pdf', 'extract-completed', { pageCount: result.pageCount, textCharacters: result.text.length, method: result.method })
+ return result
+} catch (error) {
+ run.log('error', 'pdf', 'extract-failed', debugError(error))
+ throw error
+}
 }
 
 // Native path — dynamic import keeps `expo-pdf-text-extract` (a native module that
@@ -74,12 +84,14 @@ async function extractOnNative(uri: string): Promise<ExtractionResult> {
 // Web path — pdfjs-dist (legacy build) parses the PDF bytes on the main thread.
 // The worker module is imported and registered on `globalThis.pdfjsWorker` so
 // pdf.js runs its worker logic inline (no separate worker file for Metro to emit).
-async function extractOnWeb(uri: string): Promise<ExtractionResult> {
+async function extractOnWeb(uri: string, run?: ReturnType<typeof startPipelineDebugRun>): Promise<ExtractionResult> {
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
   const workerMod = await import('pdfjs-dist/legacy/build/pdf.worker.mjs')
   ;(globalThis as unknown as { pdfjsWorker?: unknown }).pdfjsWorker = workerMod
 
-  const bytes = new Uint8Array(await (await fetch(uri)).arrayBuffer())
+const bytesStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+const bytes = new Uint8Array(await (await fetch(uri)).arrayBuffer())
+run?.log('debug', 'pdf', 'bytes-loaded', { byteLength: bytes.byteLength, durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - bytesStartedAt) })
   const loadingTask = pdfjs.getDocument({ data: bytes })
   const doc = await loadingTask.promise
 
@@ -92,12 +104,14 @@ async function extractOnWeb(uri: string): Promise<ExtractionResult> {
   let offset = 0
   const pageCount = doc.numPages
   for (let i = 1; i <= pageCount; i++) {
-    const page = await doc.getPage(i)
+const pageStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+const page = await doc.getPage(i)
     const content = await page.getTextContent()
     const pageText = content.items
       .map((item) => ('str' in item ? item.str : ''))
       .join(' ')
-    pageCharCounts.push(pageText.trim().length)
+pageCharCounts.push(pageText.trim().length)
+run?.log('trace', 'pdf', 'page-text-extracted', { page: i, pageCount, characters: pageText.length, durationMs: Math.round((typeof performance !== 'undefined' ? performance.now() : Date.now()) - pageStartedAt) })
     pageBreaks.push(offset)
     parts.push(pageText)
     offset += pageText.length + 1 // +1 for the '\n' join separator below

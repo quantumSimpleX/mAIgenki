@@ -665,3 +665,9 @@ Depends on: 8.8, 8.9, 8.10, 8.11.
 - Move the card from `kb1-TODO` only after implementation, automated validation, and browser acceptance are honestly recorded in `kb3-TEST`; do not mark this planning card DONE in advance.
 
 Depends on: 8.11, 8.12.
+## Pipeline diagnostics
+
+- Add runtime-switchable `globalThis.__MAIGENKI_DEBUG__` logging with `off`/`error`/`warn`/`info`/`debug`/`trace` levels and category filters.
+- Instrument PDF byte loading, document parsing, per-page text extraction, pipeline stages, LLM events, media capture, and IndexedDB persistence/transaction failures.
+- Keep diagnostics disabled by default and verify no extracted health text, PII, or API keys are logged.
+- Use `doc.userDataFlow/pipelineDebugging.md` as the QA capture and triage procedure.

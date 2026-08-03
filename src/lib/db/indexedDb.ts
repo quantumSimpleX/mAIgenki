@@ -4,6 +4,7 @@ import {
 } from '@/model/conditions'
 import { applyInferenceRules } from '@/lib/inference/rules'
 import { isValidCareEventInput, isValidProviderInput } from '@/lib/llm/enrich'
+import { pipelineDebug, startPipelineDebugRun } from '@/lib/debug/pipelineDebug'
 import type { CareEventInput, ConditionInput, MeasurementInput, ProviderInput } from '@/lib/llm/enrich'
 
 /** Browser-only persistence adapter for the web architecture. */
@@ -170,8 +171,8 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
 function transactionToPromise(transaction: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed'))
-    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'))
+transaction.onerror = () => { pipelineDebug('error', 'db', 'transaction-failed', { error: transaction.error?.message ?? 'IndexedDB transaction failed' }); reject(transaction.error ?? new Error('IndexedDB transaction failed')) }
+transaction.onabort = () => { pipelineDebug('error', 'db', 'transaction-aborted', { error: transaction.error?.message ?? 'IndexedDB transaction aborted' }); reject(transaction.error ?? new Error('IndexedDB transaction aborted')) }
   })
 }
 
@@ -415,6 +416,8 @@ export type EnrichedInput = {
 export type PersistEnrichmentResult = { recordId: string; conditionCount: number; measurementCount: number }
 
 export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedInput): Promise<PersistEnrichmentResult> {
+ const run = startPipelineDebugRun()
+ run.log('debug', 'db', 'persist-started', { conditions: input.conditions.length, measurements: input.measurements.length, providers: input.providers?.length ?? 0 })
   const recordId = await putIndexedHealthRecord(db, {
     id: input.recordId,
     filename: input.filename,
@@ -553,7 +556,8 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     linkedProviderKeys.add(providerKey(p))
   }
 
-  return { recordId, conditionCount: input.conditions.length, measurementCount: input.measurements.length }
+ run.log('info', 'db', 'persist-completed', { recordId, conditionCount: input.conditions.length, measurementCount: input.measurements.length })
+ return { recordId, conditionCount: input.conditions.length, measurementCount: input.measurements.length }
 }
 
 // Maps a hardcoded demo DesignCondition (src/model/conditions.ts) onto the same

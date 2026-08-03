@@ -257,3 +257,6 @@ New functions needed in `src/lib/db/indexedDb.ts` (mirroring the existing `putIn
 8. **Phase 7**: multi-location editing UI (§5.10), depends on Phase 2's `condition_locations` store/functions and Phase 5's dot-rendering refactor (`useConditionDots`, flattened dot list) — both already shipped.
 
 The provider-attribution fix (§5.5) already shipped ahead of the rest, as planned.
+### Pipeline diagnostics
+
+The PDF-to-IndexedDB path must retain configurable elapsed-time and error diagnostics in production code. See [pipelineDebugging.md](pipelineDebugging.md). Diagnostics default to `off` and are controlled at runtime through `globalThis.__MAIGENKI_DEBUG__`, with independent verbosity and pipeline-category filters.

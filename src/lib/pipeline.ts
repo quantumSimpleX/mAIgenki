@@ -18,6 +18,7 @@ import {
 import { redactPIIWithOffsetMap, extractProviderContacts } from './privacy/redact'
 import { renderPagesToCanvas } from './pdf/renderPage'
 import { compressToTarget } from './media/compress'
+import { startPipelineDebugRun } from './debug/pipelineDebug'
 
 export type { EnrichedInput }
 
@@ -293,9 +294,10 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   const {
     uri, idb, sex, kind, onProgress,
   } = opts
-  const pipelineStartedAt = Date.now()
+ const debugRun = startPipelineDebugRun()
+ const pipelineStartedAt = Date.now()
   const trace = (event: string, details: Record<string, unknown> = {}): void => {
-    console.info('[health-pipeline]', event, { elapsedMs: Date.now() - pipelineStartedAt, ...details })
+debugRun.log('info', 'pipeline', event, details)
   }
   const traceLlm = (event: LLMTraceEvent): void => {
     if (event.type === 'attempt') {
