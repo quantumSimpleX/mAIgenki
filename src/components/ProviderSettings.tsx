@@ -123,7 +123,7 @@ export function ProviderSettings({
   const spec = BUILT_IN_PROVIDERS[providerId] ?? BUILT_IN_PROVIDERS.custom
   const isCustom = providerId === 'custom'
   const baseURLValid = !isCustom || customBaseURLInput.length === 0 || isAllowedBaseURL(customBaseURLInput)
-  const visibleModels = useMemo(() => filterModels(allModels, modelQuery), [allModels, modelQuery])
+  const visibleModels = useMemo(() => filterModels(providerId === 'openrouter' ? allModels.filter((model) => model.endsWith(':free')) : allModels, modelQuery), [allModels, modelQuery, providerId])
   const vMessage = validationMessage(validation)
   // OpenRouter also supports its OAuth connection flow, which does not need
   // an API key before the Connect control can be shown.
@@ -197,7 +197,7 @@ export function ProviderSettings({
     setAllModelsLoading(true)
     const activeSpec = effectiveSpec(spec, customBaseURLInput)
     const models = await listModels(activeSpec, keyInput || null)
-    setAllModels(models)
+    setAllModels(providerId === 'openrouter' ? models.filter((model) => model.endsWith(':free')) : models)
     setAllModelsLoading(false)
   }
 
@@ -208,6 +208,10 @@ export function ProviderSettings({
       return
     }
     const model = resolveSelectedModel(pickedModel, freeTextModel)
+    if (providerId === 'openrouter' && (!model || !model.endsWith(':free'))) {
+      setSaveStatus('Choose a free OpenRouter model.')
+      return
+    }
     const next: LMFProfile = {
       tier: isCustom ? 3 : 2,
       activeProviderId: providerId,

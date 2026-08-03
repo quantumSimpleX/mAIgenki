@@ -66,7 +66,7 @@ describe('ProviderSettings — Connect OpenRouter wiring', () => {
 
     render(<ProviderSettings />)
     await waitFor(() => expect(mockLoadProfile).toHaveBeenCalledTimes(1))
-    fireEvent.press(screen.getAllByText('Connect')[0])
+    fireEvent.press(screen.getByText('Connect'))
 
     await waitFor(() => expect(mockConnectOpenRouter).toHaveBeenCalledWith(fakeDb))
     await waitFor(() => expect(screen.getByText(/Tier 1/)).toBeTruthy())
@@ -82,7 +82,7 @@ describe('ProviderSettings — Connect OpenRouter wiring', () => {
 
     render(<ProviderSettings />)
     await waitFor(() => expect(mockLoadProfile).toHaveBeenCalledTimes(1))
-    fireEvent.press(screen.getAllByText('Connect')[0])
+    fireEvent.press(screen.getByText('Connect'))
 
     await waitFor(() => expect(mockConnectOpenRouter).toHaveBeenCalled())
     expect(screen.getByText(/Tier 0/)).toBeTruthy()

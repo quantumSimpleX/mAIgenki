@@ -27,6 +27,8 @@ import {
 import { parseEvidence, formatDateDisplay } from '@/lib/support'
 import { openQSWebsite } from '@/lib/links'
 import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
+import { loadProfile } from '@/lib/llm/profile'
+import { makeKeyStore } from '@/lib/llm/keystore'
 import {
   getIndexedSetting, putIndexedSetting, updateIndexedConditionPosition,
   getRecordImageThumbnail, getRecordImageBlob, type IndexedConditionDot,
@@ -1261,8 +1263,9 @@ function ConditionSheet() {
         'Answer in 1–3 short sentences. Always recommend consulting a healthcare provider.',
         DISCLAIMER,
       ].filter(Boolean).join(' ')
-      const apiKey = idb ? (await getIndexedSetting(idb, 'openrouter_api_key')) ?? '' : ''
-      const outcome = await lmfChat(sys, userMsg, { apiKey, db: idb ?? undefined })
+const profile = idb ? await loadProfile(idb) : undefined
+const keys = await makeKeyStore()
+const outcome = await lmfChat(sys, userMsg, { db: idb ?? undefined, profile, keys })
       if (outcome.ok) {
         addChatMessage({ role: 'assistant', content: outcome.content })
       } else {

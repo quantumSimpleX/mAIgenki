@@ -66,6 +66,7 @@ export type LMFProfile = {
   customBaseURL: string | null
   fallbackToFree: boolean
   keySource: 'oauth' | 'manual' | null
+  verifiedAt?: string | null
 }
 
 export interface KeyStore {
