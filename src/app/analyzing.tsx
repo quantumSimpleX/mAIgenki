@@ -13,6 +13,7 @@ import { ALL_SYSTEMS, CONDITIONS, type SystemId } from '@/model/conditions'
 import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
 import { seedIndexedDbDemoData } from '@/lib/db/indexedDb'
 import { processHealthRecord } from '@/lib/pipeline'
+import { downloadPipelineDebugLog } from '@/lib/debug/pipelineDebug'
 import { EnrichmentFailedError } from '@/lib/llm/enrich'
 
 // The native animation driver is absent on web; using it there only warns.
@@ -518,8 +519,10 @@ export default function AnalyzingScreen() {
         })
         setPipelineError(null)
         setScreen('bodymap')
-        setTimeout(() => replaceBodymap('auto', result.conditionCount), 400)
-      } catch (e) {
+ void downloadPipelineDebugLog()
+ setTimeout(() => replaceBodymap('auto', result.conditionCount), 400)
+ } catch (e) {
+ void downloadPipelineDebugLog()
         clearInterval(smooth)
         if (!mountedRef.current) return
         let msg: string
