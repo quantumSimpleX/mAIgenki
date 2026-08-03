@@ -272,6 +272,8 @@ async function extractConditionsFromChunk(
   apiKey: string,
   models: string[],
   routing: EnrichRoutingOptions | undefined,
+  chunkIndex = 0,
+  chunkCount = 1,
 ): Promise<ChunkExtractionResult> {
   const contextLine = `Section: "${chunk.sectionHeading}" (type: ${chunk.sectionType}${chunk.inferredDate ? `, dated ${chunk.inferredDate}` : ''})`
   const result = await callLLMWithFallback<ChunkExtractionResult>({
@@ -282,7 +284,7 @@ async function extractConditionsFromChunk(
     apiKey,
     models,
     temperature: 0,
-    label: 'chunk-extraction',
+    label: `enrichment-chunk-${chunkIndex + 1}-of-${chunkCount}`,
     validate: parseChunkExtraction,
     ...routing,
   })
@@ -444,7 +446,8 @@ export async function enrichFromText(
 
   let completed = 0
   const settled = await runWithConcurrency(chunks, POOL_SIZE, async (chunk) => {
-    const result = await extractConditionsFromChunk(chunk, apiKey, modelChain, llmRouting)
+    const chunkIndex = chunks.indexOf(chunk)
+    const result = await extractConditionsFromChunk(chunk, apiKey, modelChain, llmRouting, chunkIndex, total)
     completed += 1
     onChunkProgress?.(completed, total)
     return result

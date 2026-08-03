@@ -259,4 +259,4 @@ New functions needed in `src/lib/db/indexedDb.ts` (mirroring the existing `putIn
 The provider-attribution fix (§5.5) already shipped ahead of the rest, as planned.
 ### Pipeline diagnostics
 
-The PDF-to-IndexedDB path must retain configurable elapsed-time and error diagnostics in production code. See [pipelineDebugging.md](pipelineDebugging.md). Diagnostics default to `off` and are controlled at runtime through `globalThis.__MAIGENKI_DEBUG__`, with independent verbosity and pipeline-category filters.
+The PDF-to-IndexedDB path must retain configurable elapsed-time and error diagnostics in production code. See [pipelineDebugging.md](pipelineDebugging.md). Local builds default to `trace` with Console and in-memory capture; runtime settings are controlled through `globalThis.__MAIGENKI_DEBUG__`, with independent verbosity and pipeline-category filters.

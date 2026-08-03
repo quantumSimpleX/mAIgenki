@@ -6,8 +6,8 @@ describe('pipeline debug controls', () => {
   })
 
   it('is off by default and supports runtime verbosity/category filters', () => {
-    expect(getPipelineDebugConfig().level).toBe('off')
-    expect(pipelineDebugEnabled('info', 'pdf')).toBe(false)
+    expect(getPipelineDebugConfig().level).toBe('trace')
+    expect(pipelineDebugEnabled('info', 'pdf')).toBe(true)
     setPipelineDebugConfig({ level: 'debug', categories: ['pdf'] })
     expect(pipelineDebugEnabled('debug', 'pdf')).toBe(true)
     expect(pipelineDebugEnabled('trace', 'pdf')).toBe(false)
