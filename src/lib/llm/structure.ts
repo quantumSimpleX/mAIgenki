@@ -1,4 +1,5 @@
 import { callLLMWithFallback, type LLMTraceEvent } from './client'
+import { STRUCTURE_PROMPT as EDITABLE_STRUCTURE_PROMPT } from './prompts'
 import type { KeyStore, LMFProfile } from '@/lib/lmf'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -145,6 +146,7 @@ export async function analyzeRecordStructure(
   routing?: EnrichRoutingOptions,
   pageBreaks?: number[],
 ): Promise<RecordStructure> {
+ const STRUCTURE_PROMPT = EDITABLE_STRUCTURE_PROMPT
   const result = await callLLMWithFallback<RawStructure>({
     messages: [
       { role: 'system', content: STRUCTURE_PROMPT },

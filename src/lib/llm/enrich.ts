@@ -2,6 +2,7 @@ import { callLLMWithFallback, DEFAULT_MODELS } from './client'
 import { analyzeRecordStructure, type EnrichRoutingOptions } from './structure'
 import { chunkRecordBySections, type TextChunk } from './chunk'
 import { runWithConcurrency } from './pool'
+import { CHUNK_EXTRACTION_PROMPT as EDITABLE_CHUNK_EXTRACTION_PROMPT } from './prompts'
 import type { ConditionStatus } from '@/model/health'
 
 export type { EnrichRoutingOptions } from './structure'
@@ -275,6 +276,7 @@ async function extractConditionsFromChunk(
   chunkIndex = 0,
   chunkCount = 1,
 ): Promise<ChunkExtractionResult> {
+ const CHUNK_EXTRACTION_PROMPT = EDITABLE_CHUNK_EXTRACTION_PROMPT
   const contextLine = `Section: "${chunk.sectionHeading}" (type: ${chunk.sectionType}${chunk.inferredDate ? `, dated ${chunk.inferredDate}` : ''})`
   const result = await callLLMWithFallback<ChunkExtractionResult>({
     messages: [
