@@ -7,6 +7,35 @@ import type { ConditionStatus } from '@/model/health'
 
 export type { EnrichRoutingOptions } from './structure'
 
+const LONGITUDINAL_PROMPT = `Extract a longitudinal medical record as JSON. Return only {"schema_version":1,"organization":"chronological|problem_based|mixed","conditions":[],"measurements":[],"report_context":{"providers":[],"facilities":[]}}. Include each unique condition once, earliest diagnosis/onset date, evidence, notes, normalized organ/system/anatomical_location, uncertainty, source_pages, and inherited_from_structure fields. Inherit a date or report-level provider/facility only when the document scope supports it and mark inherited fields. Leave unsupported values null or empty. Never invent severity, anatomy, laterality, providers, facilities, or measurements. Never recommend treatment.`
+
+const LONGITUDINAL_LIMIT = 12_000
+
+function parseLongitudinalResponse(content: string): EnrichmentResult | null {
+  try {
+    const parsed = JSON.parse(content) as { schema_version?: number; conditions?: ConditionInput[]; measurements?: MeasurementInput[] }
+    if (parsed.schema_version !== 1 || !Array.isArray(parsed.conditions) || !Array.isArray(parsed.measurements)) return null
+    return { conditions: parsed.conditions, measurements: parsed.measurements }
+  } catch {
+    return null
+  }
+}
+
+async function extractWholeDocument(text: string, apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<EnrichmentResult | null> {
+  const result = await callLLMWithFallback<EnrichmentResult>({
+    messages: [{ role: 'system', content: LONGITUDINAL_PROMPT }, { role: 'user', content: text }],
+    apiKey,
+    models,
+    label: 'enrichment-longitudinal',
+    db: routing.db,
+    profile: routing.profile,
+    keys: routing.keys,
+    timeoutMs: routing.timeoutMs,
+    validate: parseLongitudinalResponse,
+  })
+  return result.ok ? result.value : null
+}
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 // Additional (non-primary) location for a condition with more than one site —
@@ -22,6 +51,9 @@ export type ConditionInputLocation = {
 }
 
 export type ConditionInput = {
+  /** Phase 09 longitudinal provenance metadata. */
+  source_pages?: number[] | null
+  provenance?: string[]
   // Stable id, set only by callers that already have one (e.g. demo seeding
   // from src/model/conditions.ts's fixed ids). Real LLM extraction leaves this
   // unset and the persistence layer generates one.
@@ -125,6 +157,19 @@ export type EnrichmentResult = {
   // know which pages to render/capture. Absent/empty when no chunk was
   // imageWorthy or had a resolved page range.
   imageSections?: ImageWorthySection[]
+}
+
+/** Deterministic longitudinal merge: repeated mentions retain the earliest supported date. */
+export function mergeLongitudinalConditions(conditions: ConditionInput[]): ConditionInput[] {
+  const result = new Map<string, ConditionInput>()
+  const date = (values: Array<string | null | undefined>): string | null => values.filter((v): v is string => Boolean(v && /^\d{4}(-\d{2}-\d{2})?$/.test(v))).sort()[0] ?? null
+  for (const condition of conditions) {
+    const key = `${condition.name_medical.trim().toLowerCase()}|${condition.system.trim().toLowerCase()}`
+    const prior = result.get(key)
+    if (!prior) { result.set(key, { ...condition, date_diagnosed: date([condition.date_diagnosed, condition.date_onset]) }); continue }
+    result.set(key, { ...prior, date_diagnosed: date([prior.date_diagnosed, prior.date_onset, condition.date_diagnosed, condition.date_onset]), source_pages: [...new Set([...(prior.source_pages ?? []), ...(condition.source_pages ?? [])])], provenance: [...new Set([...(prior.provenance ?? []), ...(condition.provenance ?? [])])] })
+  }
+  return [...result.values()]
 }
 
 const EMPTY: EnrichmentResult = { conditions: [], measurements: [], providers: [] }
@@ -436,6 +481,16 @@ export async function enrichFromText(
   // pageBreaks isn't a callLLMWithFallback option — strip it before `llmRouting`
   // gets spread into the LLM call options below.
   const { pageBreaks, ...llmRouting } = routing ?? {}
+
+  if (text.length >= LONGITUDINAL_LIMIT) {
+    const wholeDocument = await extractWholeDocument(text, apiKey, modelChain, llmRouting)
+    if (wholeDocument) {
+      return {
+        ...wholeDocument,
+        conditions: mergeConditions(wholeDocument.conditions),
+      }
+    }
+  }
 
   const structure = await analyzeRecordStructure(text, apiKey, modelChain, llmRouting, pageBreaks)
   const chunks = chunkRecordBySections(text, structure, undefined, pageBreaks)
