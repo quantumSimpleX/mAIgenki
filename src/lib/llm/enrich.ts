@@ -7,8 +7,6 @@ import type { ConditionStatus } from '@/model/health'
 
 export type { EnrichRoutingOptions } from './structure'
 
-const LONGITUDINAL_LIMIT = 12_000
-
 export function parseLongitudinalResponse(content: string): EnrichmentResult | null {
   try {
     const parsed = JSON.parse(content) as { schema_version?: number; conditions?: ConditionInput[]; measurements?: MeasurementInput[]; report_context?: { providers?: ProviderInput[]; facilities?: FacilityInput[] } }
@@ -516,15 +514,18 @@ export async function enrichFromText(
   // gets spread into the LLM call options below.
   const { pageBreaks, ...llmRouting } = routing ?? {}
 
-  if (text.length >= LONGITUDINAL_LIMIT) {
-    const wholeDocument = await extractWholeDocument(text, apiKey, modelChain, llmRouting)
-    if (wholeDocument) {
-      return {
-        ...wholeDocument,
-        conditions: mergeConditions(wholeDocument.conditions),
-      }
+  const wholeDocument = await extractWholeDocument(text, apiKey, modelChain, llmRouting)
+  if (wholeDocument) {
+    return {
+      ...wholeDocument,
+      conditions: mergeConditions(wholeDocument.conditions),
     }
   }
+
+  // P09 intentionally keeps initial condition/date extraction text-only and
+  // document-scoped. Chunking is reserved for a later image/page-processing
+  // phase; it must not silently change the extraction contract here.
+  throw new EnrichmentFailedError(['whole-document extraction unavailable or context-rejected'])
 
   const structure = await analyzeRecordStructure(text, apiKey, modelChain, llmRouting, pageBreaks)
   const chunks = chunkRecordBySections(text, structure, undefined, pageBreaks)
