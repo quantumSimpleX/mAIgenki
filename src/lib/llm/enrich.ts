@@ -2,7 +2,7 @@ import { callLLMWithFallback, DEFAULT_MODELS } from './client'
 import { analyzeRecordStructure, type EnrichRoutingOptions } from './structure'
 import { chunkRecordBySections, type TextChunk } from './chunk'
 import { runWithConcurrency } from './pool'
-import { CHUNK_EXTRACTION_PROMPT as EDITABLE_CHUNK_EXTRACTION_PROMPT, LONGITUDINAL_EXTRACTION_PROMPT } from './prompts'
+import { CHUNK_EXTRACTION_PROMPT as EDITABLE_CHUNK_EXTRACTION_PROMPT, LONGITUDINAL_EXTRACTION_PROMPT, P09_WHOLE_DOCUMENT_EXTRACTION_PROMPT } from './prompts'
 import type { ConditionStatus } from '@/model/health'
 
 export type { EnrichRoutingOptions } from './structure'
@@ -48,7 +48,7 @@ export function parseLongitudinalResponse(content: string): EnrichmentResult | n
 
 async function extractWholeDocument(text: string, apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<EnrichmentResult | null> {
   const result = await callLLMWithFallback<EnrichmentResult>({
-    messages: [{ role: 'system', content: LONGITUDINAL_EXTRACTION_PROMPT }, { role: 'user', content: text }],
+    messages: [{ role: 'system', content: P09_WHOLE_DOCUMENT_EXTRACTION_PROMPT }, { role: 'user', content: text }],
     apiKey,
     models,
     label: 'enrichment-longitudinal',
