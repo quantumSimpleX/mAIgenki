@@ -260,3 +260,8 @@ The provider-attribution fix (§5.5) already shipped ahead of the rest, as plann
 ### Pipeline diagnostics
 
 The PDF-to-IndexedDB path must retain configurable elapsed-time and error diagnostics in production code. See [pipelineDebugging.md](pipelineDebugging.md). Local builds default to `trace` with Console and in-memory capture; runtime settings are controlled through `globalThis.__MAIGENKI_DEBUG__`, with independent verbosity and pipeline-category filters.
+## Phase 09 — Whole-document longitudinal extraction and body-map enrichment
+
+Phase 09 changes the LLM contract for extraction/enrichment. The first request receives the complete locally extracted, PII-redacted text for typical reports under 100 pages and extracts unique conditions, earliest diagnosis dates, longitudinal notes/evidence, physicians, contacts, and institutions. Report- and section-level hierarchy may provide inherited dates, conditions, physician, and institution context; inherited values must be marked as inferred with provenance. `yearFrac` remains a deterministic application calculation.
+
+The second request enriches each condition into an organ/system/anatomical-region proposal. Local code must calculate and validate `cx`/`cy` against the affected body-map image alpha mask, repairing or rejecting transparent-pixel coordinates. Existing IndexedDB/bodymap schemas and demo behavior remain compatible. A context-limit fallback remains for unusually large documents.

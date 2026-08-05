@@ -671,3 +671,15 @@ Depends on: 8.11, 8.12.
 - Instrument PDF byte loading, document parsing, per-page text extraction, pipeline stages, LLM events, media capture, and IndexedDB persistence/transaction failures.
 - Keep diagnostics disabled by default and verify no extracted health text, PII, or API keys are logged.
 - Use `doc.userDataFlow/pipelineDebugging.md` as the QA capture and triage procedure.
+## Phase 09 — Whole-document extraction and body-map enrichment tasks
+
+1. Define extraction schema, hierarchy inheritance, and provenance rules.
+2. Replace structure/chunk extraction prompts with longitudinal condition/provider extraction while retaining context-limit fallback.
+3. Add deterministic earliest-date/year-fraction calculation and merge tests.
+4. Define condition-level organ/system/anatomical-region enrichment schema.
+5. Add local body-map alpha-mask coordinate validation and repair/fallback.
+6. Map results into existing `ConditionInput`, `condition_locations`, and IndexedDB persistence.
+7. Add sparse-report, inheritance, context-limit, coordinate-mask, fallback, and regression fixtures.
+8. Run browser acceptance and compare body-map rendering before/after.
+
+Detailed kanban card: `doc.userDataFlow/kb1-TODO/p09-llm-extraction-enrichment.md`.
