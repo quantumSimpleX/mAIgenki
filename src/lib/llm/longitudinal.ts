@@ -86,6 +86,27 @@ export function mergeLongitudinalConditions(conditions: ConditionInput[]): Condi
 
 export type AlphaMask = { width: number; height: number; alpha: Uint8Array | Uint8ClampedArray }
 
+/** Decode a browser image asset into an alpha mask for authoritative coordinate validation. */
+export async function loadAlphaMaskFromImageSource(source: string | HTMLImageElement): Promise<AlphaMask> {
+  if (typeof document === 'undefined') throw new Error('Alpha-mask decoding requires a browser canvas')
+  const image = typeof source === 'string' ? await new Promise<HTMLImageElement>((resolve, reject) => {
+    const value = new Image()
+    value.onload = () => resolve(value)
+    value.onerror = () => reject(new Error('Unable to load anatomy mask asset'))
+    value.src = source
+  }) : source
+  const canvas = document.createElement('canvas')
+  canvas.width = image.naturalWidth || image.width
+  canvas.height = image.naturalHeight || image.height
+  const context = canvas.getContext('2d')
+  if (!context || canvas.width < 1 || canvas.height < 1) throw new Error('Unable to decode anatomy mask asset')
+  context.drawImage(image, 0, 0)
+  const data = context.getImageData(0, 0, canvas.width, canvas.height).data
+  const alpha = new Uint8ClampedArray(canvas.width * canvas.height)
+  for (let index = 0; index < alpha.length; index += 1) alpha[index] = data[index * 4 + 3]
+  return { width: canvas.width, height: canvas.height, alpha }
+}
+
 export function isOpaquePixel(mask: AlphaMask, cx: number, cy: number): boolean {
   const x = Math.round((Math.max(0, Math.min(100, cx)) / 100) * (mask.width - 1))
   const y = Math.round((Math.max(0, Math.min(100, cy)) / 100) * (mask.height - 1))
