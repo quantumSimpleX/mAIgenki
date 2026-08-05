@@ -429,6 +429,8 @@ export type EnrichedInput = {
   recordId?: string
   recordType?: string | null
   coordinateMask?: AlphaMask
+  coordinateMasks?: Record<string, AlphaMask>
+  coordinateMaskResolver?: (system: string) => Promise<AlphaMask | undefined>
 }
 
 export async function putIndexedFacility(db: IDBDatabase, facility: IndexedFacility): Promise<void> {
@@ -463,7 +465,8 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
   const providerKey = (provider: ProviderInput): string => `${provider.name}|${provider.email ?? ''}|${provider.phone ?? ''}`
 
   for (const rawCondition of input.conditions) {
-    const c = input.coordinateMask ? repairConditionCoordinates(input.coordinateMask, rawCondition) : rawCondition
+    const mask = input.coordinateMasks?.[rawCondition.system] ?? input.coordinateMask ?? await input.coordinateMaskResolver?.(rawCondition.system)
+    const c = mask ? repairConditionCoordinates(mask, rawCondition) : rawCondition
     const locations = c.locations ?? []
     // The demo kidney-stone record uses two explicit bilateral locations;
     // those replace its midpoint marker. Other records retain their authored

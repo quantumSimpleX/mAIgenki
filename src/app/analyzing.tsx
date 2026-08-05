@@ -8,6 +8,7 @@ import Svg, {
   Defs, LinearGradient, Rect, Stop,
 } from 'react-native-svg'
 import { Image } from 'expo-image'
+import { Image as RNImage } from 'react-native'
 import { useAppStore } from '@/store/useAppStore'
 import { ALL_SYSTEMS, CONDITIONS, type SystemId } from '@/model/conditions'
 import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
@@ -15,6 +16,7 @@ import { seedIndexedDbDemoData } from '@/lib/db/indexedDb'
 import { processHealthRecord } from '@/lib/pipeline'
 import { downloadPipelineDebugLog } from '@/lib/debug/pipelineDebug'
 import { EnrichmentFailedError } from '@/lib/llm/enrich'
+import { loadAlphaMaskFromImageSource, type AlphaMask } from '@/lib/llm/longitudinal'
 
 // The native animation driver is absent on web; using it there only warns.
 const IS_WEB = Platform.OS === 'web'
@@ -126,6 +128,19 @@ const INGEST_LAYERS: Record<SystemId, number> = {
   lymphatic: require('../../assets/maigenki-systems-2colorized/08-lymphatic.png'),
   endocrine: require('../../assets/maigenki-systems-2colorized/09-endocrine.png'),
   reproductive: require('../../assets/maigenki-systems-2colorized/10-reproductive-m.png'),
+}
+
+const ingestMaskCache = new Map<string, Promise<AlphaMask | undefined>>()
+function maskForSystem(system: string): Promise<AlphaMask | undefined> {
+  const existing = ingestMaskCache.get(system)
+  if (existing) return existing
+  const asset = INGEST_LAYERS[system as SystemId]
+  if (!asset) return Promise.resolve(undefined)
+  const uri = RNImage.resolveAssetSource(asset)?.uri
+  if (!uri) return Promise.resolve(undefined)
+  const loading = loadAlphaMaskFromImageSource(uri).catch(() => undefined)
+  ingestMaskCache.set(system, loading)
+  return loading
 }
 
 const PREVIEW_SYSTEMS = ALL_SYSTEMS.filter((system) => system !== 'reproductive')
@@ -497,7 +512,8 @@ export default function AnalyzingScreen() {
         const result = await processHealthRecord({
           uri: upload.uri,
           idb,
-          kind: upload.kind,
+              kind: upload.kind,
+              coordinateMaskResolver: maskForSystem,
           sex: gender,
           onProgress: (phase, progress) => {
             if (!mountedRef.current) return

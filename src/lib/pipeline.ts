@@ -55,6 +55,8 @@ export type PipelineOptions = {
   kind?: 'pdf' | 'image'
   /** Optional decoded body-map alpha mask used to reject transparent coordinates. */
   coordinateMask?: AlphaMask
+  coordinateMasks?: Record<string, AlphaMask>
+  coordinateMaskResolver?: (system: string) => Promise<AlphaMask | undefined>
   onProgress?: (phase: ProgressPhase, progress: number) => void
 }
 
@@ -295,7 +297,7 @@ function rehydrateConditionContacts(
 
 export async function processHealthRecord(opts: PipelineOptions): Promise<PipelineResult> {
   const {
-    uri, idb, sex, kind, onProgress, coordinateMask,
+    uri, idb, sex, kind, onProgress, coordinateMask, coordinateMasks, coordinateMaskResolver,
   } = opts
  const debugRun = startPipelineDebugRun()
  const pipelineStartedAt = Date.now()
@@ -498,6 +500,8 @@ debugRun.log('info', 'pipeline', event, details)
     providers,
     facilities: llmFacilities,
     coordinateMask,
+    coordinateMasks,
+    coordinateMaskResolver,
   })
   trace('persistence-completed', {
     recordId: result.recordId,
