@@ -15,7 +15,7 @@ export const INDEXED_DB_NAME = 'maigenki'
 // v3 adds the `providers` store, so structured provider data from real
 // uploads (previously discarded) is retained.
 // v4 adds condition-specific care events (provider/facility/date/type).
-export const INDEXED_DB_VERSION = 4
+export const INDEXED_DB_VERSION = 5
 
 export const DEMO_RECORD_ID = 'demo-record'
 const DEMO_IMAGE_ID = 'demo-image-stones-kub'
@@ -138,6 +138,17 @@ export type IndexedProvider = {
   evidence: string | null
 }
 
+export type IndexedFacility = {
+  id: string
+  record_id: string
+  condition_id?: string | null
+  name: string
+  address: string | null
+  city: string | null
+  state: string | null
+  country: string | null
+}
+
 export type IndexedConditionCareEvent = {
   id: string
   condition_id: string
@@ -192,6 +203,7 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
     ['measurements', { keyPath: 'id' }],
     ['providers', { keyPath: 'id' }],
     ['condition_care_events', { keyPath: 'id' }],
+    ['facilities', { keyPath: 'id' }],
     ['settings', { keyPath: 'key' }],
     ]
     for (const [storeName, options] of stores) {
@@ -207,6 +219,8 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
     if (measurements && !measurements.indexNames.contains('record_id')) measurements.createIndex('record_id', 'record_id')
   const providers = request.transaction?.objectStore('providers')
   if (providers && !providers.indexNames.contains('record_id')) providers.createIndex('record_id', 'record_id')
+  const facilities = request.transaction?.objectStore('facilities')
+  if (facilities && !facilities.indexNames.contains('record_id')) facilities.createIndex('record_id', 'record_id')
   const careEvents = request.transaction?.objectStore('condition_care_events')
   if (careEvents && !careEvents.indexNames.contains('condition_id')) careEvents.createIndex('condition_id', 'condition_id')
   }
@@ -411,9 +425,25 @@ export type EnrichedInput = {
   conditions: ConditionInput[]
   measurements: MeasurementInput[]
   providers?: ProviderInput[]
+  facilities?: import('../llm/enrich').FacilityInput[]
   recordId?: string
   recordType?: string | null
   coordinateMask?: AlphaMask
+}
+
+export async function putIndexedFacility(db: IDBDatabase, facility: IndexedFacility): Promise<void> {
+  const transaction = db.transaction('facilities', 'readwrite')
+  transaction.objectStore('facilities').put(facility)
+  await transactionToPromise(transaction)
+}
+
+export async function getFacilitiesForRecord(db: IDBDatabase, recordId: string): Promise<IndexedFacility[]> {
+  const transaction = db.transaction('facilities', 'readonly')
+  const rows = await requestToPromise(
+    transaction.objectStore('facilities').index('record_id').getAll(recordId),
+  ) as IndexedFacility[]
+  await transactionToPromise(transaction)
+  return rows
 }
 
 export type PersistEnrichmentResult = { recordId: string; conditionCount: number; measurementCount: number }
@@ -559,6 +589,23 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
       evidence: p.evidence,
     })
     linkedProviderKeys.add(providerKey(p))
+  }
+  const facilityKeys = new Set<string>()
+  for (const facility of input.facilities ?? []) {
+    if (!facility || typeof facility.name !== 'string' || facility.name.trim() === '') continue
+    const key = `${facility.name}|${facility.address ?? ''}|${facility.city ?? ''}|${facility.state ?? ''}|${facility.country ?? ''}`
+    if (facilityKeys.has(key)) continue
+    facilityKeys.add(key)
+    await putIndexedFacility(db, {
+      id: `${recordId}-facility-${facilityKeys.size}`,
+      record_id: recordId,
+      condition_id: null,
+      name: facility.name,
+      address: facility.address,
+      city: facility.city,
+      state: facility.state,
+      country: facility.country,
+    })
   }
 
  run.log('info', 'db', 'persist-completed', { recordId, conditionCount: input.conditions.length, measurementCount: input.measurements.length })

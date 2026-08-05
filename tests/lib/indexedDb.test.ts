@@ -234,4 +234,20 @@ describe('IndexedDB vertical slice', () => {
 
     db.close()
   })
+
+  it('persists report-scoped facilities when provider is unavailable', async () => {
+    const db = await openIndexedDb(`maigenki-facility-${Date.now()}`)
+    const { recordId } = await persistEnrichmentResult(db, {
+      filename: 'report.pdf', pageCount: 1, extractionMethod: 'text', conditions: [], measurements: [],
+      facilities: [{ name: 'Community Clinic', address: null, city: 'Seattle', state: 'WA', country: 'US' }],
+    })
+    const request = db.transaction('facilities', 'readonly').objectStore('facilities').index('record_id').getAll(recordId)
+    const rows = await new Promise<unknown[]>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result as unknown[])
+      request.onerror = () => reject(request.error)
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ name: 'Community Clinic', record_id: recordId })
+    db.close()
+  })
 })

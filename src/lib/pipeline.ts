@@ -435,7 +435,7 @@ debugRun.log('info', 'pipeline', event, details)
         report(1, 0.4 + (total > 0 ? 0.35 * completed / total : 0.35))
       })
       : await enrichFromText(safeText, apiKey, models)
-  const { conditions: llmConditions, measurements, providers: llmProviders = [] } = enrichment
+  const { conditions: llmConditions, measurements, providers: llmProviders = [], facilities: llmFacilities = [] } = enrichment
   trace('enrichment-completed', {
     conditions: llmConditions.length,
     measurements: measurements.length,
@@ -496,6 +496,7 @@ debugRun.log('info', 'pipeline', event, details)
     conditions: allConditions,
     measurements,
     providers,
+    facilities: llmFacilities,
     coordinateMask,
   })
   trace('persistence-completed', {

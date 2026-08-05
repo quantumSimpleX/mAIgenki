@@ -17,6 +17,7 @@ export const INDEXED_DB_BACKUP_STORES = [
   'measurements',
   'providers',
   'condition_care_events',
+  'facilities',
   'settings',
 ] as const
 
@@ -253,6 +254,17 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
     requireField(row, 'condition_care_events', 'evidence', isNullableString)
   }
 
+  for (const row of rows('facilities')) {
+    requireField(row, 'facilities', 'id', (value) => typeof value === 'string')
+    requireField(row, 'facilities', 'record_id', (value) => typeof value === 'string')
+    optionalField(row, 'facilities', 'condition_id', (value) => value === null || (typeof value === 'string' && conditionIds.has(value)))
+    requireField(row, 'facilities', 'name', (value) => typeof value === 'string')
+    requireField(row, 'facilities', 'address', isNullableString)
+    requireField(row, 'facilities', 'city', isNullableString)
+    requireField(row, 'facilities', 'state', isNullableString)
+    requireField(row, 'facilities', 'country', isNullableString)
+  }
+
   for (const row of rows('settings')) {
     requireField(row, 'settings', 'key', (value) => typeof value === 'string')
     requireField(row, 'settings', 'value', (value) => typeof value === 'string')
@@ -262,11 +274,16 @@ function validateBackupStores(stores: unknown): asserts stores is Record<string,
 export async function restoreIndexedDbBackup(db: IDBDatabase, backup: IndexedDbBackup): Promise<void> {
   if (backup.app !== 'maigenki') throw new Error(`Not a mAIgenki IndexedDB backup (app="${String(backup.app)}")`)
   if (backup.formatVersion !== 1) throw new Error(`Unsupported IndexedDB backup formatVersion: ${String(backup.formatVersion)}`)
-  validateBackupStores(backup.stores)
+  // Backups created before the report-scoped facilities store was introduced
+  // remain restorable; treat the newly added store as empty.
+  const stores = backup.stores.facilities === undefined
+    ? { ...backup.stores, facilities: [] }
+    : backup.stores
+  validateBackupStores(stores)
   const transaction = db.transaction([...INDEXED_DB_BACKUP_STORES], 'readwrite')
   for (const storeName of [...INDEXED_DB_BACKUP_STORES].reverse()) transaction.objectStore(storeName).clear()
   for (const storeName of INDEXED_DB_BACKUP_STORES) {
-    const rows = backup.stores[storeName] ?? []
+    const rows = stores[storeName] ?? []
     const store = transaction.objectStore(storeName)
     for (const row of rows) store.put(row)
   }

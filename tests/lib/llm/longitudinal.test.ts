@@ -55,4 +55,36 @@ describe('longitudinal extraction utilities', () => {
   it('rejects malformed facilities rather than persisting invented structure', () => {
     expect(isValidFacilityInput({ name: 'Clinic', city: 42 })).toBe(false)
   })
+
+  it('retains facility-only report context without requiring a provider', () => {
+    const result = parseLongitudinalResponse(JSON.stringify({
+      schema_version: 1,
+      organization: 'chronological',
+      report_context: { providers: [], facilities: [{ name: 'Community Clinic', address: null, city: 'Seattle', state: 'WA', country: 'US' }] },
+      conditions: [{ ...condition({ date_diagnosed: null }) }],
+      measurements: [],
+    }))
+    expect(result?.facilities?.[0].name).toBe('Community Clinic')
+    expect(result?.conditions[0].care_events ?? []).toHaveLength(0)
+  })
+
+  it('retains report facility when condition supplies an explicit provider', () => {
+    const result = parseLongitudinalResponse(JSON.stringify({
+      schema_version: 1,
+      conditions: [condition({
+        date_diagnosed: '2021-04-01',
+        provider: { name: 'Dr Explicit', specialty: null, email: null, phone: null, evidence: null },
+      })],
+      measurements: [],
+      report_context: {
+        providers: [],
+        facilities: [{ name: 'Report Clinic', address: '1 Main', city: 'Seattle', state: 'WA', country: 'US' }],
+      },
+    }))
+
+    expect(result?.conditions[0].provider?.name).toBe('Dr Explicit')
+    expect(result?.conditions[0].care_events?.[0].facility?.name).toBe('Report Clinic')
+    expect(result?.conditions[0].provenance).toContain('facility:report_context')
+    expect(result?.facilities?.[0].name).toBe('Report Clinic')
+  })
 })

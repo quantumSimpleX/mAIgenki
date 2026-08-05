@@ -16,18 +16,32 @@ export function parseLongitudinalResponse(content: string): EnrichmentResult | n
     const reportProvider = parsed.report_context?.providers?.find(isValidProviderInput)
     const reportFacility = parsed.report_context?.facilities?.find(isValidFacilityInput)
     const conditions = parsed.conditions.map((condition) => {
-      const inherited = !condition.provider && reportProvider
+      const inheritedProvider = !condition.provider && reportProvider
+      const selectedProvider = condition.provider ?? reportProvider ?? null
       const careEvents = condition.care_events ?? []
       const inheritedDate = condition.date_diagnosed ?? condition.date_onset
-      if (inherited && reportFacility && inheritedDate) {
-        careEvents.push({ event_type: 'other', date: inheritedDate, provider: reportProvider, facility: reportFacility, evidence: null })
+      // A report-scoped facility is inherited independently from the provider.
+      // When a provider is available (condition-scoped or report-scoped), retain
+      // the facility attribution as a care event so persistence cannot drop it.
+      if (selectedProvider && reportFacility && inheritedDate && !careEvents.some((event) => event.facility?.name === reportFacility.name)) {
+        careEvents.push({ event_type: 'other', date: inheritedDate, provider: selectedProvider, facility: reportFacility, evidence: null })
       }
-      return { ...condition, provider: condition.provider ?? reportProvider ?? null, care_events: careEvents, provenance: inherited ? [...new Set([...(condition.provenance ?? []), 'provider:report_context', 'facility:report_context'])] : condition.provenance }
+      const inheritedFields = [
+        ...(inheritedProvider ? ['provider:report_context'] : []),
+        ...(reportFacility && selectedProvider && inheritedDate ? ['facility:report_context'] : []),
+      ]
+      return {
+        ...condition,
+        provider: selectedProvider,
+        care_events: careEvents,
+        provenance: inheritedFields.length > 0 ? [...new Set([...(condition.provenance ?? []), ...inheritedFields])] : condition.provenance,
+      }
     })
     return {
       conditions,
       measurements: parsed.measurements,
       providers: parsed.report_context?.providers?.filter(isValidProviderInput),
+      facilities: parsed.report_context?.facilities?.filter(isValidFacilityInput),
     }
   } catch {
     return null
@@ -161,6 +175,8 @@ export type EnrichmentResult = {
   conditions: ConditionInput[]
   measurements: MeasurementInput[]
   providers?: ProviderInput[]
+  /** Report-scoped facilities retained even when no provider is named. */
+  facilities?: FacilityInput[]
   // Sections whose chunk extraction failed even after the model fallback
   // chain was exhausted — surfaced for diagnostics (pipeline.ts traces these)
   // rather than silently dropped. Absent/empty when every chunk succeeded.
@@ -185,7 +201,7 @@ export function mergeLongitudinalConditions(conditions: ConditionInput[]): Condi
   return [...result.values()]
 }
 
-const EMPTY: EnrichmentResult = { conditions: [], measurements: [], providers: [] }
+const EMPTY: EnrichmentResult = { conditions: [], measurements: [], providers: [], facilities: [] }
 
 // Number of chunks processed concurrently. Bounded (not Promise.all-unlimited)
 // so a large record's chunk count doesn't open dozens of simultaneous LLM
@@ -564,12 +580,16 @@ export async function enrichFromText(
   const providers = mergedConditions
     .map((c) => c.provider)
     .filter((p): p is ProviderInput => Boolean(p))
+  const facilities = mergedConditions
+    .flatMap((c) => (c.care_events ?? []).map((event) => event.facility))
+    .filter((facility): facility is FacilityInput => Boolean(facility))
   const coalescedImageSections = coalesceImageSections(imageSections)
 
   return {
     conditions: mergedConditions,
     measurements: mergedMeasurements,
     providers,
+    facilities,
     ...(partialFailures.length > 0 ? { partialFailures } : {}),
     ...(coalescedImageSections.length > 0 ? { imageSections: coalescedImageSections } : {}),
   }
