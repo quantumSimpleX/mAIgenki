@@ -6,6 +6,7 @@ import { applyInferenceRules } from '@/lib/inference/rules'
 import { isValidCareEventInput, isValidProviderInput } from '@/lib/llm/enrich'
 import { pipelineDebug, startPipelineDebugRun } from '@/lib/debug/pipelineDebug'
 import type { CareEventInput, ConditionInput, MeasurementInput, ProviderInput } from '@/lib/llm/enrich'
+import { repairConditionCoordinates, type AlphaMask } from '@/lib/llm/longitudinal'
 
 /** Browser-only persistence adapter for the web architecture. */
 export const INDEXED_DB_NAME = 'maigenki'
@@ -53,6 +54,7 @@ export type IndexedCondition = {
   date_diagnosed: string | null
   note: string | null
   evidence: string | null
+  source_pages?: number[] | null
   local_names: Partial<Record<SupportedLang, string>> | null
   inferred_fields: string[] | null
 }
@@ -60,7 +62,7 @@ export type IndexedCondition = {
 // putIndexedCondition accepts cx/cy as optional so callers that don't already
 // know a position can let it compute one (Task 2.7) — the stored/returned
 // shape always has concrete numbers.
-export type PutIndexedConditionInput = Omit<IndexedCondition, 'cx' | 'cy'> & { cx?: number; cy?: number }
+export type PutIndexedConditionInput = Omit<IndexedCondition, 'cx' | 'cy' | 'source_pages'> & { cx?: number; cy?: number; source_pages?: number[] | null }
 
 export type IndexedConditionLocation = {
   id: string
@@ -411,6 +413,7 @@ export type EnrichedInput = {
   providers?: ProviderInput[]
   recordId?: string
   recordType?: string | null
+  coordinateMask?: AlphaMask
 }
 
 export type PersistEnrichmentResult = { recordId: string; conditionCount: number; measurementCount: number }
@@ -429,7 +432,8 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
   const linkedProviderKeys = new Set<string>()
   const providerKey = (provider: ProviderInput): string => `${provider.name}|${provider.email ?? ''}|${provider.phone ?? ''}`
 
-  for (const c of input.conditions) {
+  for (const rawCondition of input.conditions) {
+    const c = input.coordinateMask ? repairConditionCoordinates(input.coordinateMask, rawCondition) : rawCondition
     const locations = c.locations ?? []
     // The demo kidney-stone record uses two explicit bilateral locations;
     // those replace its midpoint marker. Other records retain their authored
@@ -456,6 +460,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     date_diagnosed: c.date_diagnosed,
       note: c.notes ?? null,
       evidence: c.evidence,
+      source_pages: c.source_pages ?? null,
       local_names: (c.local_names as Partial<Record<SupportedLang, string>> | null | undefined) ?? null,
       inferred_fields: c.inferred_from_structure && c.inferred_from_structure.length > 0 ? c.inferred_from_structure : null,
     })

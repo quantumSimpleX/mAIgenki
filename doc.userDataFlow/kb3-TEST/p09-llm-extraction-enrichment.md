@@ -63,6 +63,8 @@ Remaining checklist work (blocked): map report-context provider/facility and sou
 
 Final bounded validation 2026-08-05: `npm run typecheck` PASS; focused longitudinal/enrichment tests PASS (2 suites, 25 tests). Full P09 checklist is not complete.
 
+Follow-up 2026-08-05: added optional `source_pages` to `ConditionInput`/IndexedDB write input so longitudinal provenance survives persistence; typecheck PASS and pipeline/enrichment/longitudinal tests PASS (3 suites, 48 tests). Provider/facility inheritance persistence and alpha-mask asset loading/coordinate repair are still not wired into the production pipeline; browser acceptance remains blocked.
+
 ## QA Record
 
 Pending independent QAAgent validation.
@@ -75,6 +77,33 @@ None recorded.
 
 None recorded.
 
+## QA Record (2026-08-05)
+
+Independent QA verified focused longitudinal/enrichment/IndexedDB tests (16), pipeline tests (23), typecheck, and lint. Full Jest still has unrelated ProviderSettings UI failures; browser desktop/mobile acceptance was not run.
+
+## Defects and Retests
+
+- Production anatomy asset decoding/resolution is not connected to the injected alpha-mask validator.
+- Facility-only report context has no standalone persistence mapping in the existing care-event schema.
+- Full Jest and browser acceptance remain pending.
+
+## Blockers
+
+Do not move to `kb4-DONE` until production mask loading, facility-only semantics, browser acceptance, and a green full validation run are resolved.
+
 ## Completion
 
 Not complete. Card remains in `kb2-CODE` until DevAgent evidence is recorded, then transitions to `kb3-TEST` for independent QA.
+## QA Record
+
+QAAgent Herschel (2026-08-05): `npm run typecheck` PASS. Focused Phase 09 and pipeline suites (`longitudinal`, `enrich`, `indexedDb`, `pipeline`) PASS: 4 suites, 61 tests. Coordinate-repair edge cases and report-context provider/facility parser tests PASS. Runtime persistence now accepts an optional coordinate mask and repairs coordinates before writes.
+
+## Defects and Retests
+
+- Full `npm test` and browser desktop/mobile acceptance were not completed in this QA pass.
+- Coordinate-mask enforcement is caller-supplied; browser asset-to-mask loading is not covered end-to-end. Omitting a mask retains deterministic fallback coordinates.
+- Facility-only report context remains unsupported; facility attribution currently uses a synthetic care event when a report-level provider exists.
+
+## Completion
+
+NOT COMPLETE — remain in `kb3-TEST` pending full Jest/browser acceptance and resolution or explicit acceptance of the coordinate-mask loading and facility-only attribution defects.

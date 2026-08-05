@@ -2,20 +2,33 @@ import { callLLMWithFallback, DEFAULT_MODELS } from './client'
 import { analyzeRecordStructure, type EnrichRoutingOptions } from './structure'
 import { chunkRecordBySections, type TextChunk } from './chunk'
 import { runWithConcurrency } from './pool'
-import { CHUNK_EXTRACTION_PROMPT as EDITABLE_CHUNK_EXTRACTION_PROMPT } from './prompts'
+import { CHUNK_EXTRACTION_PROMPT as EDITABLE_CHUNK_EXTRACTION_PROMPT, LONGITUDINAL_EXTRACTION_PROMPT } from './prompts'
 import type { ConditionStatus } from '@/model/health'
 
 export type { EnrichRoutingOptions } from './structure'
 
-const LONGITUDINAL_PROMPT = `Extract a longitudinal medical record as JSON. Return only {"schema_version":1,"organization":"chronological|problem_based|mixed","conditions":[],"measurements":[],"report_context":{"providers":[],"facilities":[]}}. Include each unique condition once, earliest diagnosis/onset date, evidence, notes, normalized organ/system/anatomical_location, uncertainty, source_pages, and inherited_from_structure fields. Inherit a date or report-level provider/facility only when the document scope supports it and mark inherited fields. Leave unsupported values null or empty. Never invent severity, anatomy, laterality, providers, facilities, or measurements. Never recommend treatment.`
-
 const LONGITUDINAL_LIMIT = 12_000
 
-function parseLongitudinalResponse(content: string): EnrichmentResult | null {
+export function parseLongitudinalResponse(content: string): EnrichmentResult | null {
   try {
-    const parsed = JSON.parse(content) as { schema_version?: number; conditions?: ConditionInput[]; measurements?: MeasurementInput[] }
+    const parsed = JSON.parse(content) as { schema_version?: number; conditions?: ConditionInput[]; measurements?: MeasurementInput[]; report_context?: { providers?: ProviderInput[]; facilities?: FacilityInput[] } }
     if (parsed.schema_version !== 1 || !Array.isArray(parsed.conditions) || !Array.isArray(parsed.measurements)) return null
-    return { conditions: parsed.conditions, measurements: parsed.measurements }
+    const reportProvider = parsed.report_context?.providers?.find(isValidProviderInput)
+    const reportFacility = parsed.report_context?.facilities?.find(isValidFacilityInput)
+    const conditions = parsed.conditions.map((condition) => {
+      const inherited = !condition.provider && reportProvider
+      const careEvents = condition.care_events ?? []
+      const inheritedDate = condition.date_diagnosed ?? condition.date_onset
+      if (inherited && reportFacility && inheritedDate) {
+        careEvents.push({ event_type: 'other', date: inheritedDate, provider: reportProvider, facility: reportFacility, evidence: null })
+      }
+      return { ...condition, provider: condition.provider ?? reportProvider ?? null, care_events: careEvents, provenance: inherited ? [...new Set([...(condition.provenance ?? []), 'provider:report_context', 'facility:report_context'])] : condition.provenance }
+    })
+    return {
+      conditions,
+      measurements: parsed.measurements,
+      providers: parsed.report_context?.providers?.filter(isValidProviderInput),
+    }
   } catch {
     return null
   }
@@ -23,7 +36,7 @@ function parseLongitudinalResponse(content: string): EnrichmentResult | null {
 
 async function extractWholeDocument(text: string, apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<EnrichmentResult | null> {
   const result = await callLLMWithFallback<EnrichmentResult>({
-    messages: [{ role: 'system', content: LONGITUDINAL_PROMPT }, { role: 'user', content: text }],
+    messages: [{ role: 'system', content: LONGITUDINAL_EXTRACTION_PROMPT }, { role: 'user', content: text }],
     apiKey,
     models,
     label: 'enrichment-longitudinal',
@@ -216,6 +229,11 @@ export function isValidProviderInput(value: unknown): value is ProviderInput {
     && isNullableString(value.email)
     && isNullableString(value.phone)
     && isNullableString(value.evidence)
+}
+
+export function isValidFacilityInput(value: unknown): value is FacilityInput {
+  if (!isRecord(value)) return false
+  return typeof value.name === 'string' && isNullableString(value.address) && isNullableString(value.city) && isNullableString(value.state) && isNullableString(value.country)
 }
 
 export function isValidCareEventInput(value: unknown): value is CareEventInput {

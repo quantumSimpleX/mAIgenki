@@ -1,5 +1,5 @@
 import { earliestDate, mergeLongitudinalConditions, repairPixelCoordinate, yearFrac } from '@/lib/llm/longitudinal'
-import type { ConditionInput } from '@/lib/llm/enrich'
+import { isValidFacilityInput, parseLongitudinalResponse, type ConditionInput } from '@/lib/llm/enrich'
 
 const condition = (overrides: Partial<ConditionInput> = {}): ConditionInput => ({
   name_medical: 'Hypertension', name_common: null, system: 'cardiovascular', organ: 'heart', anatomical_location: null,
@@ -29,5 +29,30 @@ describe('longitudinal extraction utilities', () => {
     const mask = { width: 3, height: 3, alpha: new Uint8Array([0, 0, 0, 0, 0, 255, 0, 0, 0]) }
     expect(repairPixelCoordinate(mask, 0, 0)).toEqual({ cx: 100, cy: 50 })
     expect(repairPixelCoordinate({ ...mask, alpha: new Uint8Array(9) }, 50, 50)).toBeNull()
+  })
+
+  it('clamps out-of-range coordinates and handles one-pixel masks', () => {
+    expect(repairPixelCoordinate({ width: 2, height: 2, alpha: new Uint8Array([0, 0, 0, 255]) }, 150, 150)).toEqual({ cx: 100, cy: 100 })
+    expect(repairPixelCoordinate({ width: 1, height: 1, alpha: new Uint8Array([255]) }, 50, 50)).toEqual({ cx: 50, cy: 50 })
+  })
+
+  it('inherits report-scoped provider/facility and preserves source attribution', () => {
+    const result = parseLongitudinalResponse(JSON.stringify({
+      schema_version: 1,
+      conditions: [condition({ date_diagnosed: '2020-01-01' })],
+      measurements: [],
+      report_context: {
+        providers: [{ name: 'Dr Lee', specialty: null, email: null, phone: null, evidence: 'header' }],
+        facilities: [{ name: 'General Hospital', address: null, city: 'Seattle', state: 'WA', country: 'US' }],
+      },
+    }))
+    expect(result?.providers).toHaveLength(1)
+    expect(result?.conditions[0].provider?.name).toBe('Dr Lee')
+    expect(result?.conditions[0].provenance).toContain('provider:report_context')
+    expect(result?.conditions[0].care_events?.[0].facility?.name).toBe('General Hospital')
+  })
+
+  it('rejects malformed facilities rather than persisting invented structure', () => {
+    expect(isValidFacilityInput({ name: 'Clinic', city: 42 })).toBe(false)
   })
 })

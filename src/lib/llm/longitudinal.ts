@@ -94,14 +94,19 @@ export function isOpaquePixel(mask: AlphaMask, cx: number, cy: number): boolean 
 
 /** Finds the closest opaque pixel; returns null when a mask has no valid pixels. */
 export function repairPixelCoordinate(mask: AlphaMask, cx: number, cy: number): { cx: number; cy: number } | null {
-  if (isOpaquePixel(mask, cx, cy)) return { cx, cy }
-  const originX = Math.round((Math.max(0, Math.min(100, cx)) / 100) * (mask.width - 1))
-  const originY = Math.round((Math.max(0, Math.min(100, cy)) / 100) * (mask.height - 1))
+  const clampedCx = Math.max(0, Math.min(100, cx))
+  const clampedCy = Math.max(0, Math.min(100, cy))
+  if (isOpaquePixel(mask, clampedCx, clampedCy)) return { cx: clampedCx, cy: clampedCy }
+  const originX = Math.round((clampedCx / 100) * (mask.width - 1))
+  const originY = Math.round((clampedCy / 100) * (mask.height - 1))
   const maxRadius = Math.max(mask.width, mask.height)
   for (let radius = 1; radius <= maxRadius; radius += 1) {
     for (let y = Math.max(0, originY - radius); y <= Math.min(mask.height - 1, originY + radius); y += 1) {
       for (let x = Math.max(0, originX - radius); x <= Math.min(mask.width - 1, originX + radius); x += 1) {
-        if (mask.alpha[y * mask.width + x] > 0) return { cx: (x / (mask.width - 1)) * 100, cy: (y / (mask.height - 1)) * 100 }
+        if (mask.alpha[y * mask.width + x] > 0) return {
+          cx: mask.width > 1 ? (x / (mask.width - 1)) * 100 : 0,
+          cy: mask.height > 1 ? (y / (mask.height - 1)) * 100 : 0,
+        }
       }
     }
   }

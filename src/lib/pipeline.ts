@@ -19,6 +19,7 @@ import { redactPIIWithOffsetMap, extractProviderContacts } from './privacy/redac
 import { renderPagesToCanvas } from './pdf/renderPage'
 import { compressToTarget } from './media/compress'
 import { startPipelineDebugRun } from './debug/pipelineDebug'
+import type { AlphaMask } from './llm/longitudinal'
 
 export type { EnrichedInput }
 
@@ -52,6 +53,8 @@ export type PipelineOptions = {
   // Explicit input kind from the picker; overrides the URI-suffix heuristic
   // (web blob/data URIs often lack a .pdf extension).
   kind?: 'pdf' | 'image'
+  /** Optional decoded body-map alpha mask used to reject transparent coordinates. */
+  coordinateMask?: AlphaMask
   onProgress?: (phase: ProgressPhase, progress: number) => void
 }
 
@@ -292,7 +295,7 @@ function rehydrateConditionContacts(
 
 export async function processHealthRecord(opts: PipelineOptions): Promise<PipelineResult> {
   const {
-    uri, idb, sex, kind, onProgress,
+    uri, idb, sex, kind, onProgress, coordinateMask,
   } = opts
  const debugRun = startPipelineDebugRun()
  const pipelineStartedAt = Date.now()
@@ -493,6 +496,7 @@ debugRun.log('info', 'pipeline', event, details)
     conditions: allConditions,
     measurements,
     providers,
+    coordinateMask,
   })
   trace('persistence-completed', {
     recordId: result.recordId,
