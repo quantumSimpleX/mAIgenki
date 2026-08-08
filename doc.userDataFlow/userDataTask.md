@@ -428,7 +428,7 @@ All of #8–#9 in `src/app/bodymap.tsx` (`enqueueLocationWrite`, the materialize
 Implemented in `src/hooks/useConditions.ts` (`useConditionDots`'s `refresh`) and `src/app/bodymap.tsx` (`idb` hoisted earlier in `BodyMapScreen` and deduplicated, `canFinishLocationEditing`, `handleLocationRemoveAttempt`'s `await refreshDots()`, `NavBar`'s button styles/compact-mode logic).
 ## Phase 08 — OpenRouter OAuth Onboarding, Free-Model Selection & Gated Document Intake
 
-**Status: TODO.** This phase implements `userDataReq.md` §5.0. It changes the landing page from upload-first to connection-first while reusing the existing LMF/BYOK implementation. No application code is being changed by this planning card; tasks below are the implementation and verification work to execute later.
+**Status: DONE.** This phase implements `userDataReq.md` §5.0. It changes the landing page from upload-first to connection-first while reusing the existing LMF/BYOK implementation. Implemented and QA-signed-off 2026-08-08 (`doc.userDataFlow/kb4-DONE/p08-llm-connection-onboarding.md`); live OAuth/free-model/disconnect acceptance exercised against a real OpenRouter account. 429 rate-limit auto-fallback and QR camera scan remain unverified live (no way to force a real rate limit or access a physical camera in any available environment) — both are covered by unit tests and accepted as out-of-reach blockers per the card's QA record.
 
 ### Phase 08 product decisions (locked for implementation)
 

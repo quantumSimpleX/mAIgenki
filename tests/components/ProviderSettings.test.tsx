@@ -100,7 +100,7 @@ describe('ProviderSettings — Connect OpenRouter wiring', () => {
 
     render(<ProviderSettings />)
     await waitFor(() => expect(mockLoadProfile).toHaveBeenCalledTimes(1))
-    fireEvent.press(screen.getAllByText('Connect')[0])
+    fireEvent.press(screen.getByText('Connect'))
 
     await waitFor(() =>
       expect(screen.getByText('Authorization expired or invalid — try again.')).toBeTruthy())
