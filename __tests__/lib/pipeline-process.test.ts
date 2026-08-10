@@ -187,6 +187,27 @@ describe('processHealthRecord — input routing', () => {
     idb.close()
   })
 
+  it('retains the redacted text for retry when enrichment fails', async () => {
+    mockPdf.mockResolvedValue({ text: 'Some records text.', pageCount: 1, method: 'text' })
+    mockEnrich.mockRejectedValue(new EnrichmentFailedError(['model-a:free: network error']))
+
+    const idb = await freshIdb()
+    await expect(processHealthRecord({ uri: 'file:///r.pdf', idb, apiKey: '' }))
+      .rejects.toThrow(EnrichmentFailedError)
+    expect(await countIndexedRows(idb, 'pending_extraction_text')).toBe(1)
+    idb.close()
+  })
+
+  it('clears the pending redacted text once enrichment succeeds', async () => {
+    mockPdf.mockResolvedValue({ text: 'Some records text.', pageCount: 1, method: 'text' })
+    mockEnrich.mockResolvedValue(EMPTY)
+
+    const idb = await freshIdb()
+    await processHealthRecord({ uri: 'file:///r.pdf', idb, apiKey: '' })
+    expect(await countIndexedRows(idb, 'pending_extraction_text')).toBe(0)
+    idb.close()
+  })
+
   it('routes image input through OCR extraction', async () => {
     mockImage.mockResolvedValue('HbA1c 7.1%')
     mockEnrich.mockResolvedValue(EMPTY)

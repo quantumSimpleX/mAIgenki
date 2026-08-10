@@ -18,9 +18,11 @@ const mockFetch = jest.fn()
 ;(globalThis as any).fetch = mockFetch
 
 function okResponse(content: string) {
+  const body = { choices: [{ message: { content } }] }
   return Promise.resolve({
     ok: true,
-    json: () => Promise.resolve({ choices: [{ message: { content } }] }),
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
   })
 }
 
@@ -30,11 +32,13 @@ function okResponse(content: string) {
 // retry, so tests that expect an immediate move to the next model use a
 // non-retryable status (400) rather than 5xx.
 function errorResponse(status: number, message: string) {
+  const body = { error: { message } }
   return Promise.resolve({
     ok: false,
     status,
     headers: new Map(),
-    json: () => Promise.resolve({ error: { message } }),
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
   })
 }
 

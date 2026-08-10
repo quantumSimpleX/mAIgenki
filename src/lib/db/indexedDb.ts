@@ -4,7 +4,9 @@ import {
 } from '@/model/conditions'
 import { applyInferenceRules } from '@/lib/inference/rules'
 import { isValidCareEventInput, isValidProviderInput } from '@/lib/llm/enrich'
+import { pipelineDebug, startPipelineDebugRun } from '@/lib/debug/pipelineDebug'
 import type { CareEventInput, ConditionInput, MeasurementInput, ProviderInput } from '@/lib/llm/enrich'
+import { repairConditionCoordinates, type AlphaMask } from '@/lib/llm/longitudinal'
 
 /** Browser-only persistence adapter for the web architecture. */
 export const INDEXED_DB_NAME = 'maigenki'
@@ -13,7 +15,9 @@ export const INDEXED_DB_NAME = 'maigenki'
 // v3 adds the `providers` store, so structured provider data from real
 // uploads (previously discarded) is retained.
 // v4 adds condition-specific care events (provider/facility/date/type).
-export const INDEXED_DB_VERSION = 4
+// v6 adds `pending_extraction_text`, holding a record's redacted text only
+// until enrichment persists successfully (Task: retry without re-upload).
+export const INDEXED_DB_VERSION = 6
 
 export const DEMO_RECORD_ID = 'demo-record'
 const DEMO_IMAGE_ID = 'demo-image-stones-kub'
@@ -52,6 +56,7 @@ export type IndexedCondition = {
   date_diagnosed: string | null
   note: string | null
   evidence: string | null
+  source_pages?: number[] | null
   local_names: Partial<Record<SupportedLang, string>> | null
   inferred_fields: string[] | null
 }
@@ -59,7 +64,7 @@ export type IndexedCondition = {
 // putIndexedCondition accepts cx/cy as optional so callers that don't already
 // know a position can let it compute one (Task 2.7) — the stored/returned
 // shape always has concrete numbers.
-export type PutIndexedConditionInput = Omit<IndexedCondition, 'cx' | 'cy'> & { cx?: number; cy?: number }
+export type PutIndexedConditionInput = Omit<IndexedCondition, 'cx' | 'cy' | 'source_pages'> & { cx?: number; cy?: number; source_pages?: number[] | null }
 
 export type IndexedConditionLocation = {
   id: string
@@ -99,6 +104,20 @@ export type RecordImage = {
   created_at: string
 }
 
+// Holds a record's redacted extracted text only between successful PDF
+// extraction/redaction and successful enrichment persistence — long enough to
+// retry enrichment without re-running extraction, never longer. Deleted once
+// persistEnrichmentResult succeeds, since every useful fact it contained is by
+// then captured structurally in conditions/measurements/providers/facilities.
+export type PendingExtractionText = {
+  id: string
+  filename: string
+  page_count: number | null
+  extraction_method: string | null
+  text_blob: Blob
+  created_at: string
+}
+
 export type ConditionRecordEntry = {
   id: string
   condition_id: string
@@ -133,6 +152,17 @@ export type IndexedProvider = {
   email: string | null
   phone: string | null
   evidence: string | null
+}
+
+export type IndexedFacility = {
+  id: string
+  record_id: string
+  condition_id?: string | null
+  name: string
+  address: string | null
+  city: string | null
+  state: string | null
+  country: string | null
 }
 
 export type IndexedConditionCareEvent = {
@@ -170,8 +200,8 @@ function requestToPromise<T>(request: IDBRequest<T>): Promise<T> {
 function transactionToPromise(transaction: IDBTransaction): Promise<void> {
   return new Promise((resolve, reject) => {
     transaction.oncomplete = () => resolve()
-    transaction.onerror = () => reject(transaction.error ?? new Error('IndexedDB transaction failed'))
-    transaction.onabort = () => reject(transaction.error ?? new Error('IndexedDB transaction aborted'))
+transaction.onerror = () => { pipelineDebug('error', 'db', 'transaction-failed', { error: transaction.error?.message ?? 'IndexedDB transaction failed' }); reject(transaction.error ?? new Error('IndexedDB transaction failed')) }
+transaction.onabort = () => { pipelineDebug('error', 'db', 'transaction-aborted', { error: transaction.error?.message ?? 'IndexedDB transaction aborted' }); reject(transaction.error ?? new Error('IndexedDB transaction aborted')) }
   })
 }
 
@@ -189,7 +219,9 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
     ['measurements', { keyPath: 'id' }],
     ['providers', { keyPath: 'id' }],
     ['condition_care_events', { keyPath: 'id' }],
+    ['facilities', { keyPath: 'id' }],
     ['settings', { keyPath: 'key' }],
+    ['pending_extraction_text', { keyPath: 'id' }],
     ]
     for (const [storeName, options] of stores) {
       if (!database.objectStoreNames.contains(storeName)) database.createObjectStore(storeName, options)
@@ -204,10 +236,32 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
     if (measurements && !measurements.indexNames.contains('record_id')) measurements.createIndex('record_id', 'record_id')
   const providers = request.transaction?.objectStore('providers')
   if (providers && !providers.indexNames.contains('record_id')) providers.createIndex('record_id', 'record_id')
+  const facilities = request.transaction?.objectStore('facilities')
+  if (facilities && !facilities.indexNames.contains('record_id')) facilities.createIndex('record_id', 'record_id')
   const careEvents = request.transaction?.objectStore('condition_care_events')
   if (careEvents && !careEvents.indexNames.contains('condition_id')) careEvents.createIndex('condition_id', 'condition_id')
   }
-  return requestToPromise(request)
+  // If another connection (another tab, or a stale one left over from a dev
+  // hot-reload) is still open at an older version, this open() call blocks
+  // here instead of upgrading/hanging silently — surface that rather than
+  // leaving it a mystery.
+  request.onblocked = () => {
+    pipelineDebug('warn', 'db', 'open-blocked', {
+      reason: 'Another connection is holding an older-version IndexedDB open; upgrade is waiting for it to close.',
+    })
+  }
+  const db = await requestToPromise(request)
+  // Self-heals the reverse case: once THIS connection is open, if a still
+  // newer version tries to open later (another tab updates, or another
+  // hot-reload lands), close this one instead of blocking that attempt —
+  // the same fix applied on the other side of the handshake above.
+  db.onversionchange = () => {
+    pipelineDebug('warn', 'db', 'stale-connection-closed', {
+      reason: 'A newer version of this database was requested — closing this connection so that upgrade can proceed.',
+    })
+    db.close()
+  }
+  return db
 }
 
 // Computes a position when the caller doesn't already have one (e.g. a fresh
@@ -261,6 +315,25 @@ export async function getRecordImageBlob(db: IDBDatabase, imageId: string): Prom
   const row = await requestToPromise(transaction.objectStore('record_images').get(imageId)) as RecordImage | undefined
   await transactionToPromise(transaction)
   return row ? { blob: row.image_blob, mimeType: row.mime_type } : null
+}
+
+export async function putPendingExtractionText(db: IDBDatabase, entry: PendingExtractionText): Promise<void> {
+  const transaction = db.transaction('pending_extraction_text', 'readwrite')
+  transaction.objectStore('pending_extraction_text').put(entry)
+  await transactionToPromise(transaction)
+}
+
+export async function getPendingExtractionText(db: IDBDatabase, id: string): Promise<string | null> {
+  const transaction = db.transaction('pending_extraction_text', 'readonly')
+  const row = await requestToPromise(transaction.objectStore('pending_extraction_text').get(id)) as PendingExtractionText | undefined
+  await transactionToPromise(transaction)
+  return row ? row.text_blob.text() : null
+}
+
+export async function deletePendingExtractionText(db: IDBDatabase, id: string): Promise<void> {
+  const transaction = db.transaction('pending_extraction_text', 'readwrite')
+  transaction.objectStore('pending_extraction_text').delete(id)
+  await transactionToPromise(transaction)
 }
 
 export async function getConditionRecords(db: IDBDatabase, conditionId: string): Promise<ConditionRecordEntry[]> {
@@ -408,13 +481,34 @@ export type EnrichedInput = {
   conditions: ConditionInput[]
   measurements: MeasurementInput[]
   providers?: ProviderInput[]
+  facilities?: import('../llm/enrich').FacilityInput[]
   recordId?: string
   recordType?: string | null
+  coordinateMask?: AlphaMask
+  coordinateMasks?: Record<string, AlphaMask>
+  coordinateMaskResolver?: (system: string) => Promise<AlphaMask | undefined>
+}
+
+export async function putIndexedFacility(db: IDBDatabase, facility: IndexedFacility): Promise<void> {
+  const transaction = db.transaction('facilities', 'readwrite')
+  transaction.objectStore('facilities').put(facility)
+  await transactionToPromise(transaction)
+}
+
+export async function getFacilitiesForRecord(db: IDBDatabase, recordId: string): Promise<IndexedFacility[]> {
+  const transaction = db.transaction('facilities', 'readonly')
+  const rows = await requestToPromise(
+    transaction.objectStore('facilities').index('record_id').getAll(recordId),
+  ) as IndexedFacility[]
+  await transactionToPromise(transaction)
+  return rows
 }
 
 export type PersistEnrichmentResult = { recordId: string; conditionCount: number; measurementCount: number }
 
 export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedInput): Promise<PersistEnrichmentResult> {
+ const run = startPipelineDebugRun()
+ run.log('debug', 'db', 'persist-started', { conditions: input.conditions.length, measurements: input.measurements.length, providers: input.providers?.length ?? 0 })
   const recordId = await putIndexedHealthRecord(db, {
     id: input.recordId,
     filename: input.filename,
@@ -426,7 +520,9 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
   const linkedProviderKeys = new Set<string>()
   const providerKey = (provider: ProviderInput): string => `${provider.name}|${provider.email ?? ''}|${provider.phone ?? ''}`
 
-  for (const c of input.conditions) {
+  for (const rawCondition of input.conditions) {
+    const mask = input.coordinateMasks?.[rawCondition.system] ?? input.coordinateMask ?? await input.coordinateMaskResolver?.(rawCondition.system)
+    const c = mask ? repairConditionCoordinates(mask, rawCondition) : rawCondition
     const locations = c.locations ?? []
     // The demo kidney-stone record uses two explicit bilateral locations;
     // those replace its midpoint marker. Other records retain their authored
@@ -453,6 +549,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     date_diagnosed: c.date_diagnosed,
       note: c.notes ?? null,
       evidence: c.evidence,
+      source_pages: c.source_pages ?? null,
       local_names: (c.local_names as Partial<Record<SupportedLang, string>> | null | undefined) ?? null,
       inferred_fields: c.inferred_from_structure && c.inferred_from_structure.length > 0 ? c.inferred_from_structure : null,
     })
@@ -552,8 +649,26 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     })
     linkedProviderKeys.add(providerKey(p))
   }
+  const facilityKeys = new Set<string>()
+  for (const facility of input.facilities ?? []) {
+    if (!facility || typeof facility.name !== 'string' || facility.name.trim() === '') continue
+    const key = `${facility.name}|${facility.address ?? ''}|${facility.city ?? ''}|${facility.state ?? ''}|${facility.country ?? ''}`
+    if (facilityKeys.has(key)) continue
+    facilityKeys.add(key)
+    await putIndexedFacility(db, {
+      id: `${recordId}-facility-${facilityKeys.size}`,
+      record_id: recordId,
+      condition_id: null,
+      name: facility.name,
+      address: facility.address,
+      city: facility.city,
+      state: facility.state,
+      country: facility.country,
+    })
+  }
 
-  return { recordId, conditionCount: input.conditions.length, measurementCount: input.measurements.length }
+ run.log('info', 'db', 'persist-completed', { recordId, conditionCount: input.conditions.length, measurementCount: input.measurements.length })
+ return { recordId, conditionCount: input.conditions.length, measurementCount: input.measurements.length }
 }
 
 // Maps a hardcoded demo DesignCondition (src/model/conditions.ts) onto the same

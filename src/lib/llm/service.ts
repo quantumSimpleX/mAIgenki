@@ -149,6 +149,8 @@ export type LmfServiceOptions = {
   telemetry?: Telemetry
   temperature?: number
   timeoutMs?: number
+  responseFormat?: 'text' | 'json'
+  waitForCooldown?: boolean
 }
 
 export type LmfChatOutcome =
@@ -178,7 +180,7 @@ export async function lmfChat(
     { messages, temperature: opts.temperature ?? 0.4 },
     keys,
     undefined,
-    { cooldown: cooldownLedger, telemetry: composeTelemetry(createStoreTelemetry(), opts.telemetry), timeoutMs: opts.timeoutMs },
+    { cooldown: cooldownLedger, telemetry: composeTelemetry(createStoreTelemetry(), opts.telemetry), timeoutMs: opts.timeoutMs, waitForCooldown: opts.waitForCooldown },
   )
 
   if (result.ok) return { ok: true, content: result.result.content }
@@ -207,10 +209,10 @@ export async function lmfEnrich<T>(
 
   const result = await callWithFallback<T>(
     route,
-    { messages, temperature: opts.temperature ?? 0, responseFormat: 'json' },
+    { messages, temperature: opts.temperature ?? 0, responseFormat: opts.responseFormat ?? 'json' },
     keys,
     validate,
-    { cooldown: cooldownLedger, telemetry: composeTelemetry(createStoreTelemetry(), opts.telemetry), timeoutMs: opts.timeoutMs },
+    { cooldown: cooldownLedger, telemetry: composeTelemetry(createStoreTelemetry(), opts.telemetry), timeoutMs: opts.timeoutMs, waitForCooldown: opts.waitForCooldown },
   )
 
   if (result.ok) return { ok: true, value: result.value }

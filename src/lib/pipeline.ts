@@ -13,11 +13,14 @@ import { loadProfile } from './llm/profile'
 import { makeKeyStore } from './llm/keystore'
 import {
   persistEnrichmentResult, putRecordImage, putConditionRecord, getIndexedSetting,
+  putPendingExtractionText, getPendingExtractionText, deletePendingExtractionText,
   type EnrichedInput, type PersistEnrichmentResult,
 } from './db/indexedDb'
 import { redactPIIWithOffsetMap, extractProviderContacts } from './privacy/redact'
 import { renderPagesToCanvas } from './pdf/renderPage'
 import { compressToTarget } from './media/compress'
+import { startPipelineDebugRun } from './debug/pipelineDebug'
+import type { AlphaMask } from './llm/longitudinal'
 
 export type { EnrichedInput }
 
@@ -51,6 +54,10 @@ export type PipelineOptions = {
   // Explicit input kind from the picker; overrides the URI-suffix heuristic
   // (web blob/data URIs often lack a .pdf extension).
   kind?: 'pdf' | 'image'
+  /** Optional decoded body-map alpha mask used to reject transparent coordinates. */
+  coordinateMask?: AlphaMask
+  coordinateMasks?: Record<string, AlphaMask>
+  coordinateMaskResolver?: (system: string) => Promise<AlphaMask | undefined>
   onProgress?: (phase: ProgressPhase, progress: number) => void
 }
 
@@ -291,11 +298,12 @@ function rehydrateConditionContacts(
 
 export async function processHealthRecord(opts: PipelineOptions): Promise<PipelineResult> {
   const {
-    uri, idb, sex, kind, onProgress,
+    uri, idb, sex, kind, onProgress, coordinateMask, coordinateMasks, coordinateMaskResolver,
   } = opts
-  const pipelineStartedAt = Date.now()
+ const debugRun = startPipelineDebugRun()
+ const pipelineStartedAt = Date.now()
   const trace = (event: string, details: Record<string, unknown> = {}): void => {
-    console.info('[health-pipeline]', event, { elapsedMs: Date.now() - pipelineStartedAt, ...details })
+debugRun.log('info', 'pipeline', event, details)
   }
   const traceLlm = (event: LLMTraceEvent): void => {
     if (event.type === 'attempt') {
@@ -390,6 +398,43 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
     localProviderContacts: localProviderContacts.length,
   })
 
+  // Persisted only until enrichment below succeeds (deleted after Step 5's
+  // persistEnrichmentResult) — lets a failed/retried enrichment reuse the
+  // already-extracted, already-redacted text instead of re-running extraction.
+  const recordId = uuid()
+  trace('pending-text-write-started', {
+    recordId,
+    dbVersion: idb.version,
+    hasStore: idb.objectStoreNames.contains('pending_extraction_text'),
+  })
+  let enrichmentText = safeText
+  try {
+    await putPendingExtractionText(idb, {
+      id: recordId,
+      filename: filenameFromUri(uri),
+      page_count: pageCount,
+      extraction_method: extractionMethod,
+      text_blob: new Blob([safeText], { type: 'text/plain' }),
+      created_at: new Date().toISOString(),
+    })
+    trace('pending-text-write-completed', { recordId })
+    // Read back from the store rather than reusing the in-memory `safeText` —
+    // the persisted copy is now the actual input to extraction/enrichment.
+    const stored = await getPendingExtractionText(idb, recordId)
+    trace('pending-text-read-completed', { recordId, usedStoredText: Boolean(stored) })
+    if (stored) enrichmentText = stored
+  } catch (err) {
+    // Non-fatal: this is a resilience/retry feature, not a hard requirement —
+    // a failure here must not block extraction from proceeding on the text
+    // already held in memory.
+    trace('pending-text-write-failed', {
+      recordId,
+      dbVersion: idb.version,
+      hasStore: idb.objectStoreNames.contains('pending_extraction_text'),
+      error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+    })
+  }
+
   // Step 3 — get model chain + API key, enrich with LLM
   const models = opts.models ?? await getModelChain(idb)
   const apiKey = opts.apiKey ?? (await getIndexedSetting(idb, 'openrouter_api_key')) ?? ''
@@ -408,44 +453,35 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   })
   const enrichmentStartedAt = Date.now()
   const enrichment = profile && profile.tier > 0 && profile.activeProviderId && profile.model
-    ? await enrichFromText(safeText, apiKey, models, {
+    ? await enrichFromText(enrichmentText, apiKey, models, {
       db: idb,
       profile,
       keys: await makeKeyStore(),
       timeoutMs: profile.activeProviderId === 'gemini' ? 180_000 : undefined,
       onTrace: traceLlm,
       pageBreaks,
-    }, (completed, total) => {
-      trace('condition-enrichment-progress', { completed, total })
+    }, (completed, total, name) => {
+      trace('condition-extracted', { completed, total, name })
       report(1, 0.4 + (total > 0 ? 0.35 * completed / total : 0.35))
     })
     : profile
-      ? await enrichFromText(safeText, apiKey, models, {
+      ? await enrichFromText(enrichmentText, apiKey, models, {
         db: idb,
         profile,
         onTrace: traceLlm,
         pageBreaks,
-      }, (completed, total) => {
-        trace('condition-enrichment-progress', { completed, total })
+      }, (completed, total, name) => {
+        trace('condition-extracted', { completed, total, name })
         report(1, 0.4 + (total > 0 ? 0.35 * completed / total : 0.35))
       })
-      : await enrichFromText(safeText, apiKey, models)
-  const { conditions: llmConditions, measurements, providers: llmProviders = [] } = enrichment
+      : await enrichFromText(enrichmentText, apiKey, models)
+  const { conditions: llmConditions, measurements, providers: llmProviders = [], facilities: llmFacilities = [] } = enrichment
   trace('enrichment-completed', {
     conditions: llmConditions.length,
     measurements: measurements.length,
     providers: llmProviders.length,
     durationMs: Date.now() - enrichmentStartedAt,
   })
-  // A record with one failing chunk (Task 3.5's partial-failure tolerance)
-  // still produces a usable result — surface which sections were dropped for
-  // diagnostics rather than silently losing them.
-  if (enrichment.partialFailures && enrichment.partialFailures.length > 0) {
-    trace('enrichment-partial-failures', {
-      failedSections: enrichment.partialFailures.length,
-      failures: enrichment.partialFailures,
-    })
-  }
   const providers = llmProviders.map((provider, index) => {
     const providerName = String(provider.name ?? '').trim()
     const local = contactForProvider(providerName, index, localProviderContacts)
@@ -485,13 +521,31 @@ export async function processHealthRecord(opts: PipelineOptions): Promise<Pipeli
   // merged into `providers` above).
   report(3, 0.9)
   const result = await persistEnrichmentResult(idb, {
+    recordId,
     filename: filenameFromUri(uri),
     pageCount,
     extractionMethod,
     conditions: allConditions,
     measurements,
     providers,
+    facilities: llmFacilities,
+    coordinateMask,
+    coordinateMasks,
+    coordinateMaskResolver,
   })
+  // The redacted text's job (surviving a failed/retried enrichment) is done —
+  // every fact worth keeping is now structured in conditions/measurements/etc.
+  // Non-fatal: the record above is already safely persisted, so a cleanup
+  // failure here must never take the rest of the pipeline (image capture,
+  // the final "completed" trace, the return) down with it.
+  try {
+    await deletePendingExtractionText(idb, recordId)
+  } catch (err) {
+    trace('pending-text-delete-failed', {
+      recordId,
+      error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+    })
+  }
   trace('persistence-completed', {
     recordId: result.recordId,
     conditions: result.conditionCount,

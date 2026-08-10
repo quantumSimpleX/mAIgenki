@@ -12,6 +12,8 @@ import { QSWordmark } from '@/components/QSWordmark'
 import { GearIcon } from '@/components/GearIcon'
 import { IS_DESKTOP, IS_WEB, S } from '@/lib/scale'
 import { openQSWebsite } from '@/lib/links'
+import { LlmOnboarding } from '@/components/LlmOnboarding'
+import { useLlmConnection } from '@/hooks/useLlmConnection'
 
 const C = {
   bg: '#FAFAF7',
@@ -96,7 +98,8 @@ export default function UploadScreen() {
   const startAnalyze = useAppStore((s) => s.startAnalyze)
   const startDemoAnalyze = useAppStore((s) => s.startDemoAnalyze)
   const setPendingUpload = useAppStore((s) => s.setPendingUpload)
-  const [conditions] = useConditions()
+ const [conditions] = useConditions()
+ const llmConnection = useLlmConnection()
   const { height: winH } = useWindowDimensions()
 
   // Live stats from the seeded conditions (falls back to bundled demo data when
@@ -199,6 +202,7 @@ export default function UploadScreen() {
             Upload health PDFs. Every condition mapped to anatomy — across time.
           </Text>
 
+          {llmConnection.status === 'ready' ? <>
           {/* Upload zone — 3 columns */}
           <View style={styles.uploadZone}>
             <View style={styles.uploadCols}>
@@ -242,6 +246,7 @@ export default function UploadScreen() {
               </Text>
             </View>
           </View>
+          </> : <LlmOnboarding onReady={llmConnection.reload} />}
 
           {/* Privacy badge */}
           <View style={styles.privacyBadge}>

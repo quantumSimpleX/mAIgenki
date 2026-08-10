@@ -86,7 +86,11 @@ function parseRetryAfterMs(headers: Headers | Record<string, string> | null | un
 }
 
 type FetchOutcome =
-  | { kind: 'success'; result: ChatResult }
+  // rawTextPreview is only set when parseResponse produced empty content —
+  // a snippet of the actual HTTP body, since an empty ChatResult.content
+  // alone doesn't say whether the server sent nothing, an unparseable body,
+  // or valid-but-shaped-wrong JSON.
+  | { kind: 'success'; result: ChatResult; rawTextPreview?: string }
   | { kind: 'aborted' }
   | {
       kind: 'failure'
@@ -119,11 +123,53 @@ async function doFetch(
       body: JSON.stringify(wire.body),
       signal: controller.signal,
     })
-    const json = await res.json().catch(() => ({}))
+    // A response's headers/status can resolve successfully before its body
+    // has finished streaming — if the timeout fires while res.text() is
+    // still reading, that read rejects with an AbortError too. Silently
+    // swallowing it here (as this used to) turns a real timeout into a fake
+    // "empty but successful" response instead of a classified failure.
+    let rawText: string
+    try {
+      rawText = await res.text()
+    } catch (bodyErr) {
+      if (callerSignal?.aborted) {
+        return { kind: 'aborted' }
+      }
+      if (controller.signal.aborted) {
+        return {
+          kind: 'failure',
+          errorKind: 'timeout',
+          status: null,
+          message: 'Request timed out while reading the response body.',
+          retryAfterMs: null,
+          rawMessage: 'Request timed out while reading the response body.',
+          responseFormatPresent: false,
+          tokenParamMaxTokens: false,
+        }
+      }
+      const message = bodyErr instanceof Error ? bodyErr.message : String(bodyErr)
+      return {
+        kind: 'failure',
+        errorKind: 'network',
+        status: null,
+        message,
+        retryAfterMs: null,
+        rawMessage: message,
+        responseFormatPresent: false,
+        tokenParamMaxTokens: false,
+      }
+    }
+    let json: unknown = {}
+    try {
+      json = rawText ? JSON.parse(rawText) : {}
+    } catch {
+      // leave json as {} — parseResponse degrades to empty content, and
+      // rawTextPreview below carries the actual unparseable body forward.
+    }
 
     if (res.ok) {
       const result = adapter.parseResponse(candidate.spec, candidate.model, json)
-      return { kind: 'success', result }
+      return { kind: 'success', result, rawTextPreview: result.content ? undefined : rawText.slice(0, 500) }
     }
 
     const classified = adapter.classifyError(candidate.spec, res.status, json, res.headers)
@@ -172,7 +218,7 @@ async function doFetch(
   }
 }
 
-export async function callWithFallback<T = string>(
+async function attemptRoute<T = string>(
   route: Route,
   req: ChatRequest,
   keys: KeyStore,
@@ -274,7 +320,12 @@ export async function callWithFallback<T = string>(
     if (validate) {
       const value = validate(outcome.result.content)
       if (value === null || value === undefined) {
-        const f = makeFailure(candidate, 'validation', null, 'Response failed validation.', null, apiKey)
+        // finishReason/usage come through even on a "successful" (HTTP 200)
+        // response — surfacing them here is the only way to tell an empty/
+        // truncated completion (e.g. finishReason "length" = ran out of
+        // output budget) apart from a model that just answered wrong-shaped.
+        const diagnostics = `finishReason=${outcome.result.finishReason ?? 'null'}, contentLength=${outcome.result.content.length}, promptTokens=${outcome.result.usage?.promptTokens ?? 'null'}, completionTokens=${outcome.result.usage?.completionTokens ?? 'null'}${outcome.rawTextPreview !== undefined ? `, rawTextPreview=${JSON.stringify(outcome.rawTextPreview)}` : ''}`
+        const f = makeFailure(candidate, 'validation', null, `Response failed validation (${diagnostics}).`, null, apiKey)
         failures.push(f)
         telemetry?.onFailure?.(f)
         continue
@@ -289,4 +340,45 @@ export async function callWithFallback<T = string>(
 
   telemetry?.onExhausted?.(failures)
   return { ok: false, failures }
+}
+
+// A shared, module-level cooldown ledger (service.ts's cooldownLedger) means
+// a burst of calls in quick succession — e.g. document chunking firing
+// several extraction calls close together — can drive every candidate in
+// the route into cooldown simultaneously, so a later call finds all of them
+// already cooling and fails without a single real attempt. Waiting out the
+// shortest cooldown and trying once more turns that into a slow success
+// instead of a guaranteed failure, for callers willing to accept the wait.
+const MAX_COOLDOWN_WAIT_MS = 65_000
+
+export async function callWithFallback<T = string>(
+  route: Route,
+  req: ChatRequest,
+  keys: KeyStore,
+  validate?: (content: string) => T | null | undefined,
+  opts: EngineOptions = {},
+): Promise<LMFResult<T>> {
+  const first = await attemptRoute(route, req, keys, validate, opts)
+  if (first.ok || !opts.waitForCooldown) return first
+
+  // Only wait when the whole route was blocked purely by cooldown — a mix of
+  // real failures (auth, validation, etc.) alongside cooldown skips means
+  // waiting wouldn't fix the actual problem, so fail normally instead.
+  const allCooldownSkips = first.failures.length === route.length
+    && first.failures.every((f) => f.message === 'Candidate is on cooldown from a previous failure.')
+  if (!allCooldownSkips) return first
+
+  const cooldown = opts.cooldown ?? new Map<string, number>()
+  const now = Date.now()
+  const remainingMs = route.map((candidate) => Math.max(
+    (cooldown.get(candidate.providerId) ?? 0) - now,
+    (cooldown.get(modelCooldownKey(candidate)) ?? 0) - now,
+  ))
+  // waitMs can already be <= 0 here (cooldown expired between the failed
+  // attempt above and this check) — that's not "give up", it means at least
+  // one candidate should already be retriable, so skip the sleep and retry
+  // right away rather than returning a now-stale failure.
+  const waitMs = Math.min(Math.min(...remainingMs), MAX_COOLDOWN_WAIT_MS)
+  if (waitMs > 0) await sleep(waitMs)
+  return attemptRoute(route, req, keys, validate, opts)
 }

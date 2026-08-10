@@ -11,11 +11,13 @@ function candidate(model: string, spec = openrouterSpec, providerId = spec.id): 
 }
 
 function okResponse(content: string) {
+  const body = { choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }
   return {
     ok: true,
     status: 200,
     headers: new Headers(),
-    json: async () => ({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 1, completion_tokens: 1 } }),
+    json: async () => body,
+    text: async () => JSON.stringify(body),
   }
 }
 
@@ -25,6 +27,7 @@ function errorResponse(status: number, body: Record<string, unknown> = {}, heade
     status,
     headers: new Headers(headers),
     json: async () => body,
+    text: async () => JSON.stringify(body),
   }
 }
 
@@ -76,12 +79,10 @@ describe('callWithFallback', () => {
     const fetchImpl = jest
       .fn()
       .mockResolvedValueOnce(errorResponse(401, { error: { message: 'bad key' } }))
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        headers: new Headers(),
-        json: async () => ({ content: [{ type: 'text', text: 'from anthropic' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }),
-      })
+      .mockResolvedValueOnce((() => {
+        const body = { content: [{ type: 'text', text: 'from anthropic' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }
+        return { ok: true, status: 200, headers: new Headers(), json: async () => body, text: async () => JSON.stringify(body) }
+      })())
     const route: Route = [
       candidate('model-a', openrouterSpec, 'openrouter'),
       candidate('model-b', openrouterSpec, 'openrouter'),
@@ -233,11 +234,13 @@ describe('callWithFallback', () => {
   })
 
   it('dispatches to the gemini adapter for a gemini candidate', async () => {
+    const geminiBody = { candidates: [{ content: { parts: [{ text: 'from gemini' }] }, finishReason: 'STOP' }] }
     const fetchImpl = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,
       headers: new Headers(),
-      json: async () => ({ candidates: [{ content: { parts: [{ text: 'from gemini' }] }, finishReason: 'STOP' }] }),
+      json: async () => geminiBody,
+      text: async () => JSON.stringify(geminiBody),
     })
     const route: Route = [candidate('gemini-x', geminiSpec, 'gemini')]
     const result = await callWithFallback(route, req, makeKeys(), undefined, { fetchImpl })

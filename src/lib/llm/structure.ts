@@ -1,4 +1,5 @@
 import { callLLMWithFallback, type LLMTraceEvent } from './client'
+import { STRUCTURE_PROMPT as EDITABLE_STRUCTURE_PROMPT } from './prompts'
 import type { KeyStore, LMFProfile } from '@/lib/lmf'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -13,6 +14,7 @@ export type EnrichRoutingOptions = {
   keys?: KeyStore
   timeoutMs?: number
   onTrace?: (event: LLMTraceEvent) => void
+  waitForCooldown?: boolean
   // Task 3.1's per-page character offsets, threaded through from
   // pipeline.ts's extraction step so analyzeRecordStructure can resolve each
   // section's pageStart/pageEnd. Not a callLLMWithFallback option — enrich.ts
@@ -58,22 +60,6 @@ const SECTION_TYPES: SectionType[] = ['visit', 'problem_list', 'labs', 'imaging'
 const ORGANIZATIONS = ['chronological', 'problem_based', 'mixed']
 
 // ── Prompt ────────────────────────────────────────────────────────────────────
-
-const STRUCTURE_PROMPT = `You are the structure-analysis stage of a clinical record extraction pipeline.
-Read the entire medical record and segment it into sections so a later stage can process each section independently.
-
-For each section, report:
-- "heading": a short verbatim label for the section (a heading line if present, otherwise a brief description of its content)
-- "startOffset"/"endOffset": your best-effort character offsets into the record text where the section begins/ends (a later stage re-verifies these — approximate is fine)
-- "inferredDate": the date this section's content is associated with (YYYY-MM-DD), or null if undated
-- "sectionType": one of "visit", "problem_list", "labs", "imaging", "summary", "other"
-- "imageWorthy": true only if the section describes or embeds an X-ray, scan, photo, ECG strip, or other image-bearing content worth capturing as a picture
-
-Also report the record's overall "organization": "chronological" (dated visit notes in order), "problem_based" (grouped by condition/problem), or "mixed".
-
-Sections must be non-overlapping and cover the whole record in order. Return only JSON with this shape:
-{"organization":"chronological | problem_based | mixed","sections":[{"heading":"...","startOffset":0,"endOffset":100,"inferredDate":"YYYY-MM-DD or null","sectionType":"visit","imageWorthy":false}]}
-Never invent content. Never recommend treatment or medication.`
 
 // ── Validate callback ─────────────────────────────────────────────────────────
 
@@ -145,6 +131,7 @@ export async function analyzeRecordStructure(
   routing?: EnrichRoutingOptions,
   pageBreaks?: number[],
 ): Promise<RecordStructure> {
+ const STRUCTURE_PROMPT = EDITABLE_STRUCTURE_PROMPT
   const result = await callLLMWithFallback<RawStructure>({
     messages: [
       { role: 'system', content: STRUCTURE_PROMPT },

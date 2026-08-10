@@ -8,18 +8,22 @@ const mockFetch = jest.fn()
 const initialStoreState = { ...useAppStore.getState() }
 
 function okResponse(content: string) {
+  const body = { choices: [{ message: { content } }] }
   return Promise.resolve({
     ok: true,
-    json: () => Promise.resolve({ choices: [{ message: { content } }] }),
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
   })
 }
 
 function errorResponse(status: number, message: string) {
+  const body = { error: { message } }
   return Promise.resolve({
     ok: false,
     status,
     headers: new Map(),
-    json: () => Promise.resolve({ error: { message } }),
+    json: () => Promise.resolve(body),
+    text: () => Promise.resolve(JSON.stringify(body)),
   })
 }
 
