@@ -1,6 +1,6 @@
 import type { KeyStore, LMFProfile } from '@/lib/lmf'
-import { saveProfile } from './profile'
-import { loadProfile } from './profile'
+import { saveProfile , loadProfile } from './profile'
+
 import { BUILT_IN_PROVIDERS, validateKey } from '@/lib/lmf'
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
@@ -29,7 +29,11 @@ export async function importConnectionBundle(db: IDBDatabase, keyStore: KeyStore
   const previousKey = await keyStore.get('openrouter')
   const profile: LMFProfile = { tier: 1, activeProviderId: 'openrouter', model: bundle.model, customBaseURL: null, fallbackToFree: true, keySource: 'oauth', verifiedAt: new Date().toISOString() }
   try { await keyStore.set('openrouter', bundle.apiKey); await saveProfile(db, profile); return profile } catch (error) {
-    try { previousKey ? await keyStore.set('openrouter', previousKey) : await keyStore.delete('openrouter'); await saveProfile(db, previousProfile) } catch { /* best-effort rollback */ }
+    try {
+      if (previousKey) await keyStore.set('openrouter', previousKey)
+      else await keyStore.delete('openrouter')
+      await saveProfile(db, previousProfile)
+    } catch { /* best-effort rollback */ }
     throw error
   }
 }

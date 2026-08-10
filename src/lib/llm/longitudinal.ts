@@ -28,7 +28,7 @@ export type LongitudinalExtraction = {
   organization: 'chronological' | 'problem_based' | 'mixed'
   report_context: { providers: NonNullable<ConditionInput['provider']>[]; facilities: string[] }
   conditions: LongitudinalCondition[]
-  measurements: Array<{ name: string; value_numeric: number; unit: string; date: string | null; inferred_from_structure: string[] }>
+  measurements: { name: string; value_numeric: number; unit: string; date: string | null; inferred_from_structure: string[] }[]
 }
 
 export function earliestDate(values: (string | null | undefined)[]): string | null {

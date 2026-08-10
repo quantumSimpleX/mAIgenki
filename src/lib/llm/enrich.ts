@@ -595,7 +595,7 @@ export type EnrichmentResult = {
 /** Deterministic longitudinal merge: repeated mentions retain the earliest supported date. */
 export function mergeLongitudinalConditions(conditions: ConditionInput[]): ConditionInput[] {
   const result = new Map<string, ConditionInput>()
-  const date = (values: Array<string | null | undefined>): string | null => values.filter((v): v is string => Boolean(v && /^\d{4}(-\d{2}-\d{2})?$/.test(v))).sort()[0] ?? null
+  const date = (values: (string | null | undefined)[]): string | null => values.filter((v): v is string => Boolean(v && /^\d{4}(-\d{2}-\d{2})?$/.test(v))).sort()[0] ?? null
   for (const condition of conditions) {
     const key = `${condition.name_medical.trim().toLowerCase()}|${condition.system.trim().toLowerCase()}`
     const prior = result.get(key)
