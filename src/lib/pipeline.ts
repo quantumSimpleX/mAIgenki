@@ -13,6 +13,7 @@ import { loadProfile } from './llm/profile'
 import { makeKeyStore } from './llm/keystore'
 import {
   persistEnrichmentResult, putRecordImage, putConditionRecord, getIndexedSetting,
+  putPendingExtractionText, getPendingExtractionText, deletePendingExtractionText,
   type EnrichedInput, type PersistEnrichmentResult,
 } from './db/indexedDb'
 import { redactPIIWithOffsetMap, extractProviderContacts } from './privacy/redact'
@@ -397,6 +398,43 @@ debugRun.log('info', 'pipeline', event, details)
     localProviderContacts: localProviderContacts.length,
   })
 
+  // Persisted only until enrichment below succeeds (deleted after Step 5's
+  // persistEnrichmentResult) — lets a failed/retried enrichment reuse the
+  // already-extracted, already-redacted text instead of re-running extraction.
+  const recordId = uuid()
+  trace('pending-text-write-started', {
+    recordId,
+    dbVersion: idb.version,
+    hasStore: idb.objectStoreNames.contains('pending_extraction_text'),
+  })
+  let enrichmentText = safeText
+  try {
+    await putPendingExtractionText(idb, {
+      id: recordId,
+      filename: filenameFromUri(uri),
+      page_count: pageCount,
+      extraction_method: extractionMethod,
+      text_blob: new Blob([safeText], { type: 'text/plain' }),
+      created_at: new Date().toISOString(),
+    })
+    trace('pending-text-write-completed', { recordId })
+    // Read back from the store rather than reusing the in-memory `safeText` —
+    // the persisted copy is now the actual input to extraction/enrichment.
+    const stored = await getPendingExtractionText(idb, recordId)
+    trace('pending-text-read-completed', { recordId, usedStoredText: Boolean(stored) })
+    if (stored) enrichmentText = stored
+  } catch (err) {
+    // Non-fatal: this is a resilience/retry feature, not a hard requirement —
+    // a failure here must not block extraction from proceeding on the text
+    // already held in memory.
+    trace('pending-text-write-failed', {
+      recordId,
+      dbVersion: idb.version,
+      hasStore: idb.objectStoreNames.contains('pending_extraction_text'),
+      error: err instanceof Error ? { name: err.name, message: err.message, stack: err.stack } : String(err),
+    })
+  }
+
   // Step 3 — get model chain + API key, enrich with LLM
   const models = opts.models ?? await getModelChain(idb)
   const apiKey = opts.apiKey ?? (await getIndexedSetting(idb, 'openrouter_api_key')) ?? ''
@@ -415,28 +453,28 @@ debugRun.log('info', 'pipeline', event, details)
   })
   const enrichmentStartedAt = Date.now()
   const enrichment = profile && profile.tier > 0 && profile.activeProviderId && profile.model
-    ? await enrichFromText(safeText, apiKey, models, {
+    ? await enrichFromText(enrichmentText, apiKey, models, {
       db: idb,
       profile,
       keys: await makeKeyStore(),
       timeoutMs: profile.activeProviderId === 'gemini' ? 180_000 : undefined,
       onTrace: traceLlm,
       pageBreaks,
-    }, (completed, total) => {
-      trace('condition-enrichment-progress', { completed, total })
+    }, (completed, total, name) => {
+      trace('condition-extracted', { completed, total, name })
       report(1, 0.4 + (total > 0 ? 0.35 * completed / total : 0.35))
     })
     : profile
-      ? await enrichFromText(safeText, apiKey, models, {
+      ? await enrichFromText(enrichmentText, apiKey, models, {
         db: idb,
         profile,
         onTrace: traceLlm,
         pageBreaks,
-      }, (completed, total) => {
-        trace('condition-enrichment-progress', { completed, total })
+      }, (completed, total, name) => {
+        trace('condition-extracted', { completed, total, name })
         report(1, 0.4 + (total > 0 ? 0.35 * completed / total : 0.35))
       })
-      : await enrichFromText(safeText, apiKey, models)
+      : await enrichFromText(enrichmentText, apiKey, models)
   const { conditions: llmConditions, measurements, providers: llmProviders = [], facilities: llmFacilities = [] } = enrichment
   trace('enrichment-completed', {
     conditions: llmConditions.length,
@@ -444,15 +482,6 @@ debugRun.log('info', 'pipeline', event, details)
     providers: llmProviders.length,
     durationMs: Date.now() - enrichmentStartedAt,
   })
-  // A record with one failing chunk (Task 3.5's partial-failure tolerance)
-  // still produces a usable result — surface which sections were dropped for
-  // diagnostics rather than silently losing them.
-  if (enrichment.partialFailures && enrichment.partialFailures.length > 0) {
-    trace('enrichment-partial-failures', {
-      failedSections: enrichment.partialFailures.length,
-      failures: enrichment.partialFailures,
-    })
-  }
   const providers = llmProviders.map((provider, index) => {
     const providerName = String(provider.name ?? '').trim()
     const local = contactForProvider(providerName, index, localProviderContacts)
@@ -492,6 +521,7 @@ debugRun.log('info', 'pipeline', event, details)
   // merged into `providers` above).
   report(3, 0.9)
   const result = await persistEnrichmentResult(idb, {
+    recordId,
     filename: filenameFromUri(uri),
     pageCount,
     extractionMethod,
@@ -503,6 +533,19 @@ debugRun.log('info', 'pipeline', event, details)
     coordinateMasks,
     coordinateMaskResolver,
   })
+  // The redacted text's job (surviving a failed/retried enrichment) is done —
+  // every fact worth keeping is now structured in conditions/measurements/etc.
+  // Non-fatal: the record above is already safely persisted, so a cleanup
+  // failure here must never take the rest of the pipeline (image capture,
+  // the final "completed" trace, the return) down with it.
+  try {
+    await deletePendingExtractionText(idb, recordId)
+  } catch (err) {
+    trace('pending-text-delete-failed', {
+      recordId,
+      error: err instanceof Error ? { name: err.name, message: err.message } : String(err),
+    })
+  }
   trace('persistence-completed', {
     recordId: result.recordId,
     conditions: result.conditionCount,

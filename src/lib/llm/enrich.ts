@@ -1,8 +1,9 @@
 import { callLLMWithFallback, DEFAULT_MODELS } from './client'
 import { analyzeRecordStructure, type EnrichRoutingOptions } from './structure'
-import { chunkRecordBySections, type TextChunk } from './chunk'
+import { chunkRecordBySections } from './chunk'
 import { runWithConcurrency } from './pool'
-import { CHUNK_EXTRACTION_PROMPT as EDITABLE_CHUNK_EXTRACTION_PROMPT, LONGITUDINAL_EXTRACTION_PROMPT, P09_WHOLE_DOCUMENT_EXTRACTION_PROMPT } from './prompts'
+import { P09_WHOLE_DOCUMENT_EXTRACTION_PROMPT, CONDITION_ENRICHMENT_PROMPT } from './prompts'
+import { pipelineDebug } from '../debug/pipelineDebug'
 import type { ConditionStatus } from '@/model/health'
 
 export type { EnrichRoutingOptions } from './structure'
@@ -46,19 +47,339 @@ export function parseLongitudinalResponse(content: string): EnrichmentResult | n
   }
 }
 
-async function extractWholeDocument(text: string, apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<EnrichmentResult | null> {
-  const result = await callLLMWithFallback<EnrichmentResult>({
-    messages: [{ role: 'system', content: P09_WHOLE_DOCUMENT_EXTRACTION_PROMPT }, { role: 'user', content: text }],
+// ── Step 2: extraction (single whole-document LLM call) ────────────────────────
+// Input is the record's redacted full text (persisted as pending_extraction_text
+// by pipeline.ts). Output is deliberately minimal — one entry per unique
+// condition with just its name, earliest supported date, and notes/evidence —
+// plus measurements. No organ/system/anatomy/provider here; that's Step 3.
+
+export type ConditionSummary = {
+  name_medical: string
+  earliest_date: string | null
+  notes: string | null
+  // Resolved per condition: the condition's own explicit attribution if the
+  // text names one, otherwise inherited from the document/report-level
+  // provider or facility (a record often states the clinician/institution
+  // once rather than repeating it for every condition) — inheritance is
+  // resolved here in the parser, not left for Step 3 to figure out.
+  provider: ProviderInput | null
+  facility: FacilityInput | null
+}
+
+type ExtractionStepResult = {
+  conditions: ConditionSummary[]
+  measurements: MeasurementInput[]
+}
+
+function isValidConditionSummaryShape(value: unknown): value is { name_medical: string; earliest_date: string | null; notes: string | null; provider?: unknown; facility?: unknown } {
+  if (!isRecord(value)) return false
+  return typeof value.name_medical === 'string' && isNullableString(value.earliest_date) && isNullableString(value.notes)
+}
+
+// Logged whenever a model's response fails validation — the engine only
+// records "Response failed validation.", with no indication of whether the
+// JSON was truncated, malformed, or just shaped wrong, so that's opaque
+// without this. Preview only (not the full response) to keep the debug log
+// readable for a document-sized response.
+function logExtractionValidationFailure(reason: string, content: string): void {
+  // JSON.parse's SyntaxError message ends with "at position N" for a syntax
+  // error (not for "Unexpected end of JSON input", which has no position) —
+  // when present, a window around N is far more useful than head/tail alone,
+  // since N is usually deep inside content neither of those covers.
+  const positionMatch = /at position (\d+)/.exec(reason)
+  const errorPosition = positionMatch ? Number(positionMatch[1]) : null
+  pipelineDebug('warn', 'llm', 'extraction-validation-failed', {
+    reason,
+    contentLength: content.length,
+    contentHead: content.slice(0, 500),
+    contentTail: content.length > 500 ? content.slice(-300) : undefined,
+    ...(errorPosition !== null ? { contentAroundError: content.slice(Math.max(0, errorPosition - 150), errorPosition + 150) } : {}),
+  })
+}
+
+function isValidMeasurementLine(value: Record<string, unknown>): value is { name: string; value_numeric: number; unit: string; date: string | null } {
+  return typeof value.name === 'string' && typeof value.value_numeric === 'number' && typeof value.unit === 'string' && isNullableString(value.date)
+}
+
+// NDJSON: one JSON object per line, dispatched by a "type" field. A single
+// malformed or unrecognized line is skipped, not fatal to the rest — the
+// whole point of this format over one big JSON object/array is that one
+// model slip (or a truncated final line) doesn't discard everything else.
+export function parseExtractionStepResponse(content: string): ExtractionStepResult | null {
+  const cleaned = content.replace(/```(?:json|ndjson)?\n?|\n?```/g, '').trim()
+  const lines = cleaned.split('\n').map((line) => line.trim()).filter(Boolean)
+
+  const rawConditions: { name_medical: string; earliest_date: string | null; notes: string | null; provider?: unknown; facility?: unknown }[] = []
+  const measurements: MeasurementInput[] = []
+  const reportProviders: ProviderInput[] = []
+  const reportFacilities: FacilityInput[] = []
+  let skippedLines = 0
+
+  for (const line of lines) {
+    let value: unknown
+    try {
+      value = JSON.parse(line)
+    } catch {
+      skippedLines += 1
+      continue
+    }
+    if (!isRecord(value) || typeof value.type !== 'string') {
+      skippedLines += 1
+      continue
+    }
+    switch (value.type) {
+      case 'condition':
+        if (isValidConditionSummaryShape(value)) rawConditions.push(value)
+        else skippedLines += 1
+        break
+      case 'measurement':
+        if (isValidMeasurementLine(value)) measurements.push(value)
+        else skippedLines += 1
+        break
+      case 'report_provider':
+        if (isValidProviderInput(value)) reportProviders.push(value)
+        else skippedLines += 1
+        break
+      case 'report_facility':
+        if (isValidFacilityInput(value)) reportFacilities.push(value)
+        else skippedLines += 1
+        break
+      default:
+        skippedLines += 1
+    }
+  }
+
+  if (rawConditions.length === 0 && measurements.length === 0) {
+    logExtractionValidationFailure(
+      `no usable NDJSON lines (${lines.length} total lines, ${skippedLines} malformed/unrecognized)`,
+      content,
+    )
+    return null
+  }
+
+  if (skippedLines > 0) {
+    pipelineDebug('warn', 'llm', 'extraction-lines-skipped', {
+      skippedLines,
+      totalLines: lines.length,
+      usableConditions: rawConditions.length,
+      usableMeasurements: measurements.length,
+    })
+  }
+
+  const reportProvider = reportProviders[0] ?? null
+  const reportFacility = reportFacilities[0] ?? null
+
+  const conditions = rawConditions.map((raw) => {
+    const ownProvider = isValidProviderInput(raw.provider) ? raw.provider : null
+    const ownFacility = isValidFacilityInput(raw.facility) ? raw.facility : null
+    return {
+      name_medical: raw.name_medical,
+      earliest_date: raw.earliest_date,
+      notes: raw.notes,
+      provider: ownProvider ?? reportProvider,
+      facility: ownFacility ?? reportFacility,
+    }
+  })
+  return { conditions, measurements }
+}
+
+// A single whole-document call (tens of thousands of characters in, a long
+// NDJSON completion out) turned out to be genuinely too much for the
+// free-tier model pool to handle reliably — not a formatting problem (NDJSON
+// already fixed that class of failure), but real timeouts, rate limits, and
+// degenerate output on the input size itself. Splitting into chunks and
+// extracting each independently (then merging) is the fix: each call is
+// small enough that even weak/throttled free models handle it, and one
+// chunk's total failure no longer takes the whole record down with it.
+const EXTRACTION_TIMEOUT_MS = 180_000
+const CHUNK_MAX_CHARS = 20_000
+// Sequential, not concurrent — free-tier per-minute rate limits are what we
+// were actually hitting (a shared, module-level cooldown ledger means
+// several chunks firing at once can drive every model into cooldown
+// simultaneously), so one chunk at a time trades some wall-clock time for
+// meaningfully fewer 429s in the first place.
+const CHUNK_POOL_SIZE = 1
+
+async function extractConditionSummariesFromChunk(chunkText: string, apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<ExtractionStepResult | null> {
+  const result = await callLLMWithFallback<ExtractionStepResult>({
+    messages: [{ role: 'system', content: P09_WHOLE_DOCUMENT_EXTRACTION_PROMPT }, { role: 'user', content: chunkText }],
     apiKey,
     models,
-    label: 'enrichment-longitudinal',
+    label: 'extraction-condition-list',
     db: routing.db,
     profile: routing.profile,
     keys: routing.keys,
+    // No 180s floor here — a ~20K-character chunk doesn't need it, and
+    // forcing it would just make a genuinely-stuck chunk block longer.
     timeoutMs: routing.timeoutMs,
-    validate: parseLongitudinalResponse,
+    onTrace: routing.onTrace,
+    // NDJSON, not a single JSON object — the provider's strict JSON mode
+    // (the default for a validate()-backed call) forbids that shape.
+    responseFormat: 'text',
+    // A chunked document fires several of these calls close together —
+    // worth waiting out a shared cooldown rather than failing immediately.
+    waitForCooldown: true,
+    validate: parseExtractionStepResponse,
   })
   return result.ok ? result.value : null
+}
+
+// Prepended to every chunk (including the first) — patient demographics, the
+// primary ordering clinician, and the facility almost always appear once, up
+// front, in a real medical record. Without this, a chunk from later in the
+// document that never restates them would silently lose that attribution
+// entirely, even though a human reader would infer it from the document's
+// hierarchy. This is a heuristic, not a full fix for every kind of
+// cross-section inheritance — but it covers the dominant real-world case for
+// near-zero cost (no extra LLM call).
+const DOCUMENT_HEADER_CHARS = 1500
+
+function withDocumentHeader(chunkText: string, header: string): string {
+  if (!header) return chunkText
+  return `Document opening, for context only (the overall patient/provider/facility a real record usually states once, not necessarily restated in the section below):\n${header}\n\n---\n\nSection to extract from:\n${chunkText}`
+}
+
+async function extractConditionSummaries(text: string, apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<ExtractionStepResult | null> {
+  // Section-aware chunking (respects the document's actual structure, so a
+  // chunk boundary lands between sections, not mid-hierarchy) when structure
+  // analysis succeeds. analyzeRecordStructure already degrades to a single
+  // full-text section on failure (see structure.ts's singleSectionFallback),
+  // which chunkRecordBySections then splits by pure size/paragraph boundary
+  // the same way it always did — no separate fallback path needed here.
+  const structure = await analyzeRecordStructure(
+    text, apiKey, models,
+    { ...routing, timeoutMs: Math.max(routing.timeoutMs ?? 0, EXTRACTION_TIMEOUT_MS), waitForCooldown: true },
+  )
+  const chunks = chunkRecordBySections(text, structure, CHUNK_MAX_CHARS)
+  const documentHeader = text.slice(0, DOCUMENT_HEADER_CHARS)
+
+  const settled = await runWithConcurrency(chunks, CHUNK_POOL_SIZE, (chunk) => (
+    extractConditionSummariesFromChunk(withDocumentHeader(chunk.text, documentHeader), apiKey, models, routing)
+  ))
+
+  const conditions: ConditionSummary[] = []
+  const measurements: MeasurementInput[] = []
+  let succeededChunks = 0
+  settled.forEach((outcome) => {
+    if (outcome.status === 'fulfilled' && outcome.value) {
+      succeededChunks += 1
+      conditions.push(...outcome.value.conditions)
+      measurements.push(...outcome.value.measurements)
+    }
+  })
+
+  // Every chunk failed — nothing usable came out of the whole record, same
+  // "total wipeout" semantics the single-call version had.
+  if (succeededChunks === 0) return null
+  return { conditions, measurements }
+}
+
+// ── Step 3: enrichment (batched — one call for every condition) ────────────────
+// Takes Step 2's {name, earliest_date, notes} list and fills out the full
+// ConditionInput per condition. Almost none of this needs the LLM — only
+// normalized organ/system/anatomical_location/laterality, since that requires
+// medical-terminology understanding the name/notes alone don't give us
+// heuristically. Everything else is a direct, local mapping from the summary.
+// One call for every condition (not one call each) — with up to a few dozen
+// conditions, N separate calls hammers the free-tier per-minute rate limit
+// hard (each one is small, but the LLM-call *count* is what's throttled).
+
+type ConditionAnatomy = {
+  system: string
+  organ: string | null
+  anatomical_location: string | null
+  laterality: string | null
+}
+
+function isValidIndexedAnatomyLine(value: unknown): value is ConditionAnatomy & { index: number } {
+  if (!isRecord(value)) return false
+  return typeof value.index === 'number'
+    && typeof value.system === 'string'
+    && isNullableString(value.organ)
+    && isNullableString(value.anatomical_location)
+    && isNullableString(value.laterality)
+}
+
+// NDJSON, same reasoning as parseExtractionStepResponse: one malformed/missing
+// line just leaves that one condition unplaced, not the whole batch.
+function parseConditionAnatomyBatch(content: string): Map<number, ConditionAnatomy> | null {
+  const cleaned = content.replace(/```(?:json|ndjson)?\n?|\n?```/g, '').trim()
+  const lines = cleaned.split('\n').map((line) => line.trim()).filter(Boolean)
+  const results = new Map<number, ConditionAnatomy>()
+  for (const line of lines) {
+    let value: unknown
+    try {
+      value = JSON.parse(line)
+    } catch {
+      continue
+    }
+    if (isValidIndexedAnatomyLine(value)) {
+      results.set(value.index, {
+        system: value.system,
+        organ: value.organ,
+        anatomical_location: value.anatomical_location,
+        laterality: value.laterality,
+      })
+    }
+  }
+  return results.size > 0 ? results : null
+}
+
+// Never throws — a failed/unavailable anatomy call degrades to every
+// condition being unplaced rather than failing the whole record; anatomy is
+// an enhancement on top of the already-captured name/date/notes, not a hard
+// requirement.
+async function enrichConditionAnatomyBatch(summaries: ConditionSummary[], apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<Map<number, ConditionAnatomy>> {
+  try {
+    const userMessage = summaries
+      .map((summary, index) => JSON.stringify({ index, name_medical: summary.name_medical, notes: summary.notes }))
+      .join('\n')
+    const result = await callLLMWithFallback<Map<number, ConditionAnatomy>>({
+      messages: [{ role: 'system', content: CONDITION_ENRICHMENT_PROMPT }, { role: 'user', content: userMessage }],
+      apiKey,
+      models,
+      temperature: 0,
+      label: 'enrichment-anatomy',
+      db: routing.db,
+      profile: routing.profile,
+      keys: routing.keys,
+      timeoutMs: Math.max(routing.timeoutMs ?? 0, EXTRACTION_TIMEOUT_MS),
+      onTrace: routing.onTrace,
+      responseFormat: 'text',
+      waitForCooldown: true,
+      validate: parseConditionAnatomyBatch,
+    })
+    return result.ok && result.value ? result.value : new Map()
+  } catch {
+    return new Map()
+  }
+}
+
+// The non-LLM part of enrichment: local defaults filled directly from the
+// extraction summary, with only anatomy coming from enrichConditionAnatomy.
+function buildConditionFromSummary(summary: ConditionSummary, anatomy: ConditionAnatomy | null): ConditionInput {
+  return {
+    name_medical: summary.name_medical,
+    name_common: null,
+    system: anatomy?.system ?? 'other',
+    organ: anatomy?.organ ?? null,
+    anatomical_location: anatomy?.anatomical_location ?? null,
+    status: 'documented',
+    severity: null,
+    certainty: null,
+    date_onset: null,
+    date_diagnosed: summary.earliest_date,
+    evidence: null,
+    notes: summary.notes,
+    provider: summary.provider,
+    // Facility only reaches persistence via a care event (see indexedDb.ts's
+    // persistEnrichmentResult), same as the report-context inheritance path
+    // parseLongitudinalResponse already used — carry it through the same way.
+    care_events: summary.provider && summary.earliest_date
+      ? [{ event_type: 'other', date: summary.earliest_date, provider: summary.provider, facility: summary.facility, evidence: null }]
+      : [],
+    locations: anatomy?.laterality ? [{ anatomical_location: anatomy.anatomical_location, laterality: anatomy.laterality, evidence: null }] : [],
+  }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -199,13 +520,6 @@ export function mergeLongitudinalConditions(conditions: ConditionInput[]): Condi
   return [...result.values()]
 }
 
-const EMPTY: EnrichmentResult = { conditions: [], measurements: [], providers: [], facilities: [] }
-
-// Number of chunks processed concurrently. Bounded (not Promise.all-unlimited)
-// so a large record's chunk count doesn't open dozens of simultaneous LLM
-// calls — see src/lib/llm/pool.ts.
-const POOL_SIZE = 3
-
 // Thrown when every chunk failed to produce usable output (network down, all
 // models exhausted for every chunk, etc.) — distinct from a successful run
 // that legitimately found no conditions/measurements, and distinct from a
@@ -219,13 +533,6 @@ export class EnrichmentFailedError extends Error {
     this.name = 'EnrichmentFailedError'
     this.failures = failures
   }
-}
-
-// ── Per-chunk extraction ─────────────────────────────────────────────────────
-
-type ChunkExtractionResult = {
-  conditions: ConditionInput[]
-  measurements: MeasurementInput[]
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -264,113 +571,6 @@ export function isValidCareEventInput(value: unknown): value is CareEventInput {
       && isNullableString(value.facility.state)
       && isNullableString(value.facility.country)))
     && isNullableString(value.evidence)
-}
-
-const CHUNK_EXTRACTION_PROMPT = `You are a clinical data extraction assistant. Your task is to extract structured medical information from one section of a health record written in any language (English, Traditional Chinese, Japanese, or others).
-
-The user message tells you which section this is (a heading, its type, and its inferred date) followed by that section's text only — not the whole record. Use the section context to fill fields the section's own text doesn't restate (e.g. a date given only in the heading), and list any field you filled that way in "inferred_from_structure" (an array of field names, e.g. ["date_diagnosed"]) on that condition or measurement. Leave it empty/omitted when every field came directly from the section's own text.
-
-Always respond with a single JSON object — no markdown, no explanation. The JSON must have exactly two keys:
-
-{
-  "conditions": [
-    {
-      "name_medical": "standardized English medical name (e.g. Essential hypertension)",
-      "name_common": "plain English name or null",
-      "system": "one of: integumentary, muscular, skeletal, cardiovascular, nervous, digestive, respiratory, renal, lymphatic, endocrine, reproductive",
-      "organ": "specific organ or null",
-      "anatomical_location": "specific location or null",
-      "status": "documented | resolved | suspected",
-      "severity": "mild | moderate | severe | null",
-      "certainty": "confirmed | probable | possible | null",
-      "date_onset": "YYYY-MM-DD or null",
-      "date_diagnosed": "YYYY-MM-DD or null",
-      "evidence": "brief verbatim quote from the section that supports this condition, or null",
-      "inferred_from_structure": ["field names filled from section context, or omit/empty"],
-      "locations": [{"anatomical_location": "e.g. left kidney", "laterality": "left | right | bilateral | null", "evidence": "brief quote or null"}],
-      "provider": {"name": "clinician name", "specialty": "specialty or null", "email": "email or null", "phone": "phone or null", "evidence": "provider evidence or null"} ,
-      "care_events": [{
-        "event_type": "diagnosed | revisited | treated | monitored | referred | other",
-        "date": "YYYY-MM-DD",
-        "provider": {"name": "clinician name", "specialty": "specialty or null", "email": "email or null", "phone": "phone or null", "evidence": "provider evidence or null"},
-        "facility": {"name": "institution", "address": "address or null", "city": "city or null", "state": "state or null", "country": "country or null"},
-        "evidence": "brief quote supporting this event or null"
-      }]
-    }
-  ],
-  "measurements": [
-    {
-      "name": "standardized English measurement name (e.g. HbA1c, Blood Pressure Systolic)",
-      "value_numeric": <number>,
-      "unit": "unit string (e.g. %, mmHg, mg/dL)",
-      "date": "YYYY-MM-DD or null",
-      "inferred_from_structure": ["field names filled from section context, or omit/empty"]
-    }
-  ]
-}
-
-Rules:
-- Output all condition names and measurement names in English, regardless of the source language.
-- Extract every distinct medical condition mentioned in this section, including chronic diseases, acute diagnoses, and resolved conditions.
-- Extract every numeric lab value, vital sign, or clinical measurement in this section.
-- "locations" is only for a condition with more than one distinct anatomical site (e.g. bilateral findings) — omit it or leave it empty for a single-site condition.
-- Only include a "provider" when this section's text directly names the clinician responsible for that specific condition — never attach a clinician mentioned elsewhere for an unrelated reason.
-- If this section has no conditions, return an empty array for "conditions". If it has no measurements, return an empty array for "measurements".
-- Never invent data not present in this section.
-- Never recommend treatments or medications.`
-
-function parseChunkExtraction(content: string): ChunkExtractionResult | null {
-  try {
-    const cleaned = content.replace(/```(?:json)?\n?|\n?```/g, '').trim()
-    const parsed = JSON.parse(cleaned) as Record<string, unknown>
-    if (Array.isArray(parsed.conditions) && Array.isArray(parsed.measurements)) {
-      const conditions = parsed.conditions.filter(isRecord).map((raw) => {
-        const condition = { ...raw } as unknown as ConditionInput
-        if (Array.isArray(condition.care_events)) {
-          condition.care_events = condition.care_events.filter(isValidCareEventInput)
-        } else if (condition.care_events != null) {
-          condition.care_events = []
-        }
-        if (condition.provider != null && !isValidProviderInput(condition.provider)) {
-          condition.provider = null
-        }
-        return condition
-      })
-      return {
-        conditions,
-        measurements: parsed.measurements as MeasurementInput[],
-      }
-    }
-  } catch { /* fall through */ }
-  return null
-}
-
-async function extractConditionsFromChunk(
-  chunk: TextChunk,
-  apiKey: string,
-  models: string[],
-  routing: EnrichRoutingOptions | undefined,
-  chunkIndex = 0,
-  chunkCount = 1,
-): Promise<ChunkExtractionResult> {
- const CHUNK_EXTRACTION_PROMPT = EDITABLE_CHUNK_EXTRACTION_PROMPT
-  const contextLine = `Section: "${chunk.sectionHeading}" (type: ${chunk.sectionType}${chunk.inferredDate ? `, dated ${chunk.inferredDate}` : ''})`
-  const result = await callLLMWithFallback<ChunkExtractionResult>({
-    messages: [
-      { role: 'system', content: CHUNK_EXTRACTION_PROMPT },
-      { role: 'user', content: `${contextLine}\n\n${chunk.text}` },
-    ],
-    apiKey,
-    models,
-    temperature: 0,
-    label: `enrichment-chunk-${chunkIndex + 1}-of-${chunkCount}`,
-    validate: parseChunkExtraction,
-    ...routing,
-  })
-  if (!result.ok || !result.value) {
-    throw new Error(result.failures.join('; ') || 'chunk extraction failed')
-  }
-  return result.value
 }
 
 // ── Cross-chunk merge ─────────────────────────────────────────────────────────
@@ -480,119 +680,62 @@ function mergeConditions(items: ConditionInput[]): ConditionInput[] {
   })
 }
 
-function mergeMeasurements(items: MeasurementInput[]): MeasurementInput[] {
-  const merged: MeasurementInput[] = []
-  for (const m of items) {
-    const duplicate = merged.some((existing) =>
-      existing.name === m.name &&
-      existing.value_numeric === m.value_numeric &&
-      existing.unit === m.unit &&
-      existing.date === m.date,
-    )
-    if (!duplicate) merged.push(m)
-  }
-  return merged
-}
-
 // ── Main export ───────────────────────────────────────────────────────────────
-// Orchestration (Task 3.5): analyze structure → chunk by section → extract
-// each chunk under bounded concurrency → merge. LLM attempt count now scales
-// with chunk count, not condition count (the prior inventory→per-condition
-// loop's failure mode). `onChunkProgress` keeps the same (completed, total)
-// call shape the old `onConditionProgress` used, so pipeline.ts's progress
-// math and analyzing.tsx need zero changes.
+// Two-step orchestration:
+//   Step 2 (extraction): one whole-document LLM call -> {name, earliest_date,
+//     notes} per unique condition, plus measurements.
+//   Step 3 (enrichment): per condition, fill the full ConditionInput locally
+//     (no LLM) except normalized anatomy, which is the one LLM call per
+//     condition. `onConditionProgress` reports real per-condition progress
+//     (not a chunk count) as each one finishes enrichment.
 
 export async function enrichFromText(
   text: string,
   apiKey: string,
   models?: string[],
   routing?: EnrichRoutingOptions,
-  onChunkProgress?: (completed: number, total: number) => void,
+  onConditionProgress?: (completed: number, total: number, name: string) => void,
 ): Promise<EnrichmentResult> {
   const modelChain = models && models.length > 0 ? models : DEFAULT_MODELS
   // pageBreaks isn't a callLLMWithFallback option — strip it before `llmRouting`
   // gets spread into the LLM call options below.
-  const { pageBreaks, ...llmRouting } = routing ?? {}
+  const { pageBreaks: _pageBreaks, ...llmRouting } = routing ?? {}
 
-  const wholeDocument = await extractWholeDocument(text, apiKey, modelChain, llmRouting)
-  if (wholeDocument) {
-    return {
-      ...wholeDocument,
-      conditions: mergeConditions(wholeDocument.conditions),
-    }
+  const extracted = await extractConditionSummaries(text, apiKey, modelChain, llmRouting)
+  if (!extracted) {
+    throw new EnrichmentFailedError(['condition-list extraction unavailable or context-rejected'])
   }
-
-  // P09 intentionally keeps initial condition/date extraction text-only and
-  // document-scoped. Chunking is reserved for a later image/page-processing
-  // phase; it must not silently change the extraction contract here.
-  throw new EnrichmentFailedError(['whole-document extraction unavailable or context-rejected'])
-
-  const structure = await analyzeRecordStructure(text, apiKey, modelChain, llmRouting, pageBreaks)
-  const chunks = chunkRecordBySections(text, structure, undefined, pageBreaks)
-  const total = chunks.length
+  const { conditions: summaries, measurements } = extracted
+  const total = summaries.length
 
   if (total === 0) {
-    onChunkProgress?.(0, 0)
-    return { ...EMPTY }
+    onConditionProgress?.(0, 0, '')
+    return { conditions: [], measurements, providers: [], facilities: [] }
   }
 
-  let completed = 0
-  const settled = await runWithConcurrency(chunks, POOL_SIZE, async (chunk) => {
-    const chunkIndex = chunks.indexOf(chunk)
-    const result = await extractConditionsFromChunk(chunk, apiKey, modelChain, llmRouting, chunkIndex, total)
-    completed += 1
-    onChunkProgress?.(completed, total)
-    return result
+  // One call for every condition's anatomy, not one call each — see
+  // enrichConditionAnatomyBatch's comment for why (free-tier per-minute rate
+  // limits are keyed on call count, not per-call size).
+  const anatomyByIndex = await enrichConditionAnatomyBatch(summaries, apiKey, modelChain, llmRouting)
+  const conditions = summaries.map((summary, index) => {
+    const condition = buildConditionFromSummary(summary, anatomyByIndex.get(index) ?? null)
+    onConditionProgress?.(index + 1, total, summary.name_medical)
+    return condition
   })
-
-  const conditions: ConditionInput[] = []
-  const measurements: MeasurementInput[] = []
-  const partialFailures: { section: string; reason: string }[] = []
-  const imageSections: ImageWorthySection[] = []
-  let succeededCount = 0
-
-  settled.forEach((outcome, index) => {
-    const chunk = chunks[index]
-    if (chunk.imageWorthy && chunk.pageStart != null && chunk.pageEnd != null) {
-      imageSections.push({
-        heading: chunk.sectionHeading,
-        pageStart: chunk.pageStart,
-        pageEnd: chunk.pageEnd,
-        inferredDate: chunk.inferredDate,
-        conditionKeys: outcome.status === 'fulfilled' ? outcome.value.conditions.map(conditionKey) : [],
-      })
-    }
-    if (outcome.status === 'fulfilled') {
-      succeededCount += 1
-      conditions.push(...outcome.value.conditions)
-      measurements.push(...outcome.value.measurements)
-    } else {
-      const reason = outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)
-      partialFailures.push({ section: chunk.sectionHeading || `chunk ${index + 1}`, reason })
-    }
-  })
-
-  if (succeededCount === 0) {
-    throw new EnrichmentFailedError(partialFailures.map((f) => f.reason))
-  }
 
   const mergedConditions = mergeConditions(conditions)
-  const mergedMeasurements = mergeMeasurements(measurements)
   const providers = mergedConditions
     .map((c) => c.provider)
     .filter((p): p is ProviderInput => Boolean(p))
   const facilities = mergedConditions
     .flatMap((c) => (c.care_events ?? []).map((event) => event.facility))
     .filter((facility): facility is FacilityInput => Boolean(facility))
-  const coalescedImageSections = coalesceImageSections(imageSections)
 
   return {
     conditions: mergedConditions,
-    measurements: mergedMeasurements,
+    measurements,
     providers,
     facilities,
-    ...(partialFailures.length > 0 ? { partialFailures } : {}),
-    ...(coalescedImageSections.length > 0 ? { imageSections: coalescedImageSections } : {}),
   }
 }
 

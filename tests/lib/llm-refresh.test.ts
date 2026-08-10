@@ -229,9 +229,11 @@ describe('service.ts refresh wiring', () => {
   }
 
   function chatResponse() {
+    const body = { choices: [{ message: { content: 'reply' } }] }
     return Promise.resolve({
       ok: true,
-      json: () => Promise.resolve({ choices: [{ message: { content: 'reply' } }] }),
+      json: () => Promise.resolve(body),
+      text: () => Promise.resolve(JSON.stringify(body)),
     })
   }
 

@@ -8,7 +8,7 @@ import Svg, {
   Defs, LinearGradient, Rect, Stop,
 } from 'react-native-svg'
 import { Image } from 'expo-image'
-import { Image as RNImage } from 'react-native'
+import { Asset } from 'expo-asset'
 import { useAppStore } from '@/store/useAppStore'
 import { ALL_SYSTEMS, CONDITIONS, type SystemId } from '@/model/conditions'
 import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
@@ -136,7 +136,10 @@ function maskForSystem(system: string): Promise<AlphaMask | undefined> {
   if (existing) return existing
   const asset = INGEST_LAYERS[system as SystemId]
   if (!asset) return Promise.resolve(undefined)
-  const uri = RNImage.resolveAssetSource(asset)?.uri
+  // Image.resolveAssetSource isn't implemented by react-native-web — expo-asset's
+  // Asset.fromModule works cross-platform (native and web) for resolving a
+  // require()'d image to an actual loadable URI.
+  const uri = Asset.fromModule(asset)?.uri
   if (!uri) return Promise.resolve(undefined)
   const loading = loadAlphaMaskFromImageSource(uri).catch(() => undefined)
   ingestMaskCache.set(system, loading)

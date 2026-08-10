@@ -60,6 +60,12 @@ interface CallOptions<T> {
   keys?: KeyStore
   timeoutMs?: number
   onTrace?: (event: LLMTraceEvent) => void
+  // A validate()-backed call defaults to forcing the provider's strict
+  // single-JSON-object response mode. Pass 'text' to opt out — needed for
+  // NDJSON (one JSON object per line), which that mode forbids.
+  responseFormat?: 'text' | 'json'
+  // See EngineOptions.waitForCooldown — opt-in per call, not a global default.
+  waitForCooldown?: boolean
 }
 
 export type LLMTraceEvent =
@@ -88,7 +94,7 @@ function splitMessages(messages: LLMMessage[]): { systemPrompt: string; userMess
 export async function callLLMWithFallback<T = string>(
   opts: CallOptions<T>,
 ): Promise<LLMResult<T>> {
-  const { messages, apiKey, validate, temperature, label = 'llm', db, profile, keys, timeoutMs, onTrace } = opts
+  const { messages, apiKey, validate, temperature, label = 'llm', db, profile, keys, timeoutMs, onTrace, responseFormat, waitForCooldown } = opts
   const models = opts.models ?? DEFAULT_MODELS
   const { systemPrompt, userMessage } = splitMessages(messages)
 
@@ -108,7 +114,7 @@ export async function callLLMWithFallback<T = string>(
     },
     onExhausted: (exhaustedFailures) => onTrace?.({ type: 'exhausted', label, failures: exhaustedFailures }),
   }
-  const serviceOpts = { apiKey, models, temperature, telemetry, db, profile, keys, timeoutMs }
+  const serviceOpts = { apiKey, models, temperature, telemetry, db, profile, keys, timeoutMs, responseFormat, waitForCooldown }
 
   let ok = false
   let value: T | null = null

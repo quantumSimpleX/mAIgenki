@@ -15,7 +15,9 @@ export const INDEXED_DB_NAME = 'maigenki'
 // v3 adds the `providers` store, so structured provider data from real
 // uploads (previously discarded) is retained.
 // v4 adds condition-specific care events (provider/facility/date/type).
-export const INDEXED_DB_VERSION = 5
+// v6 adds `pending_extraction_text`, holding a record's redacted text only
+// until enrichment persists successfully (Task: retry without re-upload).
+export const INDEXED_DB_VERSION = 6
 
 export const DEMO_RECORD_ID = 'demo-record'
 const DEMO_IMAGE_ID = 'demo-image-stones-kub'
@@ -99,6 +101,20 @@ export type RecordImage = {
   thumbnail_blob: Blob | null
   date: string | null
   notes: string | null
+  created_at: string
+}
+
+// Holds a record's redacted extracted text only between successful PDF
+// extraction/redaction and successful enrichment persistence — long enough to
+// retry enrichment without re-running extraction, never longer. Deleted once
+// persistEnrichmentResult succeeds, since every useful fact it contained is by
+// then captured structurally in conditions/measurements/providers/facilities.
+export type PendingExtractionText = {
+  id: string
+  filename: string
+  page_count: number | null
+  extraction_method: string | null
+  text_blob: Blob
   created_at: string
 }
 
@@ -205,6 +221,7 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
     ['condition_care_events', { keyPath: 'id' }],
     ['facilities', { keyPath: 'id' }],
     ['settings', { keyPath: 'key' }],
+    ['pending_extraction_text', { keyPath: 'id' }],
     ]
     for (const [storeName, options] of stores) {
       if (!database.objectStoreNames.contains(storeName)) database.createObjectStore(storeName, options)
@@ -224,7 +241,27 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
   const careEvents = request.transaction?.objectStore('condition_care_events')
   if (careEvents && !careEvents.indexNames.contains('condition_id')) careEvents.createIndex('condition_id', 'condition_id')
   }
-  return requestToPromise(request)
+  // If another connection (another tab, or a stale one left over from a dev
+  // hot-reload) is still open at an older version, this open() call blocks
+  // here instead of upgrading/hanging silently — surface that rather than
+  // leaving it a mystery.
+  request.onblocked = () => {
+    pipelineDebug('warn', 'db', 'open-blocked', {
+      reason: 'Another connection is holding an older-version IndexedDB open; upgrade is waiting for it to close.',
+    })
+  }
+  const db = await requestToPromise(request)
+  // Self-heals the reverse case: once THIS connection is open, if a still
+  // newer version tries to open later (another tab updates, or another
+  // hot-reload lands), close this one instead of blocking that attempt —
+  // the same fix applied on the other side of the handshake above.
+  db.onversionchange = () => {
+    pipelineDebug('warn', 'db', 'stale-connection-closed', {
+      reason: 'A newer version of this database was requested — closing this connection so that upgrade can proceed.',
+    })
+    db.close()
+  }
+  return db
 }
 
 // Computes a position when the caller doesn't already have one (e.g. a fresh
@@ -278,6 +315,25 @@ export async function getRecordImageBlob(db: IDBDatabase, imageId: string): Prom
   const row = await requestToPromise(transaction.objectStore('record_images').get(imageId)) as RecordImage | undefined
   await transactionToPromise(transaction)
   return row ? { blob: row.image_blob, mimeType: row.mime_type } : null
+}
+
+export async function putPendingExtractionText(db: IDBDatabase, entry: PendingExtractionText): Promise<void> {
+  const transaction = db.transaction('pending_extraction_text', 'readwrite')
+  transaction.objectStore('pending_extraction_text').put(entry)
+  await transactionToPromise(transaction)
+}
+
+export async function getPendingExtractionText(db: IDBDatabase, id: string): Promise<string | null> {
+  const transaction = db.transaction('pending_extraction_text', 'readonly')
+  const row = await requestToPromise(transaction.objectStore('pending_extraction_text').get(id)) as PendingExtractionText | undefined
+  await transactionToPromise(transaction)
+  return row ? row.text_blob.text() : null
+}
+
+export async function deletePendingExtractionText(db: IDBDatabase, id: string): Promise<void> {
+  const transaction = db.transaction('pending_extraction_text', 'readwrite')
+  transaction.objectStore('pending_extraction_text').delete(id)
+  await transactionToPromise(transaction)
 }
 
 export async function getConditionRecords(db: IDBDatabase, conditionId: string): Promise<ConditionRecordEntry[]> {

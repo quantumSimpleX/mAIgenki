@@ -95,6 +95,13 @@ export type EngineOptions = {
   cooldown?: CooldownLedger
   telemetry?: Telemetry
   fetchImpl?: typeof fetch
+  // When every candidate in the route is skipped purely because it's on
+  // cooldown (no real attempt made against any of them), wait out the
+  // shortest remaining cooldown and walk the route once more before giving
+  // up, instead of failing immediately. Opt-in — a background/batch caller
+  // (e.g. document extraction) can afford the wait; an interactive caller
+  // (e.g. condition chat) generally can't and should keep failing fast.
+  waitForCooldown?: boolean
 }
 
 export type LMFResult<T> =

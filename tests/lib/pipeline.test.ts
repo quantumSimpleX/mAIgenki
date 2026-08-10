@@ -34,6 +34,8 @@ jest.mock('@/lib/db/indexedDb', () => ({
   putRecordImage: jest.fn(),
   putConditionRecord: jest.fn(),
   getIndexedSetting: jest.fn(),
+  putPendingExtractionText: jest.fn(),
+  deletePendingExtractionText: jest.fn(),
 }))
 // Task 4.3's image-capture step — mocked so pipeline.ts's wiring (which
 // pages it renders, how it handles a per-page failure) can be asserted
@@ -67,7 +69,7 @@ const mockPutConditionRecord = putConditionRecord as jest.MockedFunction<typeof 
 const mockRenderPages  = renderPagesToCanvas   as jest.MockedFunction<typeof renderPagesToCanvas>
 const mockCompress     = compressToTarget      as jest.MockedFunction<typeof compressToTarget>
 
-const mockIdb = {} as any
+const mockIdb = { version: 6, objectStoreNames: { contains: () => true } } as any
 
 const EMPTY_ENRICHMENT: EnrichmentResult = { conditions: [], measurements: [] }
 
