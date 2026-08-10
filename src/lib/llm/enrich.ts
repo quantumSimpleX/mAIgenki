@@ -1,8 +1,8 @@
 import { callLLMWithFallback, DEFAULT_MODELS } from './client'
 import { analyzeRecordStructure, type EnrichRoutingOptions } from './structure'
-import { chunkRecordBySections } from './chunk'
+import { chunkRecordBySections, type TextChunk } from './chunk'
 import { runWithConcurrency } from './pool'
-import { P09_WHOLE_DOCUMENT_EXTRACTION_PROMPT, CONDITION_ENRICHMENT_PROMPT } from './prompts'
+import { P09_WHOLE_DOCUMENT_EXTRACTION_PROMPT, CONDITION_ENRICHMENT_PROMPT, CONDITION_DEDUPE_PROMPT } from './prompts'
 import { pipelineDebug } from '../debug/pipelineDebug'
 import type { ConditionStatus } from '@/model/health'
 
@@ -239,6 +239,20 @@ function withDocumentHeader(chunkText: string, header: string): string {
   return `Document opening, for context only (the overall patient/provider/facility a real record usually states once, not necessarily restated in the section below):\n${header}\n\n---\n\nSection to extract from:\n${chunkText}`
 }
 
+// Chunking splits a hierarchical record (chronological visits, nested
+// sub-sections under a visit, etc.) into independently-processed pieces —
+// this line is the only signal a chunk retains of where it sits in that
+// hierarchy. Without it, a sub-section separated from its parent heading
+// loses the date/context a human reader would infer, and repeat mentions of
+// the same condition across chronological visits are more likely to drift in
+// naming (weakening the merge in mergeConditions below) since each call has
+// no sense of "this is one visit among several," just isolated text.
+function withSectionContext(chunkText: string, chunk: TextChunk): string {
+  const heading = chunk.sectionHeading || '(untitled section)'
+  const dated = chunk.inferredDate ? `, dated ${chunk.inferredDate}` : ''
+  return `Section: "${heading}" (type: ${chunk.sectionType}${dated})\n\n${chunkText}`
+}
+
 async function extractConditionSummaries(text: string, apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<ExtractionStepResult | null> {
   // Section-aware chunking (respects the document's actual structure, so a
   // chunk boundary lands between sections, not mid-hierarchy) when structure
@@ -254,7 +268,10 @@ async function extractConditionSummaries(text: string, apiKey: string, models: s
   const documentHeader = text.slice(0, DOCUMENT_HEADER_CHARS)
 
   const settled = await runWithConcurrency(chunks, CHUNK_POOL_SIZE, (chunk) => (
-    extractConditionSummariesFromChunk(withDocumentHeader(chunk.text, documentHeader), apiKey, models, routing)
+    extractConditionSummariesFromChunk(
+      withDocumentHeader(withSectionContext(chunk.text, chunk), documentHeader),
+      apiKey, models, routing,
+    )
   ))
 
   const conditions: ConditionSummary[] = []
@@ -271,7 +288,75 @@ async function extractConditionSummaries(text: string, apiKey: string, models: s
   // Every chunk failed — nothing usable came out of the whole record, same
   // "total wipeout" semantics the single-call version had.
   if (succeededChunks === 0) return null
-  return { conditions, measurements }
+  const dedupedConditions = await dedupeConditionSummaries(conditions, apiKey, models, routing)
+  return { conditions: dedupedConditions, measurements }
+}
+
+// ── Post-extraction dedupe (safety net for cross-chunk name drift) ─────────────
+// Alias canonicalization (conditionKey below) catches the common-abbreviation
+// case cheaply and deterministically. This pass catches everything else a
+// chronological record's repeated mentions can produce (paraphrasing,
+// language drift, a name spelled out fully in one visit and abbreviated
+// differently in another) by asking the model directly whether two entries
+// are the same diagnosis — one extra call, only when there's more than one
+// condition to compare, and never fatal: any failure just skips the pass and
+// leaves the un-deduped list for conditionKey/mergeConditions downstream.
+
+function isValidDedupeLine(value: unknown): value is { index: number; group: number } {
+  return isRecord(value) && typeof value.index === 'number' && typeof value.group === 'number'
+}
+
+function parseDedupeGroups(content: string): Map<number, number> | null {
+  const cleaned = content.replace(/```(?:json|ndjson)?\n?|\n?```/g, '').trim()
+  const groups = new Map<number, number>()
+  for (const line of cleaned.split('\n').map((l) => l.trim()).filter(Boolean)) {
+    try {
+      const value = JSON.parse(line)
+      if (isValidDedupeLine(value)) groups.set(value.index, value.group)
+    } catch { /* skip malformed line, same tolerance as parseExtractionStepResponse */ }
+  }
+  return groups.size > 0 ? groups : null
+}
+
+function mergeConditionSummaryGroup(items: ConditionSummary[]): ConditionSummary {
+  return items.slice(1).reduce((a, b) => ({
+    name_medical: a.name_medical,
+    earliest_date: earlierDate(a.earliest_date, b.earliest_date),
+    notes: [a.notes, b.notes].filter(Boolean).join(' | ') || null,
+    provider: a.provider ?? b.provider,
+    facility: a.facility ?? b.facility,
+  }), items[0])
+}
+
+async function dedupeConditionSummaries(
+  summaries: ConditionSummary[], apiKey: string, models: string[], routing: EnrichRoutingOptions,
+): Promise<ConditionSummary[]> {
+  if (summaries.length < 2) return summaries
+
+  const input = summaries.map((s, index) => JSON.stringify({ index, name_medical: s.name_medical })).join('\n')
+  const result = await callLLMWithFallback<Map<number, number>>({
+    messages: [{ role: 'system', content: CONDITION_DEDUPE_PROMPT }, { role: 'user', content: input }],
+    apiKey,
+    models,
+    label: 'extraction-dedupe',
+    db: routing.db,
+    profile: routing.profile,
+    keys: routing.keys,
+    timeoutMs: routing.timeoutMs,
+    onTrace: routing.onTrace,
+    responseFormat: 'text',
+    waitForCooldown: true,
+    validate: parseDedupeGroups,
+  })
+  if (!result.ok || !result.value) return summaries
+
+  const groups = result.value
+  const byGroup = new Map<number | string, ConditionSummary[]>()
+  summaries.forEach((summary, index) => {
+    const group = groups.get(index) ?? `ungrouped-${index}`
+    byGroup.set(group, [...(byGroup.get(group) ?? []), summary])
+  })
+  return Array.from(byGroup.values()).map(mergeConditionSummaryGroup)
 }
 
 // ── Step 3: enrichment (batched — one call for every condition) ────────────────
@@ -579,12 +664,48 @@ function normalizedKey(value: string): string {
   return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, ' ').trim()
 }
 
+// A chronological record mentions the same condition at every visit — each
+// mention comes from a separate chunk call (possibly a different fallback
+// model), so exact-string drift between calls ("HTN" vs "essential
+// hypertension") is the dominant reason two occurrences of one real condition
+// fail to collapse in mergeConditions below. This table only needs to cover
+// common abbreviations landing on the same canonical form normalizedKey()
+// would already produce for the spelled-out name.
+const CONDITION_NAME_ALIASES: Record<string, string> = {
+  'htn': 'hypertension',
+  'essential htn': 'essential hypertension',
+  't2dm': 'type 2 diabetes mellitus',
+  't1dm': 'type 1 diabetes mellitus',
+  'dm2': 'type 2 diabetes mellitus',
+  'dm type 2': 'type 2 diabetes mellitus',
+  'dm type 1': 'type 1 diabetes mellitus',
+  'gerd': 'gastroesophageal reflux disease',
+  'copd': 'chronic obstructive pulmonary disease',
+  'cad': 'coronary artery disease',
+  'chf': 'congestive heart failure',
+  'ckd': 'chronic kidney disease',
+  'afib': 'atrial fibrillation',
+  'a fib': 'atrial fibrillation',
+  'osa': 'obstructive sleep apnea',
+  'uti': 'urinary tract infection',
+  'hld': 'hyperlipidemia',
+  'ibs': 'irritable bowel syndrome',
+  'ra': 'rheumatoid arthritis',
+  'oa': 'osteoarthritis',
+  'mi': 'myocardial infarction',
+}
+
+function canonicalizeConditionName(name: string): string {
+  const normalized = normalizedKey(name)
+  return CONDITION_NAME_ALIASES[normalized] ?? normalized
+}
+
 export function conditionKey(c: ConditionInput): string {
   // An explicit locations array represents one condition with multiple sites
   // (for example left and right kidneys). Do not split those occurrences into
   // separate conditions based on their section-level location labels.
   const locationKey = c.locations && c.locations.length > 0 ? '' : normalizedKey(c.anatomical_location ?? '')
-  return [normalizedKey(c.name_medical), normalizedKey(c.organ ?? ''), locationKey].join('|')
+  return [canonicalizeConditionName(c.name_medical), normalizedKey(c.organ ?? ''), locationKey].join('|')
 }
 
 function earlierDate(a: string | null | undefined, b: string | null | undefined): string | null {
