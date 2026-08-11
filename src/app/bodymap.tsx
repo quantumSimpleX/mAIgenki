@@ -33,6 +33,7 @@ import {
   getIndexedSetting, putIndexedSetting, updateIndexedConditionPosition,
   getRecordImageThumbnail, getRecordImageBlob, type IndexedConditionDot,
   putIndexedConditionLocation, getConditionLocations, deleteConditionLocation, uuid,
+  clearIndexedDbData,
 } from '@/lib/db/indexedDb'
 import { exportIndexedDbBackupToJson, importIndexedDbBackupFromJson } from '@/lib/db/indexedDbBackup'
 import { ProviderSettings } from '@/components/ProviderSettings'
@@ -1717,6 +1718,7 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
 
   const idb = useOptionalIndexedDb()
   const [importConfirm, setImportConfirm] = useState(false)
+  const [clearConfirm, setClearConfirm] = useState(false)
   const [backupError, setBackupError] = useState<string | null>(null)
   const [openDropdown, setOpenDropdown] = useState<SettingsDropdownId>(null)
   // Derived, not effect-cleared: closing settings should hide any open dropdown
@@ -1782,6 +1784,19 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
     } catch (e) {
       setBackupError(e instanceof Error ? e.message : 'Import failed')
       setImportConfirm(false)
+    }
+  }
+
+  async function handleClearData() {
+    if (!idb) return
+    try {
+      setBackupError(null)
+      await clearIndexedDbData(idb)
+      setClearConfirm(false)
+      if (Platform.OS === 'web') window.location.reload()
+    } catch (e) {
+      setBackupError(e instanceof Error ? e.message : 'Clear failed')
+      setClearConfirm(false)
     }
   }
 
@@ -1940,6 +1955,37 @@ function SettingsSheet({ onExit }: { onExit?: () => void }) {
       ) : !IS_WEB ? (
         <Text style={styles.settingsHint}>Backup is web-only for now.</Text>
       ) : null}
+
+      <Text style={styles.settingsSectionLabel}>Reset</Text>
+      <View style={{ flexDirection: 'row', gap: sc(SETTINGS_CONTROL_GAP) }}>
+        {!clearConfirm ? (
+          <TouchableOpacity
+            style={[styles.backupBtn, !backupAvailable && { opacity: 0.4 }]}
+            onPress={() => {
+              setBackupError(null)
+              setClearConfirm(true)
+            }}
+            disabled={!backupAvailable}
+          >
+            <Text style={styles.backupBtnText}>Clear all data</Text>
+          </TouchableOpacity>
+        ) : (
+          <>
+            <TouchableOpacity
+              style={[styles.backupBtn, { borderColor: C.aqua }]}
+              onPress={handleClearData}
+            >
+              <Text style={[styles.backupBtnText, { color: C.aqua }]}>Confirm</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.backupBtn} onPress={() => setClearConfirm(false)}>
+              <Text style={styles.backupBtnText}>Cancel</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+      {clearConfirm && (
+        <Text style={styles.backupWarn}>Permanently deletes every uploaded record, condition, and your provider connection. Export a backup first if you want to keep this data.</Text>
+      )}
 
       <View style={[styles.providerSectionBox, providerSettingsDirty && styles.providerSectionBoxOpen]}>
         <ProviderSettings

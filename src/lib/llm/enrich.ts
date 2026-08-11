@@ -64,6 +64,10 @@ export type ConditionSummary = {
   // resolved here in the parser, not left for Step 3 to figure out.
   provider: ProviderInput | null
   facility: FacilityInput | null
+  // True when `earliest_date` wasn't extracted from this condition's own text
+  // but backfilled from the record's structural hierarchy (the nearest
+  // preceding section/chunk with a known date) — see fillMissingDatesFromStructure.
+  earliest_date_inherited?: boolean
 }
 
 type ExtractionStepResult = {
@@ -267,6 +271,18 @@ async function extractConditionSummaries(text: string, apiKey: string, models: s
   const chunks = chunkRecordBySections(text, structure, CHUNK_MAX_CHARS)
   const documentHeader = text.slice(0, DOCUMENT_HEADER_CHARS)
 
+  // Carries each chunk's own section date forward onto every following chunk
+  // that has none of its own — chunks are in document order (chunkRecordBySections
+  // walks sections start-to-end), so this is "the nearest non-null date above
+  // this chunk in the record's hierarchy," matching how a human reader would
+  // infer an undated entry's date from the last dated heading above it.
+  const carriedChunkDates: (string | null)[] = []
+  let lastKnownDate: string | null = null
+  for (const chunk of chunks) {
+    if (chunk.inferredDate) lastKnownDate = chunk.inferredDate
+    carriedChunkDates.push(lastKnownDate)
+  }
+
   const settled = await runWithConcurrency(chunks, CHUNK_POOL_SIZE, (chunk) => (
     extractConditionSummariesFromChunk(
       withDocumentHeader(withSectionContext(chunk.text, chunk), documentHeader),
@@ -277,10 +293,16 @@ async function extractConditionSummaries(text: string, apiKey: string, models: s
   const conditions: ConditionSummary[] = []
   const measurements: MeasurementInput[] = []
   let succeededChunks = 0
-  settled.forEach((outcome) => {
+  settled.forEach((outcome, index) => {
     if (outcome.status === 'fulfilled' && outcome.value) {
       succeededChunks += 1
-      conditions.push(...outcome.value.conditions)
+      const fallbackDate = carriedChunkDates[index]
+      const filledConditions = outcome.value.conditions.map((condition) => (
+        condition.earliest_date || !fallbackDate
+          ? condition
+          : { ...condition, earliest_date: fallbackDate, earliest_date_inherited: true }
+      ))
+      conditions.push(...filledConditions)
       measurements.push(...outcome.value.measurements)
     }
   })
@@ -318,14 +340,31 @@ function parseDedupeGroups(content: string): Map<number, number> | null {
   return groups.size > 0 ? groups : null
 }
 
+// Prefers a chunk's own explicitly-extracted date over a structurally-inherited
+// one, even if the inherited date is lexically earlier — an inherited date is a
+// best-effort fallback, not evidence, and shouldn't outrank a real mention.
+function pickEarliestDate(a: ConditionSummary, b: ConditionSummary): { date: string | null; inherited: boolean } {
+  const aExplicit = a.earliest_date && !a.earliest_date_inherited
+  const bExplicit = b.earliest_date && !b.earliest_date_inherited
+  if (aExplicit && !bExplicit) return { date: a.earliest_date, inherited: false }
+  if (bExplicit && !aExplicit) return { date: b.earliest_date, inherited: false }
+  const date = earlierDate(a.earliest_date, b.earliest_date)
+  const inherited = date === a.earliest_date ? Boolean(a.earliest_date_inherited) : Boolean(b.earliest_date_inherited)
+  return { date, inherited }
+}
+
 function mergeConditionSummaryGroup(items: ConditionSummary[]): ConditionSummary {
-  return items.slice(1).reduce((a, b) => ({
-    name_medical: a.name_medical,
-    earliest_date: earlierDate(a.earliest_date, b.earliest_date),
-    notes: [a.notes, b.notes].filter(Boolean).join(' | ') || null,
-    provider: a.provider ?? b.provider,
-    facility: a.facility ?? b.facility,
-  }), items[0])
+  return items.slice(1).reduce((a, b) => {
+    const picked = pickEarliestDate(a, b)
+    return {
+      name_medical: a.name_medical,
+      earliest_date: picked.date,
+      earliest_date_inherited: picked.inherited,
+      notes: [a.notes, b.notes].filter(Boolean).join(' | ') || null,
+      provider: a.provider ?? b.provider,
+      facility: a.facility ?? b.facility,
+    }
+  }, items[0])
 }
 
 async function dedupeConditionSummaries(
@@ -464,6 +503,7 @@ function buildConditionFromSummary(summary: ConditionSummary, anatomy: Condition
       ? [{ event_type: 'other', date: summary.earliest_date, provider: summary.provider, facility: summary.facility, evidence: null }]
       : [],
     locations: anatomy?.laterality ? [{ anatomical_location: anatomy.anatomical_location, laterality: anatomy.laterality, evidence: null }] : [],
+    inferred_from_structure: summary.earliest_date_inherited ? ['date_diagnosed'] : undefined,
   }
 }
 

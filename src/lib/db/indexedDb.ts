@@ -205,6 +205,20 @@ transaction.onabort = () => { pipelineDebug('error', 'db', 'transaction-aborted'
   })
 }
 
+// Full reset for testing/troubleshooting — deletes every store, including
+// `settings` (provider connection/API key), matching Import's existing
+// "replaces all current data" semantics. Closes the passed connection first
+// so deleteDatabase doesn't block on it.
+export async function clearIndexedDbData(db: IDBDatabase, name = INDEXED_DB_NAME): Promise<void> {
+  db.close()
+  await new Promise<void>((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name)
+    request.onsuccess = () => resolve()
+    request.onerror = () => reject(request.error ?? new Error('Failed to clear IndexedDB'))
+    request.onblocked = () => resolve()
+  })
+}
+
 export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase> {
   if (typeof indexedDB === 'undefined') throw new Error('IndexedDB is unavailable in this runtime')
   const request = indexedDB.open(name, INDEXED_DB_VERSION)
