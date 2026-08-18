@@ -56,7 +56,16 @@ export function parseLongitudinalResponse(content: string): EnrichmentResult | n
 
 export type ConditionSummary = {
   name_medical: string
+  // Condition tier (most granular): this condition's own explicit date,
+  // extracted directly from its own text. Never backfilled — stays null when
+  // the condition's own text states no date.
   earliest_date: string | null
+  // Section tier (P11-02): the enclosing chunk/section's own date (the
+  // nearest preceding structural section date, carried forward — see
+  // carriedChunkDates in extractConditionSummaries), tracked separately from
+  // `earliest_date` so merge-time tier resolution (resolveConditionDateTiers)
+  // can tell the two apart instead of collapsing them before merge.
+  section_date: string | null
   notes: string | null
   // Resolved per condition: the condition's own explicit attribution if the
   // text names one, otherwise inherited from the document/report-level
@@ -65,9 +74,9 @@ export type ConditionSummary = {
   // resolved here in the parser, not left for Step 3 to figure out.
   provider: ProviderInput | null
   facility: FacilityInput | null
-  // True when `earliest_date` wasn't extracted from this condition's own text
-  // but backfilled from the record's structural hierarchy (the nearest
-  // preceding section/chunk with a known date) — see fillMissingDatesFromStructure.
+  // True when the final resolved `earliest_date` came from the section or
+  // document tier rather than this condition's own text — set only by
+  // resolveConditionDateTiers, at merge finalization.
   earliest_date_inherited?: boolean
 }
 
@@ -187,6 +196,9 @@ export function parseExtractionStepResponse(content: string): ExtractionStepResu
     return {
       name_medical: raw.name_medical,
       earliest_date: raw.earliest_date,
+      // Section tier is attached per-chunk in extractConditionSummaries
+      // (from carriedChunkDates), not known at this per-line parse stage.
+      section_date: null,
       notes: raw.notes,
       provider: ownProvider ?? reportProvider,
       facility: ownFacility ?? reportFacility,
@@ -304,13 +316,14 @@ async function extractConditionSummaries(text: string, apiKey: string, models: s
   settled.forEach((outcome, index) => {
     if (outcome.status === 'fulfilled' && outcome.value) {
       succeededChunks += 1
-      const fallbackDate = carriedChunkDates[index]
-      const filledConditions = outcome.value.conditions.map((condition) => (
-        condition.earliest_date || !fallbackDate
-          ? condition
-          : { ...condition, earliest_date: fallbackDate, earliest_date_inherited: true }
-      ))
-      conditions.push(...filledConditions)
+      // P11-02/P11-04: attach this chunk's carried section date as a
+      // separate tier alongside whatever condition-tier date the chunk
+      // itself extracted — no longer collapsed into `earliest_date` here.
+      // Merge-time resolution (resolveConditionDateTiers, after dedupe)
+      // decides which tier wins.
+      const sectionDate = carriedChunkDates[index]
+      const taggedConditions = outcome.value.conditions.map((condition) => ({ ...condition, section_date: sectionDate }))
+      conditions.push(...taggedConditions)
       measurements.push(...outcome.value.measurements)
     }
   })
@@ -320,7 +333,7 @@ async function extractConditionSummaries(text: string, apiKey: string, models: s
   if (succeededChunks === 0) return null
   const attributed = backfillDocumentWideAttribution(conditions, settled)
   const dedupedConditions = await dedupeConditionSummaries(attributed, apiKey, models, routing)
-  const finalConditions = backfillDocumentWideDate(dedupedConditions, carriedChunkDates)
+  const finalConditions = resolveConditionDateTiers(dedupedConditions, structure.documentDate)
   return { conditions: finalConditions, measurements }
 }
 
@@ -361,28 +374,22 @@ export function backfillDocumentWideAttribution(
   }))
 }
 
-// P10-01: an explicit, documented fallback for `earliest_date`. Per-chunk
-// carry-forward (carriedChunkDates, computed above from structural section
-// headings) already backfills an undated chunk from the nearest preceding
-// section date within the document's hierarchy. This is the final,
-// document-wide pass: any condition still undated after that inherits the
-// single earliest date known anywhere in the document (an explicit
-// condition date or a structural section date), marked inherited. When the
-// document genuinely contains no date anywhere, `earliest_date` stays
-// null — that is the intended terminal case, not a bug.
-export function backfillDocumentWideDate(
+// P11-03: replaces the old backfillDocumentWideDate's single-global-minimum
+// backfill entirely. Resolves each (already merged-across-occurrences)
+// condition's final date across the three tracked tiers, most granular
+// non-null wins: its own condition-tier date first, its section-tier date
+// second, the document's single genuinely-extracted date third, else null
+// (the honest terminal case — never a computed substitute).
+export function resolveConditionDateTiers(
   conditions: ConditionSummary[],
-  carriedChunkDates: (string | null)[],
+  documentDate: string | null,
 ): ConditionSummary[] {
-  const knownDates = [
-    ...conditions.filter((c) => c.earliest_date && !c.earliest_date_inherited).map((c) => c.earliest_date as string),
-    ...carriedChunkDates.filter((d): d is string => Boolean(d)),
-  ].sort()
-  const documentWideDate = knownDates[0] ?? null
-  if (!documentWideDate) return conditions
-  return conditions.map((condition) => (
-    condition.earliest_date ? condition : { ...condition, earliest_date: documentWideDate, earliest_date_inherited: true }
-  ))
+  return conditions.map((condition) => {
+    if (condition.earliest_date) return { ...condition, earliest_date_inherited: false }
+    if (condition.section_date) return { ...condition, earliest_date: condition.section_date, earliest_date_inherited: true }
+    if (documentDate) return { ...condition, earliest_date: documentDate, earliest_date_inherited: true }
+    return condition
+  })
 }
 
 // ── Post-extraction dedupe (safety net for cross-chunk name drift) ─────────────
@@ -411,31 +418,20 @@ function parseDedupeGroups(content: string): Map<number, number> | null {
   return groups.size > 0 ? groups : null
 }
 
-// Prefers a chunk's own explicitly-extracted date over a structurally-inherited
-// one, even if the inherited date is lexically earlier — an inherited date is a
-// best-effort fallback, not evidence, and shouldn't outrank a real mention.
-function pickEarliestDate(a: ConditionSummary, b: ConditionSummary): { date: string | null; inherited: boolean } {
-  const aExplicit = a.earliest_date && !a.earliest_date_inherited
-  const bExplicit = b.earliest_date && !b.earliest_date_inherited
-  if (aExplicit && !bExplicit) return { date: a.earliest_date, inherited: false }
-  if (bExplicit && !aExplicit) return { date: b.earliest_date, inherited: false }
-  const date = earlierDate(a.earliest_date, b.earliest_date)
-  const inherited = date === a.earliest_date ? Boolean(a.earliest_date_inherited) : Boolean(b.earliest_date_inherited)
-  return { date, inherited }
-}
-
+// P11-03: merges each tier independently across a condition's occurrences —
+// earliest non-null condition-tier date across occurrences, earliest non-null
+// section-tier date across occurrences — keeping the two tiers distinguishable
+// for resolveConditionDateTiers, which runs after dedupe and picks whichever
+// tier applies (most granular non-null wins), not decided here.
 function mergeConditionSummaryGroup(items: ConditionSummary[]): ConditionSummary {
-  return items.slice(1).reduce((a, b) => {
-    const picked = pickEarliestDate(a, b)
-    return {
-      name_medical: a.name_medical,
-      earliest_date: picked.date,
-      earliest_date_inherited: picked.inherited,
-      notes: [a.notes, b.notes].filter(Boolean).join(' | ') || null,
-      provider: a.provider ?? b.provider,
-      facility: a.facility ?? b.facility,
-    }
-  }, items[0])
+  return items.slice(1).reduce((a, b) => ({
+    name_medical: a.name_medical,
+    earliest_date: earlierDate(a.earliest_date, b.earliest_date),
+    section_date: earlierDate(a.section_date, b.section_date),
+    notes: [a.notes, b.notes].filter(Boolean).join(' | ') || null,
+    provider: a.provider ?? b.provider,
+    facility: a.facility ?? b.facility,
+  }), items[0])
 }
 
 async function dedupeConditionSummaries(
@@ -706,7 +702,14 @@ function buildConditionFromSummary(summary: ConditionSummary, anatomy: Condition
     care_events: summary.provider && summary.earliest_date
       ? [{ event_type: 'other', date: summary.earliest_date, provider: summary.provider, facility: summary.facility, evidence: null }]
       : [],
-    locations: anatomy?.laterality ? [{ anatomical_location: anatomy.anatomical_location, laterality: anatomy.laterality, evidence: null }] : [],
+    // Defect 4 fix: carry the anatomy call's own cx/cy onto this location entry
+    // too, not just the top-level condition fields below — otherwise
+    // persistEnrichmentResult's secondary-location loop had no real point to
+    // prefer and fell back to defaultConditionPosition's hash-jitter, landing
+    // the labeled (laterality) dot away from the LLM's actual derived position.
+    locations: anatomy?.laterality
+      ? [{ anatomical_location: anatomy.anatomical_location, laterality: anatomy.laterality, evidence: null, cx: anatomy?.cx ?? null, cy: anatomy?.cy ?? null }]
+      : [],
     // P10-04: model-proposed position; null/absent leaves cx/cy unset, so
     // putIndexedCondition's defaultConditionPosition hash-jitter fallback
     // applies — last resort only, not the primary path.
@@ -1049,10 +1052,43 @@ function latestStatusFromOccurrences(occurrences: ConditionInput[]): ConditionIn
   return latest.status
 }
 
+// Defect 1 fix (P11 retest, 2026-08-18): tier-aware date merge for the
+// second (conditionKey-based) merge pass. `resolveConditionDateTiers` (run
+// once, earlier, after `dedupeConditionSummaries`) already picks the most
+// granular tier per occurrence and records whether the result was
+// tier-inherited (section/document) via `inferred_from_structure` including
+// the field name — see `buildConditionFromSummary`'s
+// `earliest_date_inherited` -> `inferred_from_structure` mapping. When the
+// semantic-dedupe LLM call fails, same-condition occurrences reach this
+// merge pass still tier-resolved independently, and a plain
+// `earlierDate` comparison (numerically-earliest-wins) can let a
+// less-granular-but-earlier inherited date beat a more-granular-but-later
+// condition-tier date — silently undoing tier resolution one merge stage
+// later. This picks the more granular (non-inherited) occurrence's date
+// regardless of numeric ordering, only falling back to earliest-within-the-
+// same-tier when both occurrences' dates are at the same tier.
+function mergeTieredDate(
+  field: 'date_onset' | 'date_diagnosed',
+  a: ConditionInput,
+  b: ConditionInput,
+): { value: string | null; inherited: boolean } {
+  const aDate = a[field]
+  const bDate = b[field]
+  const aInherited = a.inferred_from_structure?.includes(field) ?? false
+  const bInherited = b.inferred_from_structure?.includes(field) ?? false
+  if (!aDate) return { value: bDate ?? null, inherited: bInherited }
+  if (!bDate) return { value: aDate, inherited: aInherited }
+  if (aInherited !== bInherited) return aInherited ? { value: bDate, inherited: false } : { value: aDate, inherited: false }
+  return { value: earlierDate(aDate, bDate), inherited: aInherited }
+}
+
 // Merges two occurrences of "the same" condition found in different chunks:
-// earliest date wins, evidence/care_events/locations concatenate, other
-// scalar fields prefer whichever occurrence already has a non-null value.
+// tier-aware date resolution (see mergeTieredDate above), evidence/care_events/
+// locations concatenate, other scalar fields prefer whichever occurrence
+// already has a non-null value.
 function mergeTwoConditions(a: ConditionInput, b: ConditionInput): ConditionInput {
+  const dateOnset = mergeTieredDate('date_onset', a, b)
+  const dateDiagnosed = mergeTieredDate('date_diagnosed', a, b)
   return {
     id: a.id ?? b.id,
     name_medical: a.name_medical,
@@ -1063,8 +1099,8 @@ function mergeTwoConditions(a: ConditionInput, b: ConditionInput): ConditionInpu
     status: latestConditionStatus(a, b),
     severity: firstNonNull(a.severity, b.severity),
     certainty: firstNonNull(a.certainty, b.certainty),
-    date_onset: earlierDate(a.date_onset, b.date_onset),
-    date_diagnosed: earlierDate(a.date_diagnosed, b.date_diagnosed),
+    date_onset: dateOnset.value,
+    date_diagnosed: dateDiagnosed.value,
     evidence: [a.evidence, b.evidence].filter(Boolean).join(' | ') || null,
     notes: firstNonNull(a.notes, b.notes),
     local_names: a.local_names ?? b.local_names,
@@ -1087,7 +1123,17 @@ function mergeTwoConditions(a: ConditionInput, b: ConditionInput): ConditionInpu
     cx: a.cx ?? b.cx,
     cy: a.cy ?? b.cy,
     locations: mergeConditionLocations([...(a.locations ?? []), ...(b.locations ?? [])]),
-    inferred_from_structure: Array.from(new Set([...(a.inferred_from_structure ?? []), ...(b.inferred_from_structure ?? [])])),
+    // Union of both occurrences' flags for any non-date field, but for
+    // date_onset/date_diagnosed specifically, reflect the *winning* value's
+    // actual tier (mergeTieredDate above) rather than a blind union — a
+    // condition-tier date that won over an inherited one from the other
+    // occurrence must not still be flagged "inferred".
+    inferred_from_structure: Array.from(new Set([
+      ...(a.inferred_from_structure ?? []).filter((field) => field !== 'date_onset' && field !== 'date_diagnosed'),
+      ...(b.inferred_from_structure ?? []).filter((field) => field !== 'date_onset' && field !== 'date_diagnosed'),
+      ...(dateOnset.inherited ? ['date_onset'] : []),
+      ...(dateDiagnosed.inherited ? ['date_diagnosed'] : []),
+    ])),
   }
 }
 

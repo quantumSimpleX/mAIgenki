@@ -1,6 +1,6 @@
 import {
   enrichFromText, EnrichmentFailedError, parseExtractionStepResponse,
-  backfillDocumentWideAttribution, backfillDocumentWideDate,
+  backfillDocumentWideAttribution, resolveConditionDateTiers,
   parseConditionAnatomyBatch, classifyConditionSystemLocally,
   type ConditionSummary, type MeasurementInput,
 } from '@/lib/llm/enrich'
@@ -291,6 +291,62 @@ describe('enrichFromText', () => {
     expect(result.conditions[0].cy).toBeNull()
   })
 
+  // ── Defect 4: laterality-bearing conditions carry the anatomy call's own
+  // cx/cy onto their secondary locations[] entry, not just the top-level
+  // condition fields — otherwise persistEnrichmentResult's secondary-location
+  // loop had no real point to prefer and fell back to a hash-jittered default.
+
+  it('carries the anatomy call\'s cx/cy onto the locations[] entry for a laterality-bearing condition', async () => {
+    mockByLabel({
+      'structure-analysis': structureFails,
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: { conditions: [{ name_medical: 'Verruca vulgaris', earliest_date: null, notes: null, provider: null, facility: null }], measurements: [] },
+        failures: [],
+      }),
+      'enrichment-anatomy': () => ({
+        ok: true, model: 'm', content: '',
+        value: new Map([[0, {
+          system: 'integumentary', organ: null, anatomical_location: 'hands', laterality: 'bilateral',
+          name_common: 'Common wart', local_names: null, cx: 62, cy: 45,
+        }]]),
+        failures: [],
+      }),
+    })
+
+    const result = await enrichFromText('report', '', [])
+    expect(result.conditions[0].locations).toEqual([
+      expect.objectContaining({ anatomical_location: 'hands', laterality: 'bilateral', cx: 62, cy: 45 }),
+    ])
+    // Top-level cx/cy (the primary location) still carries the same anatomy point.
+    expect(result.conditions[0].cx).toBe(62)
+    expect(result.conditions[0].cy).toBe(45)
+  })
+
+  it('leaves the locations[] entry\'s cx/cy null (not a random default) when the anatomy call has no usable position, so the DB-layer hash-jitter fallback applies', async () => {
+    mockByLabel({
+      'structure-analysis': structureFails,
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: { conditions: [{ name_medical: 'Verruca vulgaris', earliest_date: null, notes: null, provider: null, facility: null }], measurements: [] },
+        failures: [],
+      }),
+      'enrichment-anatomy': () => ({
+        ok: true, model: 'm', content: '',
+        value: new Map([[0, {
+          system: 'integumentary', organ: null, anatomical_location: 'hands', laterality: 'bilateral',
+          name_common: null, local_names: null, cx: null, cy: null,
+        }]]),
+        failures: [],
+      }),
+    })
+
+    const result = await enrichFromText('report', '', [])
+    expect(result.conditions[0].locations).toEqual([
+      expect.objectContaining({ anatomical_location: 'hands', laterality: 'bilateral', cx: null, cy: null }),
+    ])
+  })
+
   // ── P10-02: multi-provider/facility merge ─────────────────────────────────
 
   it('merges providers/facilities from every occurrence of the same condition, not just the first', async () => {
@@ -338,7 +394,7 @@ describe('backfillDocumentWideAttribution', () => {
   const provider = { name: 'Dr. Kim', specialty: null, email: null, phone: null, evidence: null }
   const otherProvider = { name: 'Dr. Patel', specialty: null, email: null, phone: null, evidence: null }
   const summary = (overrides: Partial<ConditionSummary> = {}): ConditionSummary => ({
-    name_medical: 'Eczema', earliest_date: null, notes: null, provider: null, facility: null, ...overrides,
+    name_medical: 'Eczema', earliest_date: null, section_date: null, notes: null, provider: null, facility: null, ...overrides,
   })
   type ChunkExtractionResult = {
     conditions: ConditionSummary[]
@@ -372,25 +428,168 @@ describe('backfillDocumentWideAttribution', () => {
   })
 })
 
-describe('backfillDocumentWideDate', () => {
+// ── P11-03: tiered condition/section/document date resolution ────────────────
+// Replaces the old single-global-minimum backfillDocumentWideDate. Resolution
+// order is locked: condition-tier date wins first, else section-tier date,
+// else the single document-tier date, else null.
+
+describe('resolveConditionDateTiers', () => {
   const summary = (overrides: Partial<ConditionSummary> = {}): ConditionSummary => ({
-    name_medical: 'Eczema', earliest_date: null, notes: null, provider: null, facility: null, ...overrides,
+    name_medical: 'Eczema', earliest_date: null, section_date: null, notes: null, provider: null, facility: null, ...overrides,
   })
 
-  it('backfills an undated condition from the earliest date known anywhere in the document', () => {
-    const conditions = [summary(), summary({ name_medical: 'Gout', earliest_date: '2021-05-01' })]
-    const result = backfillDocumentWideDate(conditions, [null, '2019-01-01'])
-    expect(result[0].earliest_date).toBe('2019-01-01')
+  it('resolves to the section-tier date when the condition has no own date and no document date', () => {
+    const result = resolveConditionDateTiers([summary({ section_date: '2020-03-01' })], null)
+    expect(result[0].earliest_date).toBe('2020-03-01')
     expect(result[0].earliest_date_inherited).toBe(true)
-    // A condition with its own explicit date is left untouched.
-    expect(result[1].earliest_date).toBe('2021-05-01')
-    expect(result[1].earliest_date_inherited).toBeUndefined()
   })
 
-  it('leaves earliest_date null when the document genuinely has no date anywhere', () => {
-    const conditions = [summary()]
-    const result = backfillDocumentWideDate(conditions, [null, null])
+  it('resolves to the document-tier date when neither condition nor section tier has one', () => {
+    const result = resolveConditionDateTiers([summary()], '2021-01-15')
+    expect(result[0].earliest_date).toBe('2021-01-15')
+    expect(result[0].earliest_date_inherited).toBe(true)
+  })
+
+  it('leaves earliest_date null when no tier has a date anywhere — the honest terminal case, never a computed substitute', () => {
+    const result = resolveConditionDateTiers([summary()], null)
     expect(result[0].earliest_date).toBeNull()
+    expect(result[0].earliest_date_inherited).toBeFalsy()
+  })
+
+  it('prefers the condition-tier date over section and document tiers when all three are present', () => {
+    const result = resolveConditionDateTiers([summary({ earliest_date: '2019-06-01', section_date: '2020-03-01' })], '2021-01-15')
+    expect(result[0].earliest_date).toBe('2019-06-01')
+    expect(result[0].earliest_date_inherited).toBe(false)
+  })
+
+  it('prefers the section-tier date over the document-tier date when both are present but no condition-tier date exists', () => {
+    const result = resolveConditionDateTiers([summary({ section_date: '2020-03-01' })], '2021-01-15')
+    expect(result[0].earliest_date).toBe('2020-03-01')
+    expect(result[0].earliest_date_inherited).toBe(true)
+  })
+})
+
+// P11-05: a condition merged (via dedupeConditionSummaries) from two
+// occurrences — one with its own condition-tier date, the other with only a
+// section-tier date — must resolve to the condition-tier date, regardless of
+// which occurrence appears first. Exercised through enrichFromText so the
+// full extraction -> dedupe -> tier-resolution flow is proven, not just the
+// resolveConditionDateTiers unit in isolation.
+describe('enrichFromText — cross-occurrence tier resolution (P11-05)', () => {
+  it('resolves to the condition-tier date when merging an explicitly-dated occurrence with a section-dated-only occurrence', async () => {
+    mockByLabel({
+      'structure-analysis': () => ({
+        ok: true, model: 'm', content: '',
+        value: {
+          organization: 'chronological',
+          documentDate: null,
+          sections: [{ heading: 'Full record', startOffset: 0, endOffset: 9999, inferredDate: '2020-03-01', sectionType: 'other', imageWorthy: false }],
+        },
+        failures: [],
+      }),
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: {
+          conditions: [
+            { name_medical: 'Essential hypertension', earliest_date: '2019-06-01', notes: null, provider: null, facility: null },
+            { name_medical: 'Essential hypertension', earliest_date: null, notes: null, provider: null, facility: null },
+          ],
+          measurements: [],
+        },
+        failures: [],
+      }),
+      'extraction-dedupe': () => ({ ok: true, model: 'm', content: '', value: new Map([[0, 0], [1, 0]]), failures: [] }),
+      'enrichment-anatomy': () => ({
+        ok: true, model: 'm', content: '',
+        value: new Map([[0, { system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null, cx: null, cy: null }]]),
+        failures: [],
+      }),
+    })
+
+    const result = await enrichFromText('report text', '', [])
+    expect(result.conditions).toHaveLength(1)
+    expect(result.conditions[0].date_diagnosed).toBe('2019-06-01')
+  })
+
+  it('resolves to the same condition-tier date when occurrence order is swapped', async () => {
+    mockByLabel({
+      'structure-analysis': () => ({
+        ok: true, model: 'm', content: '',
+        value: {
+          organization: 'chronological',
+          documentDate: null,
+          sections: [{ heading: 'Full record', startOffset: 0, endOffset: 9999, inferredDate: '2020-03-01', sectionType: 'other', imageWorthy: false }],
+        },
+        failures: [],
+      }),
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: {
+          conditions: [
+            { name_medical: 'Essential hypertension', earliest_date: null, notes: null, provider: null, facility: null },
+            { name_medical: 'Essential hypertension', earliest_date: '2019-06-01', notes: null, provider: null, facility: null },
+          ],
+          measurements: [],
+        },
+        failures: [],
+      }),
+      'extraction-dedupe': () => ({ ok: true, model: 'm', content: '', value: new Map([[0, 0], [1, 0]]), failures: [] }),
+      'enrichment-anatomy': () => ({
+        ok: true, model: 'm', content: '',
+        value: new Map([[0, { system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null, cx: null, cy: null }]]),
+        failures: [],
+      }),
+    })
+
+    const result = await enrichFromText('report text', '', [])
+    expect(result.conditions).toHaveLength(1)
+    expect(result.conditions[0].date_diagnosed).toBe('2019-06-01')
+  })
+
+  // Defect 1 (QA retest, 2026-08-18): when the semantic-dedupe LLM call fails,
+  // same-condition occurrences reach the second, conditionKey-based merge
+  // pass (mergeConditions/mergeTwoConditions) still tier-resolved
+  // independently. Before the fix, that pass picked whichever date was
+  // numerically earlier with no tier awareness, letting a section-tier
+  // date (2020-03-01) beat a later-but-more-granular condition-tier date
+  // (2023-06-15). QA's exact repro.
+  it('resolves to the condition-tier date through the conditionKey-based merge pass when the dedupe LLM call fails', async () => {
+    mockByLabel({
+      'structure-analysis': () => ({
+        ok: true, model: 'm', content: '',
+        value: {
+          organization: 'chronological',
+          documentDate: null,
+          sections: [{ heading: 'Full record', startOffset: 0, endOffset: 9999, inferredDate: '2020-03-01', sectionType: 'other', imageWorthy: false }],
+        },
+        failures: [],
+      }),
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: {
+          conditions: [
+            { name_medical: 'Essential hypertension', earliest_date: null, notes: null, provider: null, facility: null },
+            { name_medical: 'Essential hypertension', earliest_date: '2023-06-15', notes: null, provider: null, facility: null },
+          ],
+          measurements: [],
+        },
+        failures: [],
+      }),
+      // Dedupe LLM call fails — documented non-fatal degrade path.
+      'extraction-dedupe': () => ({ ok: false, model: null, content: null, value: null, failures: [] }),
+      'enrichment-anatomy': () => ({
+        ok: true, model: 'm', content: '',
+        value: new Map([
+          [0, { system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null, cx: null, cy: null }],
+          [1, { system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null, cx: null, cy: null }],
+        ]),
+        failures: [],
+      }),
+    })
+
+    const result = await enrichFromText('report text', '', [])
+    expect(result.conditions).toHaveLength(1)
+    expect(result.conditions[0].date_diagnosed).toBe('2023-06-15')
   })
 })
 

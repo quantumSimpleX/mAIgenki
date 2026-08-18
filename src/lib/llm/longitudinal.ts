@@ -122,13 +122,30 @@ export function repairPixelCoordinate(mask: AlphaMask, cx: number, cy: number): 
   const originY = Math.round((clampedCy / 100) * (mask.height - 1))
   const maxRadius = Math.max(mask.width, mask.height)
   for (let radius = 1; radius <= maxRadius; radius += 1) {
-    for (let y = Math.max(0, originY - radius); y <= Math.min(mask.height - 1, originY + radius); y += 1) {
-      for (let x = Math.max(0, originX - radius); x <= Math.min(mask.width - 1, originX + radius); x += 1) {
-        if (mask.alpha[y * mask.width + x] > 0) return {
-          cx: mask.width > 1 ? (x / (mask.width - 1)) * 100 : 0,
-          cy: mask.height > 1 ? (y / (mask.height - 1)) * 100 : 0,
-        }
+    // Defect 4 issue 2 fix: scan only this ring's border cells (interior cells
+    // were already checked at a smaller radius) and pick the Euclidean-nearest
+    // opaque pixel within the ring, rather than the first one hit in raster
+    // (row-major) order — raster order could land on a far corner of the ring
+    // even when a much closer opaque pixel existed a few cells away.
+    const minY = Math.max(0, originY - radius)
+    const maxY = Math.min(mask.height - 1, originY + radius)
+    const minX = Math.max(0, originX - radius)
+    const maxX = Math.min(mask.width - 1, originX + radius)
+    let bestX = -1
+    let bestY = -1
+    let bestDistSq = Infinity
+    for (let y = minY; y <= maxY; y += 1) {
+      const onYBorder = y === originY - radius || y === originY + radius
+      for (let x = minX; x <= maxX; x += 1) {
+        if (!onYBorder && x !== originX - radius && x !== originX + radius) continue
+        if (mask.alpha[y * mask.width + x] <= 0) continue
+        const distSq = (x - originX) ** 2 + (y - originY) ** 2
+        if (distSq < bestDistSq) { bestDistSq = distSq; bestX = x; bestY = y }
       }
+    }
+    if (bestX !== -1) return {
+      cx: mask.width > 1 ? (bestX / (mask.width - 1)) * 100 : 0,
+      cy: mask.height > 1 ? (bestY / (mask.height - 1)) * 100 : 0,
     }
   }
   return null

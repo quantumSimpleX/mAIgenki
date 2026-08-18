@@ -328,6 +328,36 @@ describe('IndexedDB vertical slice', () => {
     db.close()
   })
 
+  // Defect 4 regression (found in the same live run as the P10-07 acceptance
+  // pass, before this card reached kb4-DONE): a laterality-bearing condition's
+  // secondary condition_locations row must use the anatomy call's own cx/cy
+  // (now carried through by enrich.ts's buildConditionFromSummary) rather than
+  // defaultConditionPosition's hash-jitter fallback.
+  it('uses the location\'s own cx/cy for a laterality-bearing secondary location, not the hash-jitter default', async () => {
+    const db = await openIndexedDb(`maigenki-laterality-location-${Date.now()}`)
+    await persistEnrichmentResult(db, {
+      filename: 'report.pdf',
+      pageCount: 1,
+      extractionMethod: 'text',
+      conditions: [{
+        id: 'wart', name_medical: 'Verruca vulgaris', name_common: 'Common wart', system: 'integumentary',
+        organ: null, anatomical_location: 'hands', status: 'documented', severity: null, certainty: null,
+        date_onset: null, date_diagnosed: '2022-06-01', evidence: null,
+        cx: 20, cy: 90,
+        locations: [{ anatomical_location: 'hands', laterality: 'bilateral', evidence: null, cx: 62, cy: 45 }],
+      }],
+      measurements: [],
+    })
+
+    const dots = await getIndexedConditionDots(db)
+    const wartDots = dots.filter((d) => d.conditionId === 'wart')
+    expect(wartDots).toHaveLength(2)
+    const secondary = wartDots.find((d) => d.cx_percent !== 20 || d.cy_percent !== 90)
+    expect(secondary).toEqual(expect.objectContaining({ cx_percent: 62, cy_percent: 45 }))
+
+    db.close()
+  })
+
   // P10-04/P10-06: a model-proposed cx/cy that lands on a transparent pixel
   // must be repaired onto the nearest opaque one, exactly as an
   // already-correct condition would be (repairConditionCoordinates, unchanged
@@ -358,6 +388,42 @@ describe('IndexedDB vertical slice', () => {
     const dot = dots.find((d) => d.conditionId === 'model-proposed-coordinate')
     expect(dot).toBeDefined()
     expect(dot).toEqual(expect.objectContaining({ cx_percent: 50, cy_percent: 50 }))
+
+    db.close()
+  })
+
+  // Defect 5 regression: a condition whose anatomy call produced no cx/cy
+  // falls through to defaultConditionPosition's hash-jitter default in
+  // putIndexedCondition — that fallback previously bypassed alpha-mask
+  // repair entirely (repairConditionCoordinates only ever saw the earlier,
+  // absent LLM value). The final stored position must still land on a
+  // non-transparent pixel, exactly like a model-proposed coordinate does.
+  it('repairs the hash-jitter fallback position onto the mask when the anatomy call produced no coordinate', async () => {
+    const db = await openIndexedDb(`maigenki-fallback-coordinate-repair-${Date.now()}`)
+    // 3x3 mask, only the top-left pixel (0%, 0%) is opaque — far from where
+    // defaultConditionPosition's system-anchor-based jitter would land, so
+    // this only passes if the fallback path is actually repaired.
+    const mask: AlphaMask = { width: 3, height: 3, alpha: new Uint8Array([255, 0, 0, 0, 0, 0, 0, 0, 0]) }
+
+    const { conditionCount } = await persistEnrichmentResult(db, {
+      filename: 'report.pdf',
+      pageCount: 1,
+      extractionMethod: 'text',
+      conditions: [{
+        id: 'no-llm-coordinate', name_medical: 'Migraine', name_common: null, system: 'nervous',
+        organ: 'brain', anatomical_location: 'head', status: 'documented', severity: null, certainty: null,
+        date_onset: null, date_diagnosed: '2022-06-01', evidence: null,
+        // No cx/cy at all — forces putIndexedCondition's defaultConditionPosition fallback.
+      }],
+      measurements: [],
+      coordinateMask: mask,
+    })
+    expect(conditionCount).toBe(1)
+
+    const dots = await getIndexedConditionDots(db)
+    const dot = dots.find((d) => d.conditionId === 'no-llm-coordinate')
+    expect(dot).toBeDefined()
+    expect(dot).toEqual(expect.objectContaining({ cx_percent: 0, cy_percent: 0 }))
 
     db.close()
   })

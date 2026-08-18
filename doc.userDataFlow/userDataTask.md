@@ -686,13 +686,25 @@ Detailed kanban card: `doc.userDataFlow/kb4-DONE/p09-llm-extraction-enrichment.m
 
 ## Phase 10 — Extraction/merge/enrichment data-integrity and coordinate-derivation fixes
 
-A 2026-08-17 audit found several gaps this task list's Phase 09 didn't close: dates/provider/facility can go silently null beyond what cross-document inheritance should allow, merged conditions keep only the first non-null provider instead of every unique provider/facility, `name_common`/`local_names` are never derived for real (non-demo) data, body-map coordinates come from a per-system hash-jitter default rather than the notes/anatomical-knowledge-derived position the product intends (alpha-mask repair is correctly wired as the final constraint, unchanged), and the persisted provider/facility/care-event data is never read back into the condition detail UI.
+**Status: IN PROGRESS** (not yet DONE — a P0 regression was found during the same live acceptance session that was about to close this phase, before the DONE state was committed). A 2026-08-17 audit found several gaps Phase 09 didn't close: dates/provider/facility could go silently null beyond what cross-document inheritance should allow, merged conditions kept only the first non-null provider instead of every unique provider/facility, `name_common`/`local_names` were never derived for real (non-demo) data, body-map coordinates came from a per-system hash-jitter default rather than a notes/anatomical-knowledge-derived position, and persisted provider/facility/care-event data was never read back into the condition detail UI. A first live browser acceptance run caught and fixed a P0 defect not in the original audit (Defect 3): a failed anatomy-enrichment call fell back to `system: 'other'`, silently rendered as Integumentary. That fix was independently confirmed live. Immediately after, manual spot-checking of the same live run's data surfaced a second, distinct P0 (Defect 4): any condition with a `laterality` value (bilateral/left/right) renders as two disconnected dots — a real primary position and a fake, hash-jittered "phantom" secondary dot carrying the real anatomical label but fake coordinates — because `buildConditionFromSummary` never writes the anatomy call's derived cx/cy onto the condition's `locations[]` array entries. This is what a duplicate-looking condition (e.g. "common wart"/Verruca Vulgaris, "hand fissure") turned out to be.
 
-1. Guarantee condition/date/notes/provider/facility are non-null whenever the source document supports a value; define an explicit fallback for the case where it doesn't.
-2. Fix cross-occurrence merge to retain every unique provider/facility, not just the first non-null one.
-3. Derive `name_common` and `local_names` per condition (currently unset for real extraction).
-4. Derive body-map `cx`/`cy` from consolidated notes first, general condition-location knowledge second, with the existing alpha-mask repair as the final, unchanged validation step.
-5. Wire persisted providers/facilities/care events into the condition detail UI.
-6. Add fixtures/tests for all of the above; run full validation and browser acceptance comparing dot placement and card content before/after.
+Defect 4 was subsequently fixed and independently re-verified (differential fail/pass
+proof on both its sub-issues); only a live-browser visual re-confirmation of that fix
+remains open. Card left in `kb3-TEST` pending that.
 
-Detailed kanban card: `doc.userDataFlow/kb1-TODO/p10-extraction-merge-enrichment-fixes.md`.
+Detailed kanban card: `doc.userDataFlow/kb3-TEST/p10-extraction-merge-enrichment-fixes.md`.
+
+## Phase 11 — Tiered condition/section/document date hierarchy for extraction merge
+
+The same 2026-08-18 live session that closed out P10's Defect 4 surfaced a distinct
+issue: P10-01's `backfillDocumentWideDate` collapses to a single global-minimum date
+found anywhere in the document and stamps it on every remaining undated condition,
+producing implausible clustering (21 of 45 conditions in one real record sharing one
+backfilled date). User-directed fix: track three separate date tiers through
+extraction — condition (most granular), section, document (last resort, a genuine
+extracted document-level date, not a computed minimum) — and resolve across tiers at
+merge time, most-granular-non-null-wins. Bidirectional (forward+backward) section-date
+search was considered and explicitly deferred, not implemented — documented as a future
+option to revisit only if clustering persists after this fix.
+
+Detailed kanban card: `doc.userDataFlow/kb1-TODO/p11-tiered-date-hierarchy.md`.

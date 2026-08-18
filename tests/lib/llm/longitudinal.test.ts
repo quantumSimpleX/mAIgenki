@@ -31,6 +31,41 @@ describe('longitudinal extraction utilities', () => {
     expect(repairPixelCoordinate({ ...mask, alpha: new Uint8Array(9) }, 50, 50)).toBeNull()
   })
 
+  // Defect 4 issue 2 regression: within a single search ring, the geometrically
+  // nearest opaque pixel must win, not whichever one raster (row-major) order
+  // happens to hit first. Both opaque pixels below sit at Chebyshev radius 2
+  // from the origin (2,2) — same ring — but (0,0) is a far corner (Euclidean
+  // ~2.83) while (2,4) is axis-aligned and nearer (Euclidean 2). The pre-fix
+  // algorithm scanned the ring in raster order and returned whichever it hit
+  // first, regardless of distance.
+  it('picks the Euclidean-nearest opaque pixel within a ring, not the first found in raster (scan-order) order', () => {
+    const width = 5
+    const height = 5
+    const alpha = new Uint8Array(width * height)
+    alpha[0 * width + 0] = 255 // (x=0, y=0): farther euclidean (~2.83), hit first by raster order
+    alpha[4 * width + 2] = 255 // (x=2, y=4): nearer euclidean (2), hit later by raster order
+    const mask = { width, height, alpha }
+
+    // Reference: the pre-fix behavior — first opaque pixel hit while scanning
+    // each expanding square in raster (row-major) order, not the nearest one.
+    const scanOrderFirstFound = (() => {
+      const originX = 2
+      const originY = 2
+      for (let radius = 1; radius <= 4; radius += 1) {
+        for (let y = Math.max(0, originY - radius); y <= Math.min(height - 1, originY + radius); y += 1) {
+          for (let x = Math.max(0, originX - radius); x <= Math.min(width - 1, originX + radius); x += 1) {
+            if (alpha[y * width + x] > 0) return { cx: (x / (width - 1)) * 100, cy: (y / (height - 1)) * 100 }
+          }
+        }
+      }
+      return null
+    })()
+    expect(scanOrderFirstFound).toEqual({ cx: 0, cy: 0 }) // the farther pixel — the pre-fix bug
+
+    const actualNearest = repairPixelCoordinate(mask, 50, 50) // origin (2,2) is transparent
+    expect(actualNearest).toEqual({ cx: 50, cy: 100 }) // the nearer pixel — this fix
+  })
+
   it('clamps out-of-range coordinates and handles one-pixel masks', () => {
     expect(repairPixelCoordinate({ width: 2, height: 2, alpha: new Uint8Array([0, 0, 0, 255]) }, 150, 150)).toEqual({ cx: 100, cy: 100 })
     expect(repairPixelCoordinate({ width: 1, height: 1, alpha: new Uint8Array([255]) }, 50, 50)).toEqual({ cx: 50, cy: 50 })

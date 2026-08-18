@@ -1082,16 +1082,805 @@ P10-06's original scope remains QA-approved (unchanged since the prior retest pa
 code near it touched by this fix). Full validation green: `npm run typecheck` PASS,
 `npx expo lint` PASS (exit 0), `npm test` PASS (55/55 suites, 545/545 tests).
 
-**Still NOT COMPLETE — cannot move to `kb4-DONE` yet.** The sole remaining blocker is
-P10-07's live browser/OpenRouter acceptance pass (dot placement, condition-card content,
-and now specifically a fresh confirmation that Defect 3's fix holds under a real upload),
-plus the never-completed point-by-point coordinate-accuracy check. Both require a live
-browser/OpenRouter session that this QA session did not have available, and a full
-free-tier run has previously taken 35-40 minutes end to end — not something this QA pass
-attempted to substitute for with a partial or simulated check. This is recorded as an
-open blocker per `prompt.userData.md`'s explicit instruction to classify an untested
-browser/viewport combination as a blocker, not a pass — not a silent gate and not a
-silent pass. ArchAgent/the user must decide whether to schedule that live run before
-`kb4-DONE`, or accept it as an explicit, user-acknowledged follow-up per the workflow
-doc's closing line — that decision is not QA's to make. This card remains in
-`kb3-TEST/` per workflow rules; not moved by this QA pass.
+## P10-07 live browser acceptance (2026-08-18) — real run, Defect 3 confirmed fixed live
+
+ArchAgent ran a full live end-to-end pass this session: restarted the web dev server
+(after killing stale processes from the prior session), the user reconnected the
+OpenRouter session directly in Settings (the prior session's `401 User not found`
+failures were a stale/invalid locally-cached key, not a code defect — confirmed by the
+fact that a fresh Connect resolved it), and the user then dropped a real multi-condition
+health PDF through the running app. The run took roughly 35 minutes end to end on the
+free-tier model chain (consistent with every prior session's timing estimate — long
+individual model timeouts, e.g. one 15-minute timeout on `google/gemma-4-26b-a4b-it:free`
+during the extraction step, with the fallback chain moving on to the next candidate
+each time, not stalling).
+
+Verified directly against the resulting IndexedDB record (`record_id
+40bf81c8-f8f6-4f96-abbe-e09e469bb34a`, 45 conditions), queried live from the running
+page, not inferred from the UI:
+
+- **Defect 3 — CONFIRMED FIXED on real data.** 0 of 45 conditions have `system: 'other'`
+  or any value outside the 11 real `OrgSystem` values. Distribution:
+  integumentary 9, digestive 13, nervous 6, cardiovascular 5, skeletal 3, endocrine 2,
+  lymphatic 2, respiratory 2, muscular 1, reproductive 1, renal 1 — spread across real
+  systems, not piled into one bucket. The user's own originally-reported repro case is
+  now correct on live data: "Major depressive disorder" resolved to
+  `system: "nervous"` (matching the locked product decision's own worked example),
+  not integumentary/other as before the fix.
+- **P10-01 (non-null guarantees) — confirmed on real data.** 45/45 conditions have a
+  non-null `date` and a non-null `note`.
+- **P10-03 (name_common) — confirmed working, with an expected/acceptable gap.** 41/45
+  conditions have a populated `name_common` (e.g. "Coronary arteriosclerosis" →
+  "clogged coronary arteries", "external otitis" → "Swimmer's ear"); the remaining 4
+  (including the depression condition) are null, which is the prompt's explicitly
+  allowed "cannot be inferred confidently" case (`CONDITION_ENRICHMENT_PROMPT`: "Return
+  null for ... name_common when they cannot be inferred reliably"), not a defect —
+  distinct from the old hard-failure `'other'` system bug, since a null common name
+  never causes a mis-render the way a wrong system did.
+- **P10-04 (coordinate derivation) — mechanically confirmed working on real data,
+  point-by-point clinical accuracy still not exhaustively checked.** 45/45 conditions
+  have non-null `cx`/`cy`. Spot-checked several: "external otitis" (an ear condition)
+  at (75, 40); "rotator cuff tendonitis" (shoulder) at (65, 35); esophageal conditions
+  clustering near (50, 30). These are plausible, differentiated positions, not a single
+  per-system anchor point with jitter — a meaningfully different result than the
+  pre-P10 hash-jitter default. A full manual audit of every condition's placement
+  against its notes was not performed (45 conditions is impractical to hand-verify
+  exhaustively in one session) — this spot-check is evidence of working behavior, not
+  proof of universal accuracy; treat as substantially de-risked, not fully closed.
+
+**Environment note for future sessions:** the `401 User not found` failure seen in an
+earlier attempt this same day was resolved by the user reconnecting via Settings' OAuth
+Connect flow — not a code change. If this recurs, check the OpenRouter connection state
+in Settings before assuming a pipeline defect.
+
+## Completion
+
+**Defects 1, 2, and 3 are all independently confirmed fixed** across separate QA
+sessions, now including live-data confirmation for Defect 3 specifically (not just
+unit tests). P10-01 through P10-06's original scope remains QA-approved. Full
+validation green: `npm run typecheck` PASS, `npx expo lint` PASS (exit 0), `npm test`
+PASS (55/55 suites, 545/545 tests). A live end-to-end browser/OpenRouter run has now
+been completed and its IndexedDB output directly inspected, closing the primary
+P10-07 blocker (an untested browser/viewport combination) that kept this card out of
+`kb4-DONE` in every prior session.
+
+**Remaining open item, not blocking:** exhaustive point-by-point coordinate accuracy
+across every condition in a real record was not fully hand-verified (spot-checked only,
+per above) — this is a lower-severity, product-quality follow-up rather than a
+correctness defect, since it's already constrained by the unchanged alpha-mask repair
+step and no longer risks a condition rendering under a clinically wrong organ system.
+Desktop-vs-narrow-mobile visual/responsive verification of the condition detail sheet's
+new attribution block (P10-05) was also not separately exercised this session.
+
+**Card was about to move to `kb4-DONE` — reverted.** Before that DONE state was
+committed, manual spot-checking of the same live run's data surfaced a fourth, distinct
+P0 defect (below). The card remains in `kb2-CODE` until it is fixed and retested.
+
+## Defect 4 (Critical — found 2026-08-18, same live run as the P10-07 acceptance pass, before DONE was committed)
+
+**User-reported symptom:** random spot-checking of the live run's rendered body map
+showed apparent duplicate conditions — e.g. "common wart" and "hand fissure" each
+seemed to appear twice.
+
+**Root cause, confirmed directly against the live run's IndexedDB data (record
+`40bf81c8-f8f6-4f96-abbe-e09e469bb34a`), not by inference:**
+
+Any condition whose anatomy-enrichment call (`enrichConditionAnatomyBatch`,
+`src/lib/llm/enrich.ts`) returns a non-null `laterality` (bilateral/left/right) ends up
+rendered as **two disconnected dots for one condition**, not a true duplicate condition
+row (there is exactly one `conditions` row per name, confirmed no name-level duplicates
+exist in this record — 45 conditions, 45 unique normalized names). The two dots come
+from two different `condition_locations` rows for the same `condition_id`:
+
+- The **secondary** (`is_primary: false`) row carries the real `anatomical_location`/
+  `laterality` label (e.g. "hands"/"bilateral" for Verruca Vulgaris — medical name for
+  common wart) — but its `cx`/`cy` are **not** the anatomy call's actual derived point.
+  `buildConditionFromSummary` (enrich.ts) only ever writes
+  `{ anatomical_location, laterality, evidence }` onto a `locations[]` entry when
+  `anatomy.laterality` is set — it never carries `anatomy.cx`/`anatomy.cy` (the P10-04
+  coordinate the LLM proposed) onto that same entry. Downstream, `persistEnrichmentResult`
+  (`src/lib/db/indexedDb.ts`)'s secondary-location loop then falls back to
+  `defaultConditionPosition`'s hash-jitter whenever `loc.cx` is undefined — which it
+  always is for these entries. The label is real; the position is fake (jittered around
+  the condition's system anchor point, which can coincidentally look plausible for
+  head/face conditions since those anchors already sit near the head, making the bug
+  easy to miss on casual inspection but not on a like-for-like check).
+- The **primary** (`is_primary: true`) row gets the condition's own top-level `cx`/`cy`
+  (`anatomy.cx`/`anatomy.cy`, correctly plumbed per P10-04) — but for several observed
+  conditions, this point has clearly been relocated a large geometric distance from
+  where it should be by the alpha-mask repair step. Confirmed example: "Congenital left
+  eye cataract" — secondary/labeled dot at (52.51, 12.51), sensibly near the head; but
+  the primary dot ends up at (18.98, 21.19), nowhere near an eye. The long, non-round
+  decimal values on affected primary points (e.g. `18.977384464110127`) are the
+  signature of `repairPixelCoordinate`'s pixel-grid division (`x / (mask.width - 1) *
+  100`), confirming mask repair is the mechanism, not the LLM's own proposal.
+
+**Two distinct issues, different scope:**
+
+1. **Confirmed P10-04 regression (required fix).** `buildConditionFromSummary` must
+   carry the anatomy call's derived `cx`/`cy` onto the `locations[]` entry it creates
+   for a lateral/bilateral condition, so the secondary dot's position matches its own
+   label instead of being silently re-derived via hash-jitter. This directly contradicts
+   P10-04's acceptance criterion ("coordinates derived from consolidated notes first,
+   general knowledge second... never a random per-system jitter as the primary source
+   of position") — the jitter is exactly what's happening for every multi-location
+   condition today.
+2. **Related but separately-scoped concern (flag for Dev/QA judgment, not necessarily
+   required for this card).** `repairPixelCoordinate` (`src/lib/llm/longitudinal.ts`,
+   confirmed unchanged since P09 by an earlier QA pass's zero-line diff) finds the
+   *first* opaque pixel encountered while scanning an expanding square ring outward
+   from the origin point, not the *geometrically nearest* one — this can produce a
+   large, implausible jump when the immediate area around a proposed point is
+   transparent. This behavior predates P10, but P10-04 routes real, differentiated
+   per-condition points through it far more often than the old system-anchor-based
+   defaults did (those were already constructed to sit near their masks' opaque
+   regions), making a pre-existing weakness much more visible/impactful now. Whoever
+   picks this up should decide explicitly whether fixing the repair search itself is
+   in scope for this card or a separate follow-up — do not silently skip it either way.
+
+**Priority:** P0 — blocks `kb4-DONE`. Directly undermines the just-verified P10-04
+acceptance criteria and produces a visibly broken/confusing body-map result (the exact
+"duplicate condition" symptom a user would notice immediately).
+
+**Fix direction for issue 1:** in `buildConditionFromSummary`, when constructing the
+`locations[]` entry from `anatomy.laterality`, also set `cx: anatomy?.cx ?? null, cy:
+anatomy?.cy ?? null` on that entry (mirroring the top-level `cx`/`cy` assignment
+immediately below it in the same function). Confirm `persistEnrichmentResult`'s
+secondary-location loop (`loc.cx ?? locationPosition.cx`) then correctly prefers this
+real value over the hash-jitter fallback, exactly as it already does when locations
+come from other sources (e.g. demo data). Add a regression test: a condition with a
+laterality-bearing anatomy result produces a secondary `condition_locations` row whose
+`cx`/`cy` matches the anatomy call's proposed point, not a hash-jittered default.
+
+## Blockers (updated 2026-08-18)
+
+- Defect 4 blocks `kb4-DONE`. Card returned to `kb2-CODE`.
+- Issue 2 above (repair-search quality) is an open scope question for the next
+  Dev/QA round to resolve explicitly, not a silent carry-forward.
+
+## Completion
+
+NOT COMPLETE. Card returned to `kb2-CODE` for Defect 4. Do not move to `kb4-DONE`
+until Defect 4's required fix (issue 1) is implemented and retested, and issue 2's
+scope has been explicitly decided (fixed here, or knowingly deferred) rather than
+silently ignored.
+
+## Defect 4 fix (DevAgent, 2026-08-18)
+
+**Issue 1 (required fix) — implemented.** `buildConditionFromSummary` (`src/lib/llm/enrich.ts`)
+now sets `cx: anatomy?.cx ?? null, cy: anatomy?.cy ?? null` on the `locations[]` entry it
+builds when `anatomy.laterality` is set, mirroring the top-level `cx`/`cy` assignment a few
+lines below in the same function. Traced `persistEnrichmentResult`'s secondary-location loop
+(`src/lib/db/indexedDb.ts`, `cx: loc.cx ?? locationPosition.cx`) and confirmed by reading the
+code — not assumed — that it already prefers a real `loc.cx`/`loc.cy` over
+`defaultConditionPosition`'s hash-jitter fallback whenever one is present, the same pattern
+already used for other location sources (e.g. demo data); no change was needed there.
+
+**Issue 2 (judgment call) — fixed, scoped as a minimal, low-risk addition to this card.**
+Read the actual `repairPixelCoordinate` implementation (`src/lib/llm/longitudinal.ts`). Its
+docstring already claimed "Finds the closest opaque pixel," but the body scanned each
+expanding square in raster (row-major) order and returned the first opaque pixel hit — not
+the nearest one within that same ring, which could put the repaired point on a far corner of
+the search area when a much closer opaque pixel existed a few cells away. Decision: this is
+small and safe — same overall algorithm shape (expanding-radius search from the origin, same
+signature, same call sites), the change is contained entirely inside one function, and it
+directly affects this defect's other user-visible symptom (the primary dot's implausible
+relocation, e.g. the "Congenital left eye cataract" example in the Defect 4 write-up above).
+Fixed it: for each radius, the ring's border cells only are scanned (interior cells were
+already checked at a smaller radius — this is also a minor efficiency win), and among opaque
+matches within that ring the Euclidean-nearest one is returned, instead of whichever the
+row-major scan order hit first. Not treated as a full rewrite to a guaranteed globally-nearest
+search — Chebyshev-ring-based expanding search can in rare cases (large radius, diagonal
+proximity) still miss a slightly-nearer pixel one ring further out; that residual gap is a
+known, accepted limitation of the expanding-square technique itself, not something this fix
+introduces, and pursuing exact global nearest-neighbor search was judged disproportionate to
+the actual body-map dot-placement use case (small canvases, coarse visual tolerance).
+
+**Tests added:**
+- `tests/lib/enrich.test.ts`: two new tests under a new "Defect 4" block — a laterality-bearing
+  condition's `locations[]` entry carries the anatomy call's own `cx`/`cy` (not null), and
+  leaves them `null` (not a random default) when the anatomy call has no usable position.
+- `tests/lib/indexedDb.test.ts`: one new test driving `persistEnrichmentResult` end-to-end with
+  a laterality condition whose location entry has explicit `cx`/`cy` — asserts the resulting
+  secondary `condition_locations` dot uses that value, not the hash-jitter default.
+- `tests/lib/llm/longitudinal.test.ts`: one new test for issue 2, directly comparing a reference
+  implementation of the pre-fix raster-order-first-found behavior (returns the far corner pixel
+  at `(0,0)`) against the actual `repairPixelCoordinate` output (returns the nearer axis-aligned
+  pixel at `(2,4)`) on a small synthetic 5x5 mask with two opaque pixels at the same Chebyshev
+  ring but different Euclidean distance.
+
+**Validation run (2026-08-18, this session):**
+- `npm run typecheck` — PASS, clean, no output.
+- `npx expo lint` — PASS, exit code 0, no errors/warnings.
+- `npx jest --runInBand --coverage=false tests/lib/enrich.test.ts tests/lib/indexedDb.test.ts` —
+  PASS, 43/43 tests (2 test suites).
+- `npx jest --runInBand --coverage=false tests/lib/llm/longitudinal.test.ts` — PASS, 9/9 tests.
+- `npm test` (full suite, with coverage) — PASS, **55 passed / 55 total suites, 549 passed /
+  549 total tests, 0 failed** (545 prior + 4 new tests from this fix). No flakiness observed
+  this run in `connectionBundle.test.ts`/`ProviderSettings.test.tsx` — both passed as part of
+  the full-suite run; consistent with this being cross-suite timing flakiness, not a hard
+  failure, as documented in every prior session on this card.
+
+**Scope discipline:** touched only `src/lib/llm/enrich.ts` (the `locations[]` cx/cy line),
+`src/lib/llm/longitudinal.ts` (`repairPixelCoordinate`'s ring-scan order), and the three test
+files above. Did not touch `persistEnrichmentResult`/`indexedDb.ts` (verified by reading, not
+assumed, that no change was needed there), demo data (`src/model/conditions.ts`'s `CONDITIONS`/
+`designConditionToConditionInput`), or any file from P10-01 through P10-08/Defect 1-3's scope.
+Confirmed via `git diff --stat` against the last commit: only `src/lib/llm/enrich.ts`,
+`src/lib/llm/longitudinal.ts`, and the three test files carry this session's code changes
+(plus pre-existing, not-mine, working-tree edits to `doc.userDataFlow/userDataTask.md` and the
+kb1→kb2 card relocation already present before this session started).
+
+**Not verified in this session:** a live browser/OpenRouter re-run confirming the fix on real
+data (no such environment was available this session) — same class of gap flagged for every
+prior round on this card. The mechanical guarantee (secondary location cx/cy now carries the
+anatomy call's real point; primary-point repair now picks a geometrically-nearer pixel within
+a ring) is proven by the tests above; whether this fully eliminates visually-implausible dot
+placement on a real multi-condition document is something only a live re-run can confirm.
+
+## Completion
+
+NOT YET DONE. Defect 4 issue 1 (required fix) is implemented and unit-tested; issue 2's scope
+question is resolved (fixed, not deferred) with reasoning documented above. Full validation
+green: `npm run typecheck` PASS, `npx expo lint` PASS (exit 0), `npm test` PASS (55/55 suites,
+549/549 tests). This card remains in `kb2-CODE` per the assigned task's instruction — QA
+retest and the ArchAgent/QA decision to move it to `kb4-DONE` are out of scope for this
+DevAgent session.
+
+## QA Record (Defect 4 retest, independent QAAgent, 2026-08-18)
+
+**Note on prior report reliability:** the DevAgent's own "Defect 4 fix" write-up above was
+flagged as garbled/truncated by a tool-output compression issue. This retest did not trust
+that prose — every claim below was independently verified by reading the actual diff and
+running independently-authored tests, not by re-reading the summary.
+
+**Issue 1 (`buildConditionFromSummary`, `src/lib/llm/enrich.ts`) — VERIFIED FIXED.** Read the
+actual diff (`git diff -- src/lib/llm/enrich.ts`). The `locations[]` entry built for a
+laterality-bearing condition now reads `cx: anatomy?.cx ?? null, cy: anatomy?.cy ?? null` —
+byte-identical expression to the top-level condition's `cx`/`cy` assignment a few lines below
+in the same function, confirming both are sourced from the same `anatomy` object, not two
+independently-derived values that happen to agree today. Traced `persistEnrichmentResult`'s
+secondary-location loop in `src/lib/db/indexedDb.ts` (`cx: loc.cx ?? locationPosition.cx`,
+unchanged by this fix) and confirmed it already prefers a real `loc.cx` over
+`defaultConditionPosition`'s hash-jitter fallback whenever one is present — the fix in
+enrich.ts is sufficient on its own; no indexedDb.ts code change was needed, and none was made.
+
+Independently reproduced the original bug with a fresh test (not copied from DevAgent's),
+using the "hand fissure" condition named in the live-run bug report (DevAgent's test used
+"common wart"/Verruca vulgaris — different condition, different cx/cy values: 33.7/71.2 vs.
+theirs), driven through the full `enrichFromText` entry point with `callLLMWithFallback`
+mocked directly:
+- Asserted the secondary `locations[0]` entry carries `cx: 33.7, cy: 71.2` — matching the
+  mocked anatomy call's point, not a hash-jittered value.
+- Asserted a companion case: when the anatomy call has no usable point (`cx`/`cy` null), the
+  location entry stays `null`/`null` rather than silently re-jittering.
+- Confirmed the test is load-bearing, not trivially true: ran it against the pre-fix code via
+  `git stash` on just `enrich.ts`/`longitudinal.ts` — it failed as expected (pre-fix,
+  `locations[0]` has no `cx`/`cy` key at all: expected `cx: 33.7` vs. actual object missing
+  that field entirely). Restored the fix (`git stash pop`) and reran — passes.
+
+**Issue 2 (`repairPixelCoordinate`, `src/lib/llm/longitudinal.ts`) — VERIFIED FIXED, with the
+documented residual gap confirmed accurate.** Read the actual ring-scan rewrite. Per ring
+(Chebyshev radius), it now scans every border cell (full row when on the ring's top/bottom
+edge, else just the left/right border columns — correctly skips already-checked interior
+cells from smaller radii) and keeps the Euclidean-nearest opaque one (`distSq` comparison)
+instead of returning the first raster-order hit. Verified with 3 independent synthetic-mask
+tests (not copied from DevAgent's 5x5/2-pixel case — used a 7x7 mask with a diagonal-corner
+vs. cardinal-direction pixel pair, plus a dedicated off-axis/non-corner ring-cell case and a
+dedicated all-transparent-mask termination case):
+- (a) every pixel in a ring is considered, including off-axis/non-corner border cells (3rd
+  test: only opaque pixel at (1,4) on a ring's bottom row, correctly found) — not skipped.
+- (b) termination/null contract for an all-transparent mask is preserved (2nd test).
+- (c) real behavioral improvement, not a no-op: 1st test's raster-order-first pixel (0,0,
+  Euclidean ≈4.24) differs from the Euclidean-nearest pixel (3,0, Euclidean 3) within the same
+  ring; `repairPixelCoordinate` returns the nearer one. Reran the same test against the
+  pre-fix code (`git stash`) — failed (returned the farther corner), confirming the test is
+  genuinely discriminating, not coincidentally passing either way.
+- The write-up's disclosed residual limitation (a ring-based expanding search can, in rare
+  cases, return a same-ring diagonal pixel when a slightly-nearer pixel exists one ring
+  farther out — e.g. ring-R corner at distance R·√2 vs. ring-(R+1) cardinal pixel at distance
+  R+1, which becomes closer once R is roughly above 2.4) is mathematically real and was
+  correctly disclosed as an accepted, scoped-out limitation of the expanding-ring technique
+  itself, not something this fix introduces or hides. Reasonable scope call for
+  coarse-tolerance body-map dot placement; not a defect.
+
+**Regression check.** `git diff --stat HEAD` shows exactly: the card file, `userDataTask.md`
+(status-narrative prose only — pre-existing per DevAgent's note, confirmed by reading the
+diff: adds "Status: IN PROGRESS" and the Defect 3/4 narrative, changes the kanban-path
+pointer; no code), `src/lib/llm/enrich.ts`, `src/lib/llm/longitudinal.ts`, and the three test
+files (`tests/lib/enrich.test.ts`, `tests/lib/indexedDb.test.ts`,
+`tests/lib/llm/longitudinal.test.ts`). Nothing from P10-01 through P10-08 or Defects 1-3's
+scope was touched. One pre-existing minor doc staleness (not a new issue, not blocking):
+`userDataTask.md`'s "Detailed kanban card" link still points at `kb2-CODE/...` even though
+the file has since moved through `kb3-TEST` — worth a one-line fix whenever this card next
+moves, no functional impact.
+
+**`mergeConditionLocations` sanity check (lower-priority ask).** Read `mergeConditionLocations`
+(`src/lib/llm/enrich.ts`). It keys merges by `anatomical_location` + `laterality` label first,
+falling back to a `cx`/`cy` coordinate key only when both label fields are empty. Since
+laterality-bearing locations always have a non-empty label, they were already keyed by label
+before this fix and still are — the newly-populated `cx`/`cy` values only feed the existing
+`firstNonNull(previous.cx, location.cx)` merge-value logic (previously always resolving to
+`null`, now resolving to a real value when present), the same `firstNonNull` pattern used for
+every other scalar field in this merge path. No behavior was silently changed here — this is
+exactly what the existing code was already written to do once the field was populated.
+
+**Validation run (2026-08-18, this session, independent):**
+- `npx tsc --noEmit` — PASS, clean, no output (after removing my own scratch test files, which
+  had a couple of unrelated "possibly undefined" TS errors only in my own throwaway
+  assertions — not in any file that will be committed).
+- `npx expo lint` — PASS, no errors/warnings.
+- `npm test` (full suite) — PASS, **55/55 suites, 549/549 tests, 0 failed** — matches
+  ArchAgent's independently reported numbers. No `ProviderSettings.test.tsx` flake surfaced
+  this run (it has intermittently in prior sessions per this card's history; not investigated
+  further here since it did not reproduce and is unrelated to this diff).
+
+**Still-open, explicitly-acknowledged item — confirmed still accurately recorded, not
+re-litigated.** The "Remaining open item, not blocking" note (point-by-point coordinate
+accuracy across all 45 conditions in the live record was spot-checked, not exhaustively
+hand-verified) is still accurate and unaffected by this fix — it concerns the quality of the
+anatomy LLM's proposed points, which this fix does not touch; this fix only concerns whether a
+laterality-bearing condition's secondary dot correctly reuses whatever point the anatomy call
+already proposed, and whether the alpha-mask repair picks the nearest valid pixel when a
+proposed point needs correcting.
+
+**Verdict: Defect 4 is genuinely fixed — both issue 1 and issue 2.** Confirmed by independent
+code reading (not agent prose) and independently-authored, pre/post-fix-differentiated tests.
+No new regressions found; diff scope is exactly as claimed. Full validation green.
+
+**Before this card moves to `kb4-DONE`, still needed (not new — carried forward, explicitly
+tracked on this card already):**
+1. A live browser/OpenRouter re-run against the same or a similar multi-laterality-condition
+   record, to close the "not verified in session" gap the DevAgent itself flagged (the
+   mechanical fix is proven by unit tests; real-world visual confirmation that the
+   "duplicate dot" symptom is gone has not been done since the fix landed).
+2. The pre-existing, explicitly-acknowledged, non-blocking item: exhaustive point-by-point
+   coordinate accuracy across all conditions in a real record (spot-checked only so far).
+3. Optional cleanup, not a blocker: fix the stale `kb2-CODE` path reference in
+   `userDataTask.md`'s Phase 10 section next time this file is touched.
+
+This card remains in `kb3-TEST` pending ArchAgent's decision on item 1 above (live browser
+verification) — QA does not have a live OpenRouter/browser environment available this
+session to close that gap itself.
+
+---
+
+## QA Record (Defect 4 independent re-verification, separate QAAgent session, 2026-08-18)
+
+**Note on prior QA entry above:** the immediately preceding "QA Record (Defect 4 retest...
+2026-08-18)" entry was flagged by the orchestrating agent as produced during a session that
+hit an unrelated harness tool error, so it was not trusted as evidence on its own. This entry
+is a fully independent, from-scratch re-verification — every claim below comes from reading
+the current working-tree diff and running freshly authored tests in this session, not from
+re-reading that prior entry's prose. Its conclusions happen to agree with what's recorded
+below, but nothing here was carried over without re-derivation.
+
+**Issue 1 fix (`src/lib/llm/enrich.ts`, `buildConditionFromSummary`) — CONFIRMED FIXED.**
+Read `git diff HEAD -- src/lib/llm/enrich.ts` directly. The `locations[]` entry built when
+`anatomy?.laterality` is set now reads:
+```
+locations: anatomy?.laterality
+  ? [{ anatomical_location: anatomy.anatomical_location, laterality: anatomy.laterality, evidence: null, cx: anatomy?.cx ?? null, cy: anatomy?.cy ?? null }]
+  : [],
+```
+`cx: anatomy?.cx ?? null` / `cy: anatomy?.cy ?? null` are sourced from the exact same
+`anatomy` object as the top-level condition's `cx`/`cy` fields a few lines below (also
+`anatomy?.cx ?? null` / `anatomy?.cy ?? null`) — same object, same optional-chain expression,
+not two independently-maintained values that could drift apart. Traced
+`persistEnrichmentResult`'s secondary-location loop in `src/lib/db/indexedDb.ts`
+(`cx: loc.cx ?? locationPosition.cx, cy: loc.cy ?? locationPosition.cy`, unchanged by this
+defect's fix) and confirmed it already prefers a real `loc.cx`/`loc.cy` over
+`defaultConditionPosition`'s hash-jitter fallback whenever one is present — this was already
+correct before Defect 4, so no `indexedDb.ts` change was required, and none was made
+(confirmed by `git diff --stat` showing `indexedDb.ts` untouched by this fix, only its test
+file changed).
+
+**Independent proof, written from scratch this session:** built a small standalone Jest test
+through the real `enrichFromText` entry point (not `persistEnrichmentResult` called with a
+hand-built `locations[]` array, which would bypass `buildConditionFromSummary` entirely and
+prove nothing about this specific defect) — mocked `callLLMWithFallback` so the anatomy call
+returns `{ laterality: 'left', cx: 17.4, cy: 63.9, ... }` for a "Hand fissure" condition, and
+asserted `result.conditions[0].locations[0].cx === 17.4` / `.cy === 63.9`. Ran it against the
+current (fixed) tree: **PASS**. Then `git stash push -- src/lib/llm/enrich.ts` to isolate just
+this defect's fix and reran the identical test: **FAILED** — `cx`/`cy` were `undefined` on the
+location entry (the exact pre-fix symptom: a labeled location with no real position, which
+`persistEnrichmentResult` then hash-jitters). Restored the fix (`git stash pop`) and confirmed
+it passes again. This is genuine, differential proof the fix is load-bearing, not a test that
+would pass regardless of the code.
+
+**Issue 2 fix (`src/lib/llm/longitudinal.ts`, `repairPixelCoordinate`) — CONFIRMED FIXED,
+correctly scoped.** Read the actual diff. Per expanding Chebyshev radius, the rewritten loop
+now scans only that ring's border cells (full top/bottom rows, left/right columns only on
+interior rows — correctly skips cells already checked at a smaller radius, matching the "one
+ring at a time" structure the function's docstring always claimed but the pre-fix body didn't
+implement) and, among opaque pixels found in that ring, keeps the one with the smallest
+squared Euclidean distance (`distSq`) rather than whichever raster/row-major scan hit first.
+Verified against the three properties the task asked to check:
+- **(a) every pixel in a ring gets considered, none skipped:** confirmed by reading the
+  bounds logic (`onYBorder` gates full-row scanning on the ring's top/bottom edge; interior
+  rows correctly restrict to `x === originX - radius || x === originX + radius`, the ring's
+  left/right edge, with no off-by-one gaps at the clamped mask boundary) and by an independent
+  test (below) using an axis-aligned ring pixel that only a correct full-ring scan would find.
+- **(b) same termination/null contract as before:** an independent test with an all-zero
+  (fully transparent) mask still returns `null` — unchanged behavior, confirmed by reading
+  that the outer `for radius` loop and final `return null` are untouched in shape.
+- **(c) real behavioral improvement, not a no-op:** an independent test with two same-ring
+  opaque pixels (one axis-aligned at Euclidean distance 3, one diagonal at Euclidean ≈4.24,
+  with the *farther* one appearing earlier in raster scan order) confirms
+  `repairPixelCoordinate` now returns the nearer pixel.
+
+**Independent proof, written from scratch this session (not copied from DevAgent's or the
+prior QA entry's 5×5/7×7 synthetic masks — a fresh 9×9 mask with a different pixel layout):**
+origin `(4,4)` (transparent), opaque pixels at `(1,1)` (raster-first, Euclidean ≈4.24) and
+`(4,1)` (raster-later, Euclidean 3, both at Chebyshev radius 3 from origin). Ran against the
+current (fixed) tree: **PASS** — returns `(4,1)`, the nearer pixel. `git stash push --
+src/lib/llm/longitudinal.ts` to isolate the fix and reran: **FAILED** — returned `(1,1)` (i.e.
+`cx: 50`, the farther, raster-order-first pixel), confirming this is genuinely the old bug
+being exercised, not a coincidentally-passing assertion. Restored the fix and confirmed it
+passes again. The companion null-mask and mask-edge-termination tests written in the same
+session passed both before and after the stash (as expected — those two properties were never
+broken by either version).
+
+**Regression check — CONFIRMED CLEAN.** `git diff --stat HEAD` for the working tree shows
+exactly five source/test files changed: `src/lib/llm/enrich.ts`, `src/lib/llm/longitudinal.ts`,
+`tests/lib/enrich.test.ts`, `tests/lib/indexedDb.test.ts`, `tests/lib/llm/longitudinal.test.ts`
+(plus this card and `userDataTask.md`'s status narrative, no code). Nothing from P10-01 through
+P10-08 or Defects 1-3's already-approved scope was touched by this defect's fix. No scratch/
+temp test files were left behind by this QA session (`git status --short` confirms a clean
+tree aside from the expected diff).
+
+**`mergeConditionLocations` sanity check — confirmed no silent behavior change.** Read
+`mergeConditionLocations` (`src/lib/llm/enrich.ts`): it keys by
+`anatomical_location + laterality` (the `labelKey`) whenever that label is non-empty, falling
+back to a `cx`/`cy`-derived key only when both label fields are empty. A laterality-bearing
+location always has a non-empty label, so it was already keyed by label before this fix and
+still is now — this fix only changes what value flows into the existing
+`cx: firstNonNull(previous.cx, location.cx)` merge logic (previously always resolving to
+`null` for these entries since `cx` was never populated; now resolving to the real
+anatomy-derived point when present), the same `firstNonNull` pattern already used for every
+other scalar field in this merge path. No new branch, no changed merge key, no regression.
+
+**Validation commands run (fresh, this session, independent of the numbers reported by
+DevAgent or any prior QA entry):**
+- `npm run typecheck` — PASS, clean, no output.
+- `npx expo lint` — PASS, exit 0, no errors/warnings.
+- `npm test` (full suite, with coverage) — PASS, **55 passed / 55 total suites, 549 passed /
+  549 total tests, 0 failed.** Matches every prior session's reported count on this card
+  exactly, independently reproduced this session, not re-asserted from memory.
+
+**Still-open, explicitly-acknowledged item — reconfirmed still accurate, not re-litigated.**
+The pre-existing, already-recorded item ("Remaining open item, not blocking": exhaustive
+point-by-point coordinate accuracy across every condition in a real record was spot-checked,
+not exhaustively hand-verified) remains accurate and is unaffected by this fix — this
+defect's fix only concerns (1) whether a laterality-bearing condition's secondary dot reuses
+the anatomy call's already-proposed point instead of hash-jittering, and (2) whether the
+alpha-mask repair step picks the geometrically nearest valid pixel when a proposed point needs
+correcting. Neither concerns the LLM's clinical judgment quality of *where* it proposes a
+point in the first place, which is what the still-open item is about.
+
+**Verdict: Defect 4 is genuinely fixed — both issue 1 and issue 2 — independently
+re-confirmed in a from-scratch session with differential (fails-pre-fix / passes-post-fix)
+proof for both issues, not by trusting either agent's prose summary.** No regressions found.
+Full validation green (typecheck, lint, 55/55 suites, 549/549 tests).
+
+**Recommendation on remaining path to `kb4-DONE`:** the code/data-layer scope for Defect 4 is
+QA-approved. What's still needed before `kb4-DONE`, carried forward and unchanged by this
+session (not new findings):
+1. A live browser/OpenRouter re-run against a multi-laterality-condition record to visually
+   confirm the "duplicate dot" symptom is gone in practice, closing the real-world-verification
+   gap neither DevAgent's session nor this QA session had an environment to close.
+2. The pre-existing, explicitly-acknowledged, non-blocking item: exhaustive point-by-point
+   coordinate accuracy across every condition in a real record (spot-checked only so far).
+3. Optional cleanup, not a blocker: the stale `kb2-CODE` path reference in
+   `userDataTask.md`'s Phase 10 section.
+
+This card remains in `kb3-TEST` — this QA session does not have a live browser/OpenRouter
+environment to close item 1 above, and per `prompt.userData.md` an untested browser/viewport
+combination is a blocker, not a pass, so this QA pass does not move the card to `kb4-DONE`
+itself.
+
+## Defect 5 (Critical — found 2026-08-18, user-reported after Defect 4/P11 fixes: "quite a few condition dots were still placed outside the alpha mask of the relevant system")
+
+**Root cause, confirmed by reading the actual code (`src/lib/db/indexedDb.ts`,
+`putIndexedCondition`, lines 284-297):** the alpha-mask repair
+(`repairConditionCoordinates`, called in `persistEnrichmentResult` before
+`putIndexedCondition`) only validates a condition's **LLM-derived** `cx`/`cy`. But
+`putIndexedCondition` has its own, separate fallback for when that value is absent:
+
+```ts
+const pos = defaultConditionPosition(system, `${input.name_medical}:${input.system}`)
+const cx = input.cx ?? pos.cx
+const cy = input.cy ?? pos.cy
+```
+
+This hash-jitter fallback path takes **no mask parameter** and is never validated
+against anything. Whenever the anatomy-enrichment LLM call doesn't produce a usable
+coordinate for a condition — confirmed happening routinely under free-tier load this
+session (`anatomy-batch-incomplete` warnings observed directly in a live run's trace)
+— the final stored position silently comes from this unchecked fallback, which can
+land on a transparent pixel for that system's real asset. The repair step already ran
+and finished (on the earlier, now-discarded absent LLM value) before this fallback
+value even exists — it is never given a second chance at repair.
+
+Since `putIndexedCondition`'s returned `cx`/`cy` are also reused verbatim for the
+condition's primary `condition_locations` row in the same `persistEnrichmentResult`
+call, both the condition's own position and its primary dot inherit this unvalidated
+value together.
+
+**Impact:** directly violates this same card's own already-claimed P10-04 acceptance
+criterion — "Every persisted body-map coordinate is on a non-transparent pixel for its
+affected system, or is explicitly unresolved" — for exactly the fallback case (anatomy
+call didn't produce a coordinate) that P10-04 was supposed to make safe via mask
+repair. Not a rare edge case: any condition whose batch-anatomy call and individual
+retries all fail to produce a usable `cx`/`cy` hits this path.
+
+**Fix direction:** thread the resolved mask (already computed in
+`persistEnrichmentResult`, immediately before its `putIndexedCondition` call) into the
+final coordinate — either by passing the mask into `putIndexedCondition` itself and
+repairing whichever value it ends up using (LLM-derived or hash-jitter fallback)
+before storing, or by repairing `putIndexedCondition`'s returned `cx`/`cy` in
+`persistEnrichmentResult` immediately after the call, before that same value is reused
+for the primary-location write. Either approach must guarantee: the *final* stored
+position, regardless of which source produced it, is validated against the system's
+mask when one is available — not just the LLM-derived path.
+
+**Priority:** P0 — blocks `kb4-DONE`. User explicitly asked for this to be fixed before
+the next live verification run.
+
+**Status: FIXED (2026-08-18, DevAgent).** See the "Defect 5 fix" Implementation Record
+entry below — the resolved mask is now threaded into `putIndexedCondition` itself, so
+the hash-jitter fallback gets the same alpha-mask repair the LLM-derived path already
+had. Awaiting independent QA retest.
+
+## Blockers (updated 2026-08-18)
+
+- Defect 5 blocks `kb4-DONE`. User has asked to fix this before doing another live
+  browser/OpenRouter run (which was otherwise the next planned step for both this card
+  and P11).
+
+## Completion
+
+NOT COMPLETE. Defect 5 found and not yet fixed. Do not move to `kb4-DONE` until fixed
+and retested, in addition to Defect 4's still-open live-visual-reconfirmation item.
+
+## Defect 5 fix (DevAgent, 2026-08-18)
+
+**Root cause recap:** `persistEnrichmentResult` (`src/lib/db/indexedDb.ts`) already
+resolves a per-condition alpha mask (`const mask = input.coordinateMasks?.[...] ??
+input.coordinateMask ?? await input.coordinateMaskResolver?.(...)`) and runs
+`repairConditionCoordinates(mask, rawCondition)` against it — but only against the
+LLM-derived `cx`/`cy`. `putIndexedCondition`'s own `input.cx ?? pos.cx` hash-jitter
+fallback (fired whenever the anatomy call produced no usable coordinate) ran after that
+repair step had already finished, with no mask parameter and no validation of its own.
+
+**Approach chosen: thread the already-resolved mask into `putIndexedCondition` itself
+(option 1 from the card), not a post-hoc repair of its return value in
+`persistEnrichmentResult` (option 2).** Reasoning: `putIndexedCondition` returns
+`{ cx, cy }` that `persistEnrichmentResult` reuses verbatim for the same condition's
+primary `condition_locations` row and, separately, is the value written to the
+`conditions` store itself. Repairing only the returned value in `persistEnrichmentResult`
+(option 2) would fix the primary-location row but leave the already-written `conditions`
+row holding the pre-repair, unvalidated position — two different stored values for what
+should be one canonical point, and a second, redundant re-derivation to bring them back
+in sync. Repairing inside `putIndexedCondition`, before the single write to `conditions`,
+guarantees the value written there and the value returned (and reused for the primary
+location) are the same repaired point, with no second write path to keep in sync.
+
+**Implementation (`src/lib/db/indexedDb.ts`):**
+- `putIndexedCondition` gained a third, optional parameter: `mask?: AlphaMask` (imported
+  `repairPixelCoordinate` alongside the existing `repairConditionCoordinates` import from
+  `@/lib/llm/longitudinal`). Kept as a separate function parameter rather than a field on
+  `PutIndexedConditionInput` — folding it into the input object would have required
+  stripping it back out again before the `{ ...input, cx, cy }` spread that builds the
+  stored `IndexedCondition` record (which has no `mask` field), adding an unused-variable
+  destructure for no benefit; a plain third parameter avoids that entirely and reads
+  clearly at the one real call site.
+- Inside the function: `fallbackCx`/`fallbackCy` (renamed from the previous `cx`/`cy`
+  locals) are computed exactly as before (`input.cx ?? pos.cx`, `input.cy ?? pos.cy`).
+  When `mask` is supplied, `repairPixelCoordinate(mask, fallbackCx, fallbackCy)` runs
+  unconditionally on that value (not gated on whether it came from `input.cx` or the
+  jitter default — `repairPixelCoordinate` is a no-op that returns the same point when
+  it's already opaque, so this correctly re-validates an LLM-derived point too, matching
+  what `repairConditionCoordinates` already did for it one step earlier, and is a no-op
+  for it in practice since it was already repaired). The final `cx`/`cy` prefer the
+  repaired point, falling back to the unrepaired value only when `repairPixelCoordinate`
+  returns `null` (mask has no opaque pixels at all — same "no valid pixels" contract
+  `repairConditionCoordinates` already uses elsewhere, unchanged).
+- The one real call site, in `persistEnrichmentResult`'s per-condition loop, now passes
+  the already-computed `mask` local (the same one used a few lines earlier for
+  `repairConditionCoordinates(mask, rawCondition)`) as `putIndexedCondition`'s third
+  argument. No new mask resolution — reuses the existing per-condition mask lookup
+  verbatim.
+- Demo-data seeding (`seedIndexedDbDemoData`) calls `persistEnrichmentResult` without any
+  `coordinateMask`/`coordinateMasks`/`coordinateMaskResolver`, so `mask` resolves to
+  `undefined` in that call chain exactly as before this fix — `putIndexedCondition`'s new
+  parameter is optional and demo data's hand-authored `cx_percent`/`cy_percent` positions
+  are unaffected, confirmed by reading `seedIndexedDbDemoData` (unchanged, not touched by
+  this fix). The two direct `putIndexedCondition(db, {...})` calls in
+  `tests/lib/indexedDb.test.ts` also continue to omit the third argument and are
+  unaffected.
+
+**Test added (`tests/lib/indexedDb.test.ts`):** a new test immediately after the existing
+P10-04/P10-06 "repairs a model-proposed coordinate landing on a transparent pixel" test —
+`'repairs the hash-jitter fallback position onto the mask when the anatomy call produced
+no coordinate'`. Uses a 3x3 mask where only the top-left pixel (0%, 0%) is opaque (deliberately
+far from wherever `defaultConditionPosition`'s system-anchor-based jitter would land for
+`system: 'nervous'`, so the test only passes if the fallback path is genuinely repaired,
+not coincidentally already on an opaque pixel), a condition with **no `cx`/`cy` fields at
+all** (forcing `putIndexedCondition`'s `input.cx ?? pos.cx` fallback), driven through the
+real `persistEnrichmentResult` with `coordinateMask: mask` supplied. Asserts the resulting
+dot is exactly `{ cx_percent: 0, cy_percent: 0 }` — the mask's only opaque pixel, not the
+raw hash-jitter default.
+
+**Validation run (2026-08-18, this session):**
+- `npm run typecheck` — PASS, clean, no output.
+- `npx expo lint` — PASS, exit 0, no errors/warnings.
+- `npx jest --runInBand --coverage=false tests/lib/indexedDb.test.ts tests/lib/enrich.test.ts tests/lib/llm/longitudinal.test.ts` — PASS, 3 suites, 59 tests (58 prior + 1 new).
+- `npm test` (full suite, with coverage) — **55 passed / 56 total suites, 558 passed / 559 total tests, 1 failed** (`tests/components/ProviderSettings.test.tsx`, "cancel leaves tier 0 unchanged and shows no error" — `render` function has not been called). This is the exact same pre-existing cross-suite-timing flake documented in every prior session on this card (DevAgent's Defect 3 fix, both QA passes on Defects 1/2/4) — not a file touched by this fix. Re-ran `npx jest --runInBand --coverage=false tests/components/ProviderSettings.test.tsx` in isolation immediately after: **PASS, 3/3 tests**, confirming it's the same isolation-vs-full-suite flakiness pattern, not a regression from this change.
+
+**Scope discipline:** touched only `src/lib/db/indexedDb.ts` (`putIndexedCondition`'s new
+optional `mask` parameter, its call site in `persistEnrichmentResult`) and
+`tests/lib/indexedDb.test.ts` (one new regression test). Did not touch
+`src/lib/llm/longitudinal.ts` (`repairPixelCoordinate`/`repairConditionCoordinates`
+unchanged, confirmed by reading — this fix only changes *when* repair is applied, not how
+it works), demo data, or any file from P10-01 through P10-08/Defects 1-4's already-fixed
+scope.
+
+**Not verified in this session (unchanged class of gap from every prior round on this
+card):** a live browser/OpenRouter re-run confirming this fix eliminates the "dots outside
+the alpha mask" symptom on real data. The mechanical guarantee (the final stored cx/cy,
+whichever source produced it, is validated against the system's mask when one is
+available) is proven by the test above; whether this closes 100% of the user's originally
+reported "quite a few" out-of-mask dots on a real multi-condition document can only be
+confirmed by another live run.
+
+## Completion
+
+NOT YET DONE. Defect 5's required fix is implemented and unit-tested; full validation
+green apart from the one pre-existing, independently-reproduced-flaky
+`ProviderSettings.test.tsx` full-suite-only failure (passes in isolation, unrelated to
+this fix's files). This card remains in `kb2-CODE` pending independent QA retest of
+Defect 5, plus the still-open live-browser-reconfirmation items carried forward from
+Defect 4.
+
+---
+
+## QA Record (Defect 5 independent retest, separate QAAgent session, 2026-08-18)
+
+Independent of the DevAgent that made this fix. Read the actual working-tree diff and
+source directly; did not trust the Implementation Record's prose for any pass/fail call.
+
+**1. `putIndexedCondition`'s mask parameter genuinely repairs whichever value results
+from `input.cx ?? pos.cx` — VERIFIED, both paths.** Read `src/lib/db/indexedDb.ts:284-308`
+directly:
+```ts
+const fallbackCx = input.cx ?? pos.cx
+const fallbackCy = input.cy ?? pos.cy
+const repaired = mask ? repairPixelCoordinate(mask, fallbackCx, fallbackCy) : null
+const cx = repaired?.cx ?? fallbackCx
+const cy = repaired?.cy ?? fallbackCy
+const condition: IndexedCondition = { ...input, cx, cy }
+```
+`repairPixelCoordinate` runs on `fallbackCx`/`fallbackCy` unconditionally whenever `mask`
+is supplied — it does not branch on whether the value came from `input.cx` (LLM-derived)
+or `pos.cx` (hash-jitter default). Both paths get the same treatment; this is not "only
+the fallback path gets checked" — it's "whatever value survives to this point gets
+checked," which also means an LLM-derived point gets re-validated here (a harmless no-op
+in practice, since `repairConditionCoordinates` already validated it one step earlier in
+`persistEnrichmentResult`, and `repairPixelCoordinate` returns the same point unchanged
+when it's already opaque). The repaired value (`cx`/`cy`) — not the pre-repair
+`fallbackCx`/`fallbackCy` — is what gets spread into `condition` and written via
+`transaction.objectStore('conditions').put(condition)`. Confirmed not computed-and-discarded:
+there is no second `cx`/`cy` reference after this point that could reintroduce the
+unrepaired value.
+
+**2. Primary-location write stays in sync — VERIFIED.** Read
+`persistEnrichmentResult`'s per-condition loop (`src/lib/db/indexedDb.ts:566-594`):
+`const { id: conditionId, cx, cy } = await putIndexedCondition(db, {...}, mask)` passes the
+already-resolved per-condition `mask` local (the same one used a few lines earlier for
+`repairConditionCoordinates(mask, rawCondition)`) as the third argument, and the
+destructured `cx`/`cy` — `putIndexedCondition`'s *returned*, already-repaired values, not a
+second independently-computed pair — are reused verbatim in the immediately-following
+`putIndexedConditionLocation(db, { id: \`${conditionId}-primary\`, condition_id: conditionId, cx, cy, is_primary: true, ... })`
+call. No second, unrepaired value sneaks in for the primary location row; both rows are
+provably the same point by construction (same closure variable), not two calls that happen
+to agree today.
+
+**3. Demo-data seeding is unaffected — VERIFIED.** `seedIndexedDbDemoData`
+(`src/lib/db/indexedDb.ts:864-882`) calls `persistEnrichmentResult` with no
+`coordinateMask`/`coordinateMasks`/`coordinateMaskResolver` fields set, so
+`input.coordinateMasks?.[...] ?? input.coordinateMask ?? await input.coordinateMaskResolver?.(...)`
+resolves to `undefined` for every demo condition — `mask` is falsy, `repairConditionCoordinates`
+is skipped (`c = mask ? ... : rawCondition`), and `putIndexedCondition`'s third argument is
+`undefined`, so `repaired` stays `null` and `cx`/`cy` fall through to `fallbackCx`/`fallbackCy`
+= `input.cx ?? pos.cx`. Since `designConditionToConditionInput` (`src/lib/db/indexedDb.ts:748-773`)
+always sets `cx: c.cx_percent, cy: c.cy_percent` from the hand-authored `DesignCondition`,
+`input.cx` is always defined for demo conditions, so `pos.cx`/repair are never reached at
+all — demo positions pass through completely untouched. Confirmed by the full-suite test run
+below: the existing "seeds demo data and returns one dot per location" test (asserting exact
+hand-authored coordinates like `stones` at `(44.36, 34)`/`(55.92, 37.57)`) still passes
+unchanged.
+
+**4. Independent test, own synthetic mask/condition — PASS, proves the original bug is
+gone.** Wrote a from-scratch test (not copied from either QA's or DevAgent's fixtures),
+run and deleted after confirming (not left in the tree): a 4×4 mask whose only opaque pixel
+is the bottom-right corner (100%, 100%) — geometrically opposite corner from DevAgent's
+top-left-pixel fixture — for a "digestive" system condition with **no `cx`/`cy` at all**
+(forcing `putIndexedCondition`'s hash-jitter fallback). Asserted both:
+- the `conditions` store row (via `getIndexedConditions`) has `cx_percent: 100, cy_percent: 100`
+- the primary `condition_locations` row (via `getConditionLocations`, `is_primary: true`)
+also has `cx: 100, cy: 100`
+
+Both assertions passed against the current tree. This directly demonstrates the fix: a
+condition with zero LLM-provided coordinate information, whose hash-jitter default would
+otherwise land wherever `defaultConditionPosition`'s system-anchor jitter happens to fall
+(almost certainly not this mask's single opaque pixel out of 16), now lands exactly on the
+mask's one valid pixel in both persisted locations. Combined with reading the code in
+points 1-2 above (which shows *why* it works, not just that this one case passes), this
+closes out the "unvalidated fallback" root cause described in Defect 5.
+
+**5. Regression check — CONFIRMED.** `git diff --stat` against the pre-P10 base
+(`5a52039`) shows this session's working tree contains, beyond already-committed/approved
+P10-01–P10-08 and Defect-1–4 work (committed in `12b8d1d`): the card file, `userDataTask.md`
+(status narrative), `src/lib/db/indexedDb.ts` (+15/-4, Defect 5's `putIndexedCondition` mask
+threading), `tests/lib/indexedDb.test.ts` (+66, one new regression test), and — confirmed
+**unrelated to Defect 5** by reading their diffs directly — `src/lib/llm/enrich.ts`,
+`src/lib/llm/longitudinal.ts` (Defect 4's already-QA-approved fix, `locations[]` cx/cy and
+the ring-scan repair, still intact and unmodified by anything new), and `src/lib/llm/prompts.ts`
+/ `src/lib/llm/structure.ts` / `tests/lib/chunk.test.ts` (P11-01/P11-02/P11-03 document-date-tier
+work — a separate, already-in-flight card sharing this tree, correctly out of scope for this
+retest, not touched by Defect 5's fix). `src/app/bodymap.tsx`, `src/hooks/useConditions.ts`,
+and `src/model/conditions.ts` (P10-05's UI wiring) are unmodified since the `12b8d1d` commit —
+confirmed via `git log --oneline -- <path>`, not assumed. Defect 5's fix is exactly as scoped:
+`indexedDb.ts` + its test file, nothing else.
+
+**6. Validation commands — independently run, this session:**
+- `npm run typecheck` — PASS, clean, no output.
+- `npx expo lint` — PASS, exit code 0, no errors/warnings.
+- `npm test` (full suite, with coverage) — PASS, **56 passed / 56 total suites, 559 passed /
+  559 total tests, 0 failed.** `tests/components/ProviderSettings.test.tsx` — the suite with a
+  documented history of full-suite-only flakiness on this card (DevAgent's own last run hit it:
+  55/56 suites, 1 failed test in that same file) — passed cleanly in this run, consistent with
+  every prior session's conclusion that it's cross-suite timing flakiness, not a regression
+  from Defect 5's fix (which touches a completely different file/module).
+
+**Verdict: Defect 5 is genuinely fixed.** Both the LLM-derived and hash-jitter fallback
+coordinate paths are validated against the alpha mask before the single write to the
+`conditions` store; the primary `condition_locations` row is provably derived from the same
+repaired value, not a second unrepaired one; demo data is untouched; the fix is correctly
+scoped to `indexedDb.ts` alone; and an independently-authored test with a geometrically
+distinct mask/condition from any prior fixture confirms the final stored position — for both
+rows — lands on the mask's real opaque pixel rather than a raw, unvalidated hash-jitter
+value. Full validation green (typecheck, lint, 56/56 suites, 559/559 tests).
+
+**Anything else flagged before P10 (alongside P11) is ready for a live browser/OpenRouter
+acceptance run:**
+- Nothing new. The previously-recorded, still-open, non-blocking items are unchanged by this
+  retest: (a) exhaustive point-by-point coordinate *accuracy* across every condition in a real
+  record was only spot-checked in the 2026-08-18 live run, not exhaustively hand-verified —
+  this is a product-quality follow-up, not a correctness defect, since it's still constrained
+  by mask repair either way; (b) the condition detail sheet's attribution block (P10-05) has
+  not been visually verified at desktop vs. narrow-mobile widths; (c) the stale `kb2-CODE`
+  path reference in `userDataTask.md`'s Phase 10 section is a one-line doc cleanup, not
+  functional. None of these block a live acceptance run — they're things to *watch for*
+  during it, not blockers to starting it.
+- One process note, not a defect: this tree currently carries uncommitted P11 work
+  (`prompts.ts`/`structure.ts`/`chunk.test.ts`, document-date-tier resolution) alongside P10's
+  Defect 4/5 fixes. Both are mechanically clean and mutually non-interfering (confirmed above),
+  but if a live acceptance run is meant to test P10 and P11 together, that's an intentional,
+  already-acknowledged combined run per this card's own history (P11 is referenced throughout
+  as "separate, already-reviewed work sitting in the same tree") — not something this retest
+  is flagging as a new risk, just confirming it's still true.
+
+## Completion
+
+**Defect 5: CONFIRMED FIXED, independently.** All five defects found across this card's
+history (1-5) are now independently retested and confirmed fixed. P10-01 through P10-08's
+scope, and Defects 1-4, remain QA-approved and unregressed. Full validation green:
+`npm run typecheck` PASS, `npx expo lint` PASS (exit 0), `npm test` PASS (56/56 suites,
+559/559 tests). This QA session has no live browser/OpenRouter environment, so — per
+`prompt.userData.md`'s "classify an untested browser/viewport combination as a blocker, not
+a pass" — this pass does not itself close the live-verification step; it confirms the
+code/data-layer is clean and ready for that run. Card intentionally left in `kb3-TEST`;
+the decision to run live acceptance and then move to `kb4-DONE` belongs to ArchAgent/the
+user, not this QA pass.

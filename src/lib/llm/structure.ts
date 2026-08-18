@@ -37,6 +37,11 @@ export type RecordSection = {
 
 export type RecordStructure = {
   organization: 'chronological' | 'problem_based' | 'mixed'
+  // P11-01: a genuinely extracted, single document-level date (e.g. a report
+  // generation or patient-intake date stated once, typically near the top of
+  // a real record) — never a computed minimum across section/condition dates.
+  // Null when the document states no such date.
+  documentDate: string | null
   sections: RecordSection[]
 }
 
@@ -53,6 +58,7 @@ type RawSection = {
 
 type RawStructure = {
   organization: 'chronological' | 'problem_based' | 'mixed'
+  documentDate: string | null
   sections: RawSection[]
 }
 
@@ -88,7 +94,11 @@ function parseStructure(content: string): RawStructure | null {
         imageWorthy: raw.imageWorthy === true,
       })
     }
-    return { organization: parsed.organization as RawStructure['organization'], sections }
+    return {
+      organization: parsed.organization as RawStructure['organization'],
+      documentDate: typeof parsed.documentDate === 'string' ? parsed.documentDate : null,
+      sections,
+    }
   } catch {
     return null
   }
@@ -109,6 +119,9 @@ export function resolvePage(offset: number, pageBreaks: number[] | undefined): n
 function singleSectionFallback(text: string, pageBreaks: number[] | undefined): RecordStructure {
   return {
     organization: 'mixed',
+    // No structure analysis succeeded, so there's no genuine extraction to
+    // draw a document date from either — null, not a guess.
+    documentDate: null,
     sections: [{
       heading: 'Full record',
       startOffset: 0,
@@ -159,5 +172,5 @@ export async function analyzeRecordStructure(
 
   if (sections.length === 0) return singleSectionFallback(text, pageBreaks)
 
-  return { organization: result.value.organization, sections }
+  return { organization: result.value.organization, documentDate: result.value.documentDate, sections }
 }

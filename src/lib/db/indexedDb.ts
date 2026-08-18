@@ -6,7 +6,7 @@ import { applyInferenceRules } from '@/lib/inference/rules'
 import { isValidCareEventInput, isValidProviderInput } from '@/lib/llm/enrich'
 import { pipelineDebug, startPipelineDebugRun } from '@/lib/debug/pipelineDebug'
 import type { CareEventInput, ConditionInput, MeasurementInput, ProviderInput } from '@/lib/llm/enrich'
-import { repairConditionCoordinates, type AlphaMask } from '@/lib/llm/longitudinal'
+import { repairConditionCoordinates, repairPixelCoordinate, type AlphaMask } from '@/lib/llm/longitudinal'
 
 /** Browser-only persistence adapter for the web architecture. */
 export const INDEXED_DB_NAME = 'maigenki'
@@ -284,11 +284,22 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
 export async function putIndexedCondition(
   db: IDBDatabase,
   input: PutIndexedConditionInput,
+  // Defect 5 fix: when supplied, repairs whichever cx/cy this function ends
+  // up using — the LLM-derived `input.cx`/`input.cy` OR the hash-jitter
+  // `defaultConditionPosition` fallback below — onto a non-transparent pixel,
+  // so the fallback path (previously never validated against anything) gets
+  // the same guarantee the LLM-derived path already had via
+  // repairConditionCoordinates. Optional and omitted by demo-data seeding and
+  // direct test callers, which don't need mask repair.
+  mask?: AlphaMask,
 ): Promise<{ id: string; cx: number; cy: number }> {
   const system = normalizeSystemId(input.system)
   const pos = defaultConditionPosition(system, `${input.name_medical}:${input.system}`)
-  const cx = input.cx ?? pos.cx
-  const cy = input.cy ?? pos.cy
+  const fallbackCx = input.cx ?? pos.cx
+  const fallbackCy = input.cy ?? pos.cy
+  const repaired = mask ? repairPixelCoordinate(mask, fallbackCx, fallbackCy) : null
+  const cx = repaired?.cx ?? fallbackCx
+  const cy = repaired?.cy ?? fallbackCy
   const condition: IndexedCondition = { ...input, cx, cy }
   const transaction = db.transaction('conditions', 'readwrite')
   transaction.objectStore('conditions').put(condition)
@@ -574,7 +585,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
       source_pages: c.source_pages ?? null,
       local_names: (c.local_names as Partial<Record<SupportedLang, string>> | null | undefined) ?? null,
       inferred_fields: c.inferred_from_structure && c.inferred_from_structure.length > 0 ? c.inferred_from_structure : null,
-    })
+    }, mask)
   await putIndexedConditionLocation(db, {
     id: `${conditionId}-primary`, condition_id: conditionId, cx, cy, is_primary: true,
     anatomical_location: primaryLocation?.anatomical_location ?? null,

@@ -15,7 +15,7 @@ function section(overrides: Partial<RecordSection> & { heading: string }): Recor
 }
 
 function structure(sections: RecordSection[]): RecordStructure {
-  return { organization: 'mixed', sections }
+  return { organization: 'mixed', documentDate: null, sections }
 }
 
 // ── Exact-substring guarantee ─────────────────────────────────────────────────
