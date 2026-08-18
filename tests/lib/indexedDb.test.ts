@@ -1,9 +1,10 @@
 import 'fake-indexeddb/auto'
 import {
-  getIndexedConditionDots, getProvidersForRecord, openIndexedDb, persistEnrichmentResult, seedIndexedDbDemoData,
+  getIndexedConditionDots, getProvidersForRecord, getFacilitiesForRecord, openIndexedDb, persistEnrichmentResult, seedIndexedDbDemoData,
   putIndexedCondition, putIndexedConditionLocation, getConditionLocations, deleteConditionLocation,
 } from '@/lib/db/indexedDb'
 import { CONDITIONS, CONDITION_RECORDS } from '@/model/conditions'
+import type { AlphaMask } from '@/lib/llm/longitudinal'
 
 describe('IndexedDB vertical slice', () => {
   it('seeds demo data and returns one dot per location, including the bilateral kidney-stones example', async () => {
@@ -248,6 +249,116 @@ describe('IndexedDB vertical slice', () => {
     })
     expect(rows).toHaveLength(1)
     expect(rows[0]).toMatchObject({ name: 'Community Clinic', record_id: recordId })
+    db.close()
+  })
+
+  // P10-02/P10-06: enrich.ts's merge step now dedupes every unique
+  // provider/facility for a condition into `providers`/`facilities` arrays
+  // (not just the single `provider` field) — this checks persistEnrichmentResult
+  // actually writes the full set as condition-scoped rows, not just the primary
+  // one, without duplicating the provider that's already linked via `provider`.
+  it('persists every unique provider/facility on a condition, not just the primary one', async () => {
+    const db = await openIndexedDb(`maigenki-multi-provider-${Date.now()}`)
+    const providerA = { name: 'Dr. Kim', specialty: 'Cardiology', email: null, phone: null, evidence: null }
+    const providerB = { name: 'Dr. Patel', specialty: null, email: null, phone: null, evidence: null }
+    const facilityA = { name: 'City Hospital', address: null, city: 'Seattle', state: 'WA', country: 'US' }
+    const facilityB = { name: 'County Clinic', address: null, city: 'Tacoma', state: 'WA', country: 'US' }
+
+    const { recordId } = await persistEnrichmentResult(db, {
+      filename: 'report.pdf',
+      pageCount: 1,
+      extractionMethod: 'text',
+      conditions: [{
+        id: 'multi-provider', name_medical: 'Essential hypertension', name_common: null, system: 'cardiovascular',
+        organ: null, anatomical_location: null, status: 'documented', severity: null, certainty: null,
+        date_onset: null, date_diagnosed: '2022-06-01', evidence: null,
+        provider: providerA,
+        providers: [providerA, providerB],
+        facilities: [facilityA, facilityB],
+      }],
+      measurements: [],
+    })
+
+    const providers = await getProvidersForRecord(db, recordId)
+    expect(providers.map((p) => p.name).sort()).toEqual(['Dr. Kim', 'Dr. Patel'])
+    // providerA must not be duplicated (already linked via the primary `provider` field).
+    expect(providers.filter((p) => p.name === 'Dr. Kim')).toHaveLength(1)
+
+    const facilities = await getFacilitiesForRecord(db, recordId)
+    expect(facilities.map((f) => f.name).sort()).toEqual(['City Hospital', 'County Clinic'])
+    expect(facilities.every((f) => f.condition_id === 'multi-provider')).toBe(true)
+
+    db.close()
+  })
+
+  // Defect 1 regression (P10 QA retest, 2026-08-17): linkedProviderKeys was
+  // record-scoped, so a provider attributed to two different conditions in
+  // the same document only got a condition-scoped row on the first condition
+  // processed — the second condition's own `providers` array was silently
+  // ignored. Both conditions must get their own row.
+  it('persists a condition-scoped provider row for every condition that cites that provider, even when shared across conditions', async () => {
+    const db = await openIndexedDb(`maigenki-shared-provider-${Date.now()}`)
+    const drKim = { name: 'Dr. Kim', specialty: 'Cardiology', email: null, phone: null, evidence: null }
+
+    const { recordId } = await persistEnrichmentResult(db, {
+      filename: 'report.pdf',
+      pageCount: 1,
+      extractionMethod: 'text',
+      conditions: [
+        {
+          id: 'cond-A', name_medical: 'Essential hypertension', name_common: null, system: 'cardiovascular',
+          organ: null, anatomical_location: null, status: 'documented', severity: null, certainty: null,
+          date_onset: null, date_diagnosed: '2022-06-01', evidence: null,
+          provider: drKim, providers: [drKim], facilities: [],
+        },
+        {
+          id: 'cond-B', name_medical: 'Type 2 diabetes', name_common: null, system: 'endocrine',
+          organ: null, anatomical_location: null, status: 'documented', severity: null, certainty: null,
+          date_onset: null, date_diagnosed: '2022-07-01', evidence: null,
+          provider: null, providers: [drKim], facilities: [],
+        },
+      ],
+      measurements: [],
+    })
+
+    const providers = await getProvidersForRecord(db, recordId)
+    const kimConditionIds = providers.filter((p) => p.name === 'Dr. Kim').map((p) => p.condition_id).sort()
+    expect(kimConditionIds).toEqual(['cond-A', 'cond-B'])
+
+    db.close()
+  })
+
+  // P10-04/P10-06: a model-proposed cx/cy that lands on a transparent pixel
+  // must be repaired onto the nearest opaque one, exactly as an
+  // already-correct condition would be (repairConditionCoordinates, unchanged
+  // by P10-04) — this exercises that interaction through the real
+  // persistEnrichmentResult write path with a coordinateMask supplied.
+  it('repairs a model-proposed coordinate landing on a transparent pixel, rather than rejecting it', async () => {
+    const db = await openIndexedDb(`maigenki-coordinate-repair-${Date.now()}`)
+    // 3x3 mask, only the center pixel (50%, 50%) is opaque.
+    const mask: AlphaMask = { width: 3, height: 3, alpha: new Uint8Array([0, 0, 0, 0, 255, 0, 0, 0, 0]) }
+
+    const { conditionCount } = await persistEnrichmentResult(db, {
+      filename: 'report.pdf',
+      pageCount: 1,
+      extractionMethod: 'text',
+      conditions: [{
+        id: 'model-proposed-coordinate', name_medical: 'Migraine', name_common: null, system: 'nervous',
+        organ: 'brain', anatomical_location: 'head', status: 'documented', severity: null, certainty: null,
+        date_onset: null, date_diagnosed: '2022-06-01', evidence: null,
+        // Model-proposed point, deliberately off the mask's only opaque pixel.
+        cx: 0, cy: 0,
+      }],
+      measurements: [],
+      coordinateMask: mask,
+    })
+    expect(conditionCount).toBe(1)
+
+    const dots = await getIndexedConditionDots(db)
+    const dot = dots.find((d) => d.conditionId === 'model-proposed-coordinate')
+    expect(dot).toBeDefined()
+    expect(dot).toEqual(expect.objectContaining({ cx_percent: 50, cy_percent: 50 }))
+
     db.close()
   })
 })

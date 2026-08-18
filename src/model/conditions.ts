@@ -10,6 +10,11 @@ export type ChatMessage = { role: 'user' | 'assistant'; content: string; showCon
 
 export type DesignCondition = {
   id: string
+  // The health_records row this condition was extracted from — undefined for
+  // the hardcoded CONDITIONS fallback (pre-DB-load state). Lets the UI look
+  // up condition-scoped providers/facilities (P10-05), which are stored
+  // record-scoped in IndexedDB and filtered down to this condition.
+  record_id?: string | null
   system: SystemId
   label: string
   medName: string

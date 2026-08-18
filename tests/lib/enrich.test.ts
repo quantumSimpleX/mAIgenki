@@ -1,4 +1,10 @@
-import { enrichFromText, EnrichmentFailedError, parseExtractionStepResponse } from '@/lib/llm/enrich'
+import {
+  enrichFromText, EnrichmentFailedError, parseExtractionStepResponse,
+  backfillDocumentWideAttribution, backfillDocumentWideDate,
+  parseConditionAnatomyBatch, classifyConditionSystemLocally,
+  type ConditionSummary, type MeasurementInput,
+} from '@/lib/llm/enrich'
+import { ALL_SYSTEMS } from '@/model/conditions'
 import { callLLMWithFallback } from '@/lib/llm/client'
 
 jest.mock('@/lib/llm/client', () => ({ callLLMWithFallback: jest.fn(), DEFAULT_MODELS: ['test-model:free'] }))
@@ -126,7 +132,11 @@ describe('enrichFromText', () => {
     expect(result.measurements[0].value_numeric).toBe(150)
   })
 
-  it('places a condition with no anatomy match under "other" rather than dropping it', async () => {
+  // P10-08 (Defect 3): the anatomy call (and its individual per-condition
+  // retry) failing outright must never leave system as 'other'/null — it
+  // falls through to the local keyword classifier, which always returns one
+  // of the 11 real systems.
+  it('falls back to the local classifier (never "other"/null) when the anatomy call fails outright, even after retry', async () => {
     mockByLabel({
       'structure-analysis': structureFails,
       'extraction-condition-list': () => ({
@@ -139,7 +149,8 @@ describe('enrichFromText', () => {
 
     const result = await enrichFromText('report', '', [])
     expect(result.conditions).toHaveLength(1)
-    expect(result.conditions[0].system).toBe('other')
+    expect(ALL_SYSTEMS).toContain(result.conditions[0].system)
+    expect(result.conditions[0].system).not.toBe('other')
     expect(result.conditions[0].organ).toBeNull()
   })
 
@@ -208,5 +219,303 @@ describe('enrichFromText', () => {
     const result = await enrichFromText('report', '', [])
     expect(result.conditions).toEqual([])
     expect(mockCall.mock.calls.some(([opts]) => (opts as MockCallOpts).label === 'enrichment-anatomy')).toBe(false)
+  })
+
+  // ── P10-03: name_common / local_names derivation ──────────────────────────
+
+  it('derives name_common and local_names from the anatomy/enrichment call', async () => {
+    mockByLabel({
+      'structure-analysis': structureFails,
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: {
+          conditions: [{ name_medical: 'Essential hypertension', earliest_date: '2022-06-01', notes: 'BP 150/95', provider: null, facility: null }],
+          measurements: [],
+        },
+        failures: [],
+      }),
+      'enrichment-anatomy': () => ({
+        ok: true, model: 'm', content: '',
+        value: new Map([[0, {
+          system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null,
+          name_common: 'High blood pressure', local_names: { 'zh-TW': '高血壓', ja: '高血圧症' }, cx: 51, cy: 30,
+        }]]),
+        failures: [],
+      }),
+    })
+
+    const result = await enrichFromText('Complete report text', '', [])
+    expect(result.conditions[0].name_common).toBe('High blood pressure')
+    expect(result.conditions[0].local_names).toEqual({ 'zh-TW': '高血壓', ja: '高血圧症' })
+  })
+
+  // ── P10-04: LLM-assisted coordinate derivation ────────────────────────────
+
+  it('carries a model-proposed cx/cy from the anatomy call onto the condition', async () => {
+    mockByLabel({
+      'structure-analysis': structureFails,
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: { conditions: [{ name_medical: 'Migraine', earliest_date: null, notes: null, provider: null, facility: null }], measurements: [] },
+        failures: [],
+      }),
+      'enrichment-anatomy': () => ({
+        ok: true, model: 'm', content: '',
+        value: new Map([[0, { system: 'nervous', organ: 'brain', anatomical_location: 'head', laterality: null, name_common: null, local_names: null, cx: 44, cy: 7 }]]),
+        failures: [],
+      }),
+    })
+
+    const result = await enrichFromText('report', '', [])
+    expect(result.conditions[0].cx).toBe(44)
+    expect(result.conditions[0].cy).toBe(7)
+  })
+
+  it('leaves cx/cy unset (not a random default) when the anatomy call has no usable position, so the DB-layer hash-jitter fallback applies', async () => {
+    mockByLabel({
+      'structure-analysis': structureFails,
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: { conditions: [{ name_medical: 'Unclear finding', earliest_date: null, notes: null, provider: null, facility: null }], measurements: [] },
+        failures: [],
+      }),
+      'enrichment-anatomy': () => ({
+        ok: true, model: 'm', content: '',
+        value: new Map([[0, { system: 'nervous', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null, cx: null, cy: null }]]),
+        failures: [],
+      }),
+    })
+
+    const result = await enrichFromText('report', '', [])
+    expect(result.conditions[0].cx).toBeNull()
+    expect(result.conditions[0].cy).toBeNull()
+  })
+
+  // ── P10-02: multi-provider/facility merge ─────────────────────────────────
+
+  it('merges providers/facilities from every occurrence of the same condition, not just the first', async () => {
+    const providerA = { name: 'Dr. Kim', specialty: null, email: null, phone: null, evidence: null }
+    const providerB = { name: 'Dr. Patel', specialty: null, email: null, phone: null, evidence: null }
+    const facilityA = { name: 'City Hospital', address: null, city: 'Seattle', state: 'WA', country: 'US' }
+    const facilityB = { name: 'County Clinic', address: null, city: 'Tacoma', state: 'WA', country: 'US' }
+
+    mockByLabel({
+      'structure-analysis': structureFails,
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: {
+          conditions: [
+            { name_medical: 'Essential hypertension', earliest_date: '2022-06-01', notes: 'first visit', provider: providerA, facility: facilityA },
+            { name_medical: 'Essential hypertension', earliest_date: '2023-01-01', notes: 'follow-up', provider: providerB, facility: facilityB },
+          ],
+          measurements: [],
+        },
+        failures: [],
+      }),
+      'enrichment-anatomy': () => ({
+        ok: true, model: 'm', content: '',
+        value: new Map([
+          [0, { system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null, cx: null, cy: null }],
+          [1, { system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null, cx: null, cy: null }],
+        ]),
+        failures: [],
+      }),
+    })
+
+    const result = await enrichFromText('Complete report text', '', [])
+    expect(result.conditions).toHaveLength(1)
+    const merged = result.conditions[0]
+    expect(merged.providers?.map((p) => p.name).sort()).toEqual(['Dr. Kim', 'Dr. Patel'])
+    expect(merged.facilities?.map((f) => f.name).sort()).toEqual(['City Hospital', 'County Clinic'])
+    // Earliest date still wins, unchanged from prior merge behavior.
+    expect(merged.date_diagnosed).toBe('2022-06-01')
+  })
+})
+
+// ── P10-01: document-wide provider/facility/date backfill ────────────────────
+
+describe('backfillDocumentWideAttribution', () => {
+  const provider = { name: 'Dr. Kim', specialty: null, email: null, phone: null, evidence: null }
+  const otherProvider = { name: 'Dr. Patel', specialty: null, email: null, phone: null, evidence: null }
+  const summary = (overrides: Partial<ConditionSummary> = {}): ConditionSummary => ({
+    name_medical: 'Eczema', earliest_date: null, notes: null, provider: null, facility: null, ...overrides,
+  })
+  type ChunkExtractionResult = {
+    conditions: ConditionSummary[]
+    measurements: MeasurementInput[]
+    reportProvider: typeof provider | null
+    reportFacility: null
+  }
+  const fulfilled = (value: ChunkExtractionResult): PromiseFulfilledResult<ChunkExtractionResult> => ({ status: 'fulfilled', value })
+
+  it('backfills a condition with no attribution when exactly one provider is named anywhere in the document', () => {
+    const conditions = [summary(), summary({ name_medical: 'Gout' })]
+    const chunkResults = [
+      fulfilled({ conditions: [conditions[0]], measurements: [], reportProvider: provider, reportFacility: null }),
+      fulfilled({ conditions: [conditions[1]], measurements: [], reportProvider: null, reportFacility: null }),
+    ]
+    const result = backfillDocumentWideAttribution(conditions, chunkResults)
+    expect(result.every((c) => c.provider?.name === 'Dr. Kim')).toBe(true)
+  })
+
+  it('does not guess when more than one distinct provider appears anywhere in the document', () => {
+    const conditions = [summary()]
+    const chunkResults = [
+      fulfilled({ conditions: [{ ...conditions[0], provider }], measurements: [], reportProvider: null, reportFacility: null }),
+      fulfilled({ conditions: [summary({ name_medical: 'Gout', provider: otherProvider })], measurements: [], reportProvider: null, reportFacility: null }),
+    ]
+    // The second condition (Gout) already has an explicit provider — but the
+    // first has none, and two distinct providers exist document-wide, so it
+    // must stay unattributed rather than guessing.
+    const result = backfillDocumentWideAttribution([conditions[0], summary({ name_medical: 'Gout', provider: otherProvider })], chunkResults)
+    expect(result[0].provider).toBeNull()
+  })
+})
+
+describe('backfillDocumentWideDate', () => {
+  const summary = (overrides: Partial<ConditionSummary> = {}): ConditionSummary => ({
+    name_medical: 'Eczema', earliest_date: null, notes: null, provider: null, facility: null, ...overrides,
+  })
+
+  it('backfills an undated condition from the earliest date known anywhere in the document', () => {
+    const conditions = [summary(), summary({ name_medical: 'Gout', earliest_date: '2021-05-01' })]
+    const result = backfillDocumentWideDate(conditions, [null, '2019-01-01'])
+    expect(result[0].earliest_date).toBe('2019-01-01')
+    expect(result[0].earliest_date_inherited).toBe(true)
+    // A condition with its own explicit date is left untouched.
+    expect(result[1].earliest_date).toBe('2021-05-01')
+    expect(result[1].earliest_date_inherited).toBeUndefined()
+  })
+
+  it('leaves earliest_date null when the document genuinely has no date anywhere', () => {
+    const conditions = [summary()]
+    const result = backfillDocumentWideDate(conditions, [null, null])
+    expect(result[0].earliest_date).toBeNull()
+  })
+})
+
+// ── P10-08 (Defect 3): guaranteed-valid system, never 'other'/null ──────────
+
+describe('parseConditionAnatomyBatch', () => {
+  it('rejects an out-of-enum system value, same as a missing one', () => {
+    const content = [
+      JSON.stringify({ index: 0, system: 'other', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }),
+      JSON.stringify({ index: 1, system: 'not-a-real-system', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }),
+      JSON.stringify({ index: 2, system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null }),
+    ].join('\n')
+
+    const result = parseConditionAnatomyBatch(content)
+    expect(result?.has(0)).toBe(false)
+    expect(result?.has(1)).toBe(false)
+    expect(result?.get(2)?.system).toBe('cardiovascular')
+  })
+
+  it('accepts every one of the 11 real systems', () => {
+    const content = ALL_SYSTEMS
+      .map((system, index) => JSON.stringify({ index, system, organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }))
+      .join('\n')
+
+    const result = parseConditionAnatomyBatch(content)
+    ALL_SYSTEMS.forEach((system, index) => {
+      expect(result?.get(index)?.system).toBe(system)
+    })
+  })
+})
+
+describe('classifyConditionSystemLocally', () => {
+  it('always returns one of the 11 valid systems, for both recognized and unrecognized inputs', () => {
+    const inputs: [string, string | null][] = [
+      ['Type 2 diabetes', null],
+      ['Major depressive disorder', 'patient reports low mood'],
+      ['Atopic dermatitis', null],
+      ['Essential hypertension', null],
+      ['Asthma', null],
+      ['Chronic kidney disease', null],
+      ['Irritable bowel syndrome', null],
+      ['Reactive lymphadenopathy', null],
+      ['Rotator cuff tear', null],
+      ['Osteoarthritis', null],
+      ['Benign prostatic hyperplasia', null],
+      // Deliberately unrecognized — must still resolve to a valid system,
+      // not throw or return an empty/invalid value.
+      ['Xyzzy syndrome', null],
+      ['', null],
+    ]
+    for (const [name, notes] of inputs) {
+      expect(ALL_SYSTEMS).toContain(classifyConditionSystemLocally(name, notes))
+    }
+  })
+
+  it('defaults to skeletal for a name with no keyword match', () => {
+    expect(classifyConditionSystemLocally('Completely unrecognized condition name', null)).toBe('skeletal')
+  })
+})
+
+describe('enrichFromText anatomy retry/fallback (P10-08)', () => {
+  it('uses an individual retry result when the batch call omits a condition but the retry succeeds', async () => {
+    let anatomyCallCount = 0
+    mockByLabel({
+      'structure-analysis': structureFails,
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: { conditions: [{ name_medical: 'Essential hypertension', earliest_date: null, notes: null, provider: null, facility: null }], measurements: [] },
+        failures: [],
+      }),
+      'enrichment-anatomy': () => {
+        anatomyCallCount += 1
+        // First call (the batch) returns nothing usable for this condition;
+        // the individual retry (second call) succeeds.
+        if (anatomyCallCount === 1) return { ok: true, model: 'm', content: '', value: new Map(), failures: [] }
+        return {
+          ok: true, model: 'm', content: '',
+          value: new Map([[0, { system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null, cx: null, cy: null }]]),
+          failures: [],
+        }
+      },
+    })
+
+    const result = await enrichFromText('report', '', [])
+    expect(result.conditions[0].system).toBe('cardiovascular')
+  })
+
+  it('never leaves system as "other"/invalid across a batch where some conditions succeed and others exhaust retries', async () => {
+    let anatomyCallCount = 0
+    mockByLabel({
+      'structure-analysis': structureFails,
+      'extraction-condition-list': () => ({
+        ok: true, model: 'm', content: '',
+        value: {
+          conditions: [
+            { name_medical: 'Essential hypertension', earliest_date: null, notes: null, provider: null, facility: null },
+            { name_medical: 'Some ambiguous finding', earliest_date: null, notes: null, provider: null, facility: null },
+          ],
+          measurements: [],
+        },
+        failures: [],
+      }),
+      'enrichment-anatomy': () => {
+        anatomyCallCount += 1
+        // Call 1 is the batch call: places index 0 only, leaving index 1
+        // unplaced. Calls 2+ are the individual retries for index 1 — both
+        // exhaust without ever placing it, forcing the local classifier.
+        if (anatomyCallCount === 1) {
+          return {
+            ok: true, model: 'm', content: '',
+            value: new Map([[0, { system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null, cx: null, cy: null }]]),
+            failures: [],
+          }
+        }
+        return { ok: true, model: 'm', content: '', value: new Map(), failures: [] }
+      },
+    })
+
+    const result = await enrichFromText('report', '', [])
+    expect(result.conditions).toHaveLength(2)
+    for (const condition of result.conditions) {
+      expect(ALL_SYSTEMS).toContain(condition.system)
+      expect(condition.system).not.toBe('other')
+    }
+    // Batch call + 2 bounded individual retries for the one unplaced condition.
+    expect(anatomyCallCount).toBe(3)
   })
 })

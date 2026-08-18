@@ -4,7 +4,8 @@ import { chunkRecordBySections, type TextChunk } from './chunk'
 import { runWithConcurrency } from './pool'
 import { P09_WHOLE_DOCUMENT_EXTRACTION_PROMPT, CONDITION_ENRICHMENT_PROMPT, CONDITION_DEDUPE_PROMPT } from './prompts'
 import { pipelineDebug } from '../debug/pipelineDebug'
-import type { ConditionStatus } from '@/model/health'
+import type { ConditionStatus, OrgSystem } from '@/model/health'
+import { ALL_SYSTEMS } from '@/model/conditions'
 
 export type { EnrichRoutingOptions } from './structure'
 
@@ -73,6 +74,13 @@ export type ConditionSummary = {
 type ExtractionStepResult = {
   conditions: ConditionSummary[]
   measurements: MeasurementInput[]
+  // The report-level provider/facility this chunk's own response named (if
+  // any), kept alongside the already-per-condition-resolved `conditions`
+  // above so extractConditionSummaries can look document-wide, not just
+  // within this one chunk, for an unambiguous attribution to backfill onto
+  // conditions that still have none (P10-01).
+  reportProvider: ProviderInput | null
+  reportFacility: FacilityInput | null
 }
 
 function isValidConditionSummaryShape(value: unknown): value is { name_medical: string; earliest_date: string | null; notes: string | null; provider?: unknown; facility?: unknown } {
@@ -184,7 +192,7 @@ export function parseExtractionStepResponse(content: string): ExtractionStepResu
       facility: ownFacility ?? reportFacility,
     }
   })
-  return { conditions, measurements }
+  return { conditions, measurements, reportProvider, reportFacility }
 }
 
 // A single whole-document call (tens of thousands of characters in, a long
@@ -257,7 +265,7 @@ function withSectionContext(chunkText: string, chunk: TextChunk): string {
   return `Section: "${heading}" (type: ${chunk.sectionType}${dated})\n\n${chunkText}`
 }
 
-async function extractConditionSummaries(text: string, apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<ExtractionStepResult | null> {
+async function extractConditionSummaries(text: string, apiKey: string, models: string[], routing: EnrichRoutingOptions): Promise<{ conditions: ConditionSummary[]; measurements: MeasurementInput[] } | null> {
   // Section-aware chunking (respects the document's actual structure, so a
   // chunk boundary lands between sections, not mid-hierarchy) when structure
   // analysis succeeds. analyzeRecordStructure already degrades to a single
@@ -310,8 +318,71 @@ async function extractConditionSummaries(text: string, apiKey: string, models: s
   // Every chunk failed — nothing usable came out of the whole record, same
   // "total wipeout" semantics the single-call version had.
   if (succeededChunks === 0) return null
-  const dedupedConditions = await dedupeConditionSummaries(conditions, apiKey, models, routing)
-  return { conditions: dedupedConditions, measurements }
+  const attributed = backfillDocumentWideAttribution(conditions, settled)
+  const dedupedConditions = await dedupeConditionSummaries(attributed, apiKey, models, routing)
+  const finalConditions = backfillDocumentWideDate(dedupedConditions, carriedChunkDates)
+  return { conditions: finalConditions, measurements }
+}
+
+// P10-01: a condition often carries its clinician/institution once, at the
+// document or a single section level, rather than restating it beside every
+// condition — per-chunk resolution above (parseExtractionStepResponse) only
+// catches that when the mention is in the *same* chunk as the condition.
+// This extends the same inheritance document-wide, but only when doing so is
+// unambiguous: if the whole document names exactly one distinct
+// provider/facility anywhere (its own conditions' explicit attribution, or
+// any chunk's report-level one), any condition still missing that field
+// inherits it. More than one distinct provider/facility anywhere leaves
+// unattributed conditions null rather than guessing which one applies.
+export function backfillDocumentWideAttribution(
+  conditions: ConditionSummary[],
+  chunkResults: PromiseSettledResult<ExtractionStepResult | null>[],
+): ConditionSummary[] {
+  const providers: ProviderInput[] = []
+  const facilities: FacilityInput[] = []
+  for (const outcome of chunkResults) {
+    if (outcome.status !== 'fulfilled' || !outcome.value) continue
+    if (outcome.value.reportProvider) providers.push(outcome.value.reportProvider)
+    if (outcome.value.reportFacility) facilities.push(outcome.value.reportFacility)
+    for (const condition of outcome.value.conditions) {
+      if (condition.provider) providers.push(condition.provider)
+      if (condition.facility) facilities.push(condition.facility)
+    }
+  }
+  const uniqueProviders = dedupeProviders(providers)
+  const uniqueFacilities = dedupeFacilities(facilities)
+  const documentProvider = uniqueProviders.length === 1 ? uniqueProviders[0] : null
+  const documentFacility = uniqueFacilities.length === 1 ? uniqueFacilities[0] : null
+  if (!documentProvider && !documentFacility) return conditions
+  return conditions.map((condition) => ({
+    ...condition,
+    provider: condition.provider ?? documentProvider,
+    facility: condition.facility ?? documentFacility,
+  }))
+}
+
+// P10-01: an explicit, documented fallback for `earliest_date`. Per-chunk
+// carry-forward (carriedChunkDates, computed above from structural section
+// headings) already backfills an undated chunk from the nearest preceding
+// section date within the document's hierarchy. This is the final,
+// document-wide pass: any condition still undated after that inherits the
+// single earliest date known anywhere in the document (an explicit
+// condition date or a structural section date), marked inherited. When the
+// document genuinely contains no date anywhere, `earliest_date` stays
+// null — that is the intended terminal case, not a bug.
+export function backfillDocumentWideDate(
+  conditions: ConditionSummary[],
+  carriedChunkDates: (string | null)[],
+): ConditionSummary[] {
+  const knownDates = [
+    ...conditions.filter((c) => c.earliest_date && !c.earliest_date_inherited).map((c) => c.earliest_date as string),
+    ...carriedChunkDates.filter((d): d is string => Boolean(d)),
+  ].sort()
+  const documentWideDate = knownDates[0] ?? null
+  if (!documentWideDate) return conditions
+  return conditions.map((condition) => (
+    condition.earliest_date ? condition : { ...condition, earliest_date: documentWideDate, earliest_date_inherited: true }
+  ))
 }
 
 // ── Post-extraction dedupe (safety net for cross-chunk name drift) ─────────────
@@ -409,24 +480,65 @@ async function dedupeConditionSummaries(
 // hard (each one is small, but the LLM-call *count* is what's throttled).
 
 type ConditionAnatomy = {
-  system: string
+  system: OrgSystem
   organ: string | null
   anatomical_location: string | null
   laterality: string | null
+  // P10-03: common-language display name, distinct from name_medical, and
+  // its localized variants (a subset of SupportedLang, keyed the same way).
+  name_common: string | null
+  local_names: Record<string, string> | null
+  // P10-04: model-proposed body-map position (0-100 percent), derived from
+  // the condition's own notes/anatomical_location/laterality first, the
+  // model's general anatomical knowledge second. Null when the model
+  // couldn't propose a usable point — buildConditionFromSummary leaves cx/cy
+  // unset in that case, so defaultConditionPosition's hash-jitter (the
+  // last-resort fallback) applies, same as if this whole call had failed.
+  cx: number | null
+  cy: number | null
 }
 
-function isValidIndexedAnatomyLine(value: unknown): value is ConditionAnatomy & { index: number } {
+function isValidLocalNames(value: unknown): value is Record<string, string> | null {
+  if (value == null) return true
+  if (!isRecord(value)) return false
+  return Object.values(value).every((v) => typeof v === 'string')
+}
+
+// A malformed/out-of-range cx or cy degrades to "no proposed position" for
+// that one field, rather than invalidating the whole anatomy line — the
+// anatomy/name fields are independently useful even without a coordinate.
+function sanitizeCoordinate(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
+}
+
+// The real 11-value OrgSystem enum, checked at runtime — a set, not just
+// `typeof === 'string'`, so a hallucinated/malformed value from a weak
+// free-tier model (or the app's own former `'other'` fallback) is treated
+// exactly like a missing system: the whole anatomy line is rejected below,
+// not silently accepted and later mis-rendered (Defect 3, P10-08).
+const VALID_SYSTEMS = new Set<string>(ALL_SYSTEMS)
+
+function isValidSystem(value: unknown): value is OrgSystem {
+  return typeof value === 'string' && VALID_SYSTEMS.has(value)
+}
+
+function isValidIndexedAnatomyLine(value: unknown): value is { index: number; system: OrgSystem; organ: string | null; anatomical_location: string | null; laterality: string | null; name_common: string | null; local_names: unknown } {
   if (!isRecord(value)) return false
   return typeof value.index === 'number'
-    && typeof value.system === 'string'
+    && isValidSystem(value.system)
     && isNullableString(value.organ)
     && isNullableString(value.anatomical_location)
     && isNullableString(value.laterality)
+    && isNullableString(value.name_common)
+    && isValidLocalNames(value.local_names)
 }
 
 // NDJSON, same reasoning as parseExtractionStepResponse: one malformed/missing
-// line just leaves that one condition unplaced, not the whole batch.
-function parseConditionAnatomyBatch(content: string): Map<number, ConditionAnatomy> | null {
+// line just leaves that one condition unplaced, not the whole batch. An
+// out-of-enum "system" value (including the app's own former `'other'`
+// fallback) is treated the same as a missing one — the line is dropped, not
+// passed through — see isValidIndexedAnatomyLine/isValidSystem above.
+export function parseConditionAnatomyBatch(content: string): Map<number, ConditionAnatomy> | null {
   const cleaned = content.replace(/```(?:json|ndjson)?\n?|\n?```/g, '').trim()
   const lines = cleaned.split('\n').map((line) => line.trim()).filter(Boolean)
   const results = new Map<number, ConditionAnatomy>()
@@ -443,6 +555,10 @@ function parseConditionAnatomyBatch(content: string): Map<number, ConditionAnato
         organ: value.organ,
         anatomical_location: value.anatomical_location,
         laterality: value.laterality,
+        name_common: value.name_common,
+        local_names: (value.local_names as Record<string, string> | null | undefined) ?? null,
+        cx: sanitizeCoordinate((value as Record<string, unknown>).cx),
+        cy: sanitizeCoordinate((value as Record<string, unknown>).cy),
       })
     }
   }
@@ -479,13 +595,95 @@ async function enrichConditionAnatomyBatch(summaries: ConditionSummary[], apiKey
   }
 }
 
+// P10-08 (Defect 3): last-resort deterministic classifier — only reached when
+// the LLM anatomy call has already failed for this condition, both in the
+// batch and after individual retry (see resolveConditionAnatomies below).
+// Keyword/substring matching on the condition name (notes as a weaker
+// secondary signal) covering common condition-name patterns. This is a safety
+// net for total LLM unavailability, not the primary classification path, and
+// it must still always return one of the 11 real systems — never 'other'/null
+// — per the locked product decision in P10-08's card entry. The per-pattern
+// mappings below are a pragmatic, non-exhaustive judgment call (flagged for
+// ArchAgent/QA): anything unmatched defaults to 'skeletal' as the broadest,
+// most common catch-all category in real records, not an arbitrary choice.
+const LOCAL_SYSTEM_KEYWORDS: [RegExp, OrgSystem][] = [
+  [/diabet|thyroid|hormon|endocrin|adrenal|pituitary|hypoglyc|hyperglyc|glucose/i, 'endocrine'],
+  [/depress|anxiety|seizure|epilep|migraine|headache|stroke|neuro|dementia|parkinson|alzheimer|mental|psychiat|bipolar|nerve|cognit/i, 'nervous'],
+  [/skin|derma|rash|eczema|psoriasis|acne|melanoma|\bmole\b/i, 'integumentary'],
+  [/heart|cardiac|cardio|hypertension|blood pressure|arrhythmia|coronary|artery|arterial|vascular/i, 'cardiovascular'],
+  [/lung|respirat|asthma|copd|pneumonia|bronch|pulmonary/i, 'respiratory'],
+  [/kidney|renal|urinary|bladder|nephro|ureter/i, 'renal'],
+  [/stomach|intestin|bowel|liver|gastro|digest|colon|pancrea|hepat/i, 'digestive'],
+  [/lymph|spleen|immune/i, 'lymphatic'],
+  [/muscle|muscular|myopath|fibromyalgia/i, 'muscular'],
+  [/bone|joint|fracture|arthritis|skeletal|spine|disc|osteo/i, 'skeletal'],
+  [/prostate|ovary|ovarian|uterus|testic|reproduct|menstru|pregnan|erectile/i, 'reproductive'],
+]
+
+export function classifyConditionSystemLocally(name: string, notes: string | null): OrgSystem {
+  const haystack = `${name} ${notes ?? ''}`.toLowerCase()
+  for (const [pattern, system] of LOCAL_SYSTEM_KEYWORDS) {
+    if (pattern.test(haystack)) return system
+  }
+  return 'skeletal'
+}
+
+// P10-08 (Defect 3): the batched anatomy call (enrichConditionAnatomyBatch)
+// already treats an out-of-enum/missing system as "unplaced" for that index
+// (isValidIndexedAnatomyLine). This wraps it with a bounded per-condition
+// retry for whichever indices came back unplaced — mirroring the model-
+// fallback-chain retry shape callLLMWithFallback already uses, just applied
+// once more at the condition level — before falling back to the local
+// classifier. Deliberately not one LLM call per missing condition every time
+// (that would reintroduce the free-tier call-count pressure the batched call
+// exists to avoid) — this only fires for the (expected to be rare) subset the
+// batch call left unplaced, not the whole condition list.
+const ANATOMY_RETRY_ATTEMPTS = 2
+
+async function resolveConditionAnatomies(
+  summaries: ConditionSummary[], apiKey: string, models: string[], routing: EnrichRoutingOptions,
+): Promise<Map<number, ConditionAnatomy>> {
+  const anatomyByIndex = await enrichConditionAnatomyBatch(summaries, apiKey, models, routing)
+  const missingIndices = summaries.map((_, index) => index).filter((index) => !anatomyByIndex.has(index))
+  if (missingIndices.length === 0) return anatomyByIndex
+
+  pipelineDebug('warn', 'llm', 'anatomy-batch-incomplete', {
+    missingCount: missingIndices.length,
+    total: summaries.length,
+  })
+
+  for (const index of missingIndices) {
+    const summary = summaries[index]
+    let resolved: ConditionAnatomy | null = null
+    for (let attempt = 0; attempt < ANATOMY_RETRY_ATTEMPTS && !resolved; attempt++) {
+      const retryResult = await enrichConditionAnatomyBatch([summary], apiKey, models, routing)
+      resolved = retryResult.get(0) ?? null
+    }
+    anatomyByIndex.set(index, resolved ?? {
+      system: classifyConditionSystemLocally(summary.name_medical, summary.notes),
+      organ: null,
+      anatomical_location: null,
+      laterality: null,
+      name_common: null,
+      local_names: null,
+      cx: null,
+      cy: null,
+    })
+  }
+  return anatomyByIndex
+}
+
 // The non-LLM part of enrichment: local defaults filled directly from the
 // extraction summary, with only anatomy coming from enrichConditionAnatomy.
+// `anatomy` is guaranteed non-null with a valid `system` by
+// resolveConditionAnatomies above (batch call -> individual retry -> local
+// classifier) for every real call path; the `?? classifyConditionSystemLocally(...)`
+// fallback below is defense-in-depth only, never reached in practice.
 function buildConditionFromSummary(summary: ConditionSummary, anatomy: ConditionAnatomy | null): ConditionInput {
   return {
     name_medical: summary.name_medical,
-    name_common: null,
-    system: anatomy?.system ?? 'other',
+    name_common: anatomy?.name_common ?? null,
+    system: anatomy?.system ?? classifyConditionSystemLocally(summary.name_medical, summary.notes),
     organ: anatomy?.organ ?? null,
     anatomical_location: anatomy?.anatomical_location ?? null,
     status: 'documented',
@@ -495,7 +693,13 @@ function buildConditionFromSummary(summary: ConditionSummary, anatomy: Condition
     date_diagnosed: summary.earliest_date,
     evidence: null,
     notes: summary.notes,
+    local_names: anatomy?.local_names ?? null,
     provider: summary.provider,
+    // P10-02: the summary's own provider/facility, kept as a single-entry
+    // list here so mergeTwoConditions can dedupe every occurrence's
+    // attribution into one list rather than keeping only the first non-null.
+    providers: summary.provider ? [summary.provider] : [],
+    facilities: summary.facility ? [summary.facility] : [],
     // Facility only reaches persistence via a care event (see indexedDb.ts's
     // persistEnrichmentResult), same as the report-context inheritance path
     // parseLongitudinalResponse already used — carry it through the same way.
@@ -503,6 +707,11 @@ function buildConditionFromSummary(summary: ConditionSummary, anatomy: Condition
       ? [{ event_type: 'other', date: summary.earliest_date, provider: summary.provider, facility: summary.facility, evidence: null }]
       : [],
     locations: anatomy?.laterality ? [{ anatomical_location: anatomy.anatomical_location, laterality: anatomy.laterality, evidence: null }] : [],
+    // P10-04: model-proposed position; null/absent leaves cx/cy unset, so
+    // putIndexedCondition's defaultConditionPosition hash-jitter fallback
+    // applies — last resort only, not the primary path.
+    cx: anatomy?.cx ?? null,
+    cy: anatomy?.cy ?? null,
     inferred_from_structure: summary.earliest_date_inherited ? ['date_diagnosed'] : undefined,
   }
 }
@@ -549,6 +758,14 @@ export type ConditionInput = {
   // DesignCondition.localNames through it.
   local_names?: Record<string, string> | null
   provider?: ProviderInput | null
+  // P10-02: every unique provider/facility attributed to this condition
+  // across all its occurrences (deduped) — `provider` above remains the
+  // single "primary" attribution used for the condition-linked provider
+  // row; these full lists are what persistEnrichmentResult now also
+  // persists as additional condition-scoped rows, and what the condition
+  // detail UI reads to show every attributed provider/facility, not just one.
+  providers?: ProviderInput[]
+  facilities?: FacilityInput[]
   care_events?: CareEventInput[]
   // Pixel-position overrides (0-100 percent), set only by callers that already
   // know an exact position (demo seeding); real extraction leaves these unset
@@ -680,6 +897,37 @@ export function isValidProviderInput(value: unknown): value is ProviderInput {
 export function isValidFacilityInput(value: unknown): value is FacilityInput {
   if (!isRecord(value)) return false
   return typeof value.name === 'string' && isNullableString(value.address) && isNullableString(value.city) && isNullableString(value.state) && isNullableString(value.country)
+}
+
+// P10-02: dedupe keys for collapsing every unique provider/facility seen
+// across a condition's occurrences (and their care events) into one list —
+// same identity rule persistEnrichmentResult already used for record-scoped
+// provider dedup (indexedDb.ts's providerKey), reused here so the two stay
+// in agreement about what counts as "the same" provider/facility.
+function providerDedupeKey(provider: ProviderInput): string {
+  return `${provider.name}|${provider.email ?? ''}|${provider.phone ?? ''}`.toLowerCase()
+}
+
+function facilityDedupeKey(facility: FacilityInput): string {
+  return `${facility.name}|${facility.address ?? ''}|${facility.city ?? ''}|${facility.state ?? ''}|${facility.country ?? ''}`.toLowerCase()
+}
+
+function dedupeProviders(providers: ProviderInput[]): ProviderInput[] {
+  const byKey = new Map<string, ProviderInput>()
+  for (const provider of providers) {
+    const key = providerDedupeKey(provider)
+    if (!byKey.has(key)) byKey.set(key, provider)
+  }
+  return [...byKey.values()]
+}
+
+function dedupeFacilities(facilities: FacilityInput[]): FacilityInput[] {
+  const byKey = new Map<string, FacilityInput>()
+  for (const facility of facilities) {
+    const key = facilityDedupeKey(facility)
+    if (!byKey.has(key)) byKey.set(key, facility)
+  }
+  return [...byKey.values()]
 }
 
 export function isValidCareEventInput(value: unknown): value is CareEventInput {
@@ -821,6 +1069,20 @@ function mergeTwoConditions(a: ConditionInput, b: ConditionInput): ConditionInpu
     notes: firstNonNull(a.notes, b.notes),
     local_names: a.local_names ?? b.local_names,
     provider: a.provider ?? b.provider,
+    // P10-02: every unique provider/facility from both occurrences' own
+    // lists plus their care events — the fix for the prior behavior, which
+    // kept only the first non-null `provider` and dropped facilities outside
+    // concatenated care_events.
+    providers: dedupeProviders([
+      ...(a.providers ?? []), ...(b.providers ?? []),
+      ...(a.care_events ?? []).map((event) => event.provider),
+      ...(b.care_events ?? []).map((event) => event.provider),
+    ]),
+    facilities: dedupeFacilities([
+      ...(a.facilities ?? []), ...(b.facilities ?? []),
+      ...(a.care_events ?? []).flatMap((event) => (event.facility ? [event.facility] : [])),
+      ...(b.care_events ?? []).flatMap((event) => (event.facility ? [event.facility] : [])),
+    ]),
     care_events: [...(a.care_events ?? []), ...(b.care_events ?? [])],
     cx: a.cx ?? b.cx,
     cy: a.cy ?? b.cy,
@@ -876,8 +1138,11 @@ export async function enrichFromText(
 
   // One call for every condition's anatomy, not one call each — see
   // enrichConditionAnatomyBatch's comment for why (free-tier per-minute rate
-  // limits are keyed on call count, not per-call size).
-  const anatomyByIndex = await enrichConditionAnatomyBatch(summaries, apiKey, modelChain, llmRouting)
+  // limits are keyed on call count, not per-call size). resolveConditionAnatomies
+  // guarantees every index ends up with a valid `system` (individual retry,
+  // then a local classifier last resort) so buildConditionFromSummary never
+  // sees a missing/invalid one — P10-08 (Defect 3).
+  const anatomyByIndex = await resolveConditionAnatomies(summaries, apiKey, modelChain, llmRouting)
   const conditions = summaries.map((summary, index) => {
     const condition = buildConditionFromSummary(summary, anatomyByIndex.get(index) ?? null)
     onConditionProgress?.(index + 1, total, summary.name_medical)

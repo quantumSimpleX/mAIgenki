@@ -19,7 +19,7 @@ import { QSWordmark } from '@/components/QSWordmark'
 import { GearIcon } from '@/components/GearIcon'
 import { useAppStore } from '@/store/useAppStore'
 import type { Gender, PendingUpload } from '@/store/useAppStore'
-import { useConditions, useConditionRecords, useConditionDots } from '@/hooks/useConditions'
+import { useConditions, useConditionRecords, useConditionDots, useConditionAttribution } from '@/hooks/useConditions'
 import {
   ALL_SYSTEMS, ConditionRecord, DesignCondition, SystemId,
   SYSTEM_META, SupportedLang, getLocalName, getSvgX, getSvgY, normalizeSystemId,
@@ -1185,6 +1185,7 @@ function ConditionSheet() {
 
   const idb = useOptionalIndexedDb()
   const condRecords = useConditionRecords(selectedCondition?.id)
+  const attribution = useConditionAttribution(selectedCondition?.id, selectedCondition?.record_id)
 
   const [sheetTranslateY] = useState(() => new Animated.Value(1)) // 1 = off-screen
   const disclaimerShown = useRef(false)
@@ -1284,6 +1285,10 @@ const outcome = await lmfChat(sys, userMsg, { db: idb ?? undefined, profile, key
   const localName = selectedCondition ? getLocalName(selectedCondition, preferredLanguage) : ''
   const meta = selectedCondition ? SYSTEM_META[selectedCondition.system] : null
   const ev = selectedCondition ? parseEvidence(selectedCondition.evidence) : null
+  const hasAttribution = attribution.providers.length > 0 || attribution.facilities.length > 0 || attribution.careEvents.length > 0
+  // Names already shown in the providers list above — omitted from care-event
+  // lines below so a provider linked via a care event doesn't render twice.
+  const attributedProviderNames = new Set(attribution.providers.map((p) => p.name))
   const displayDate = selectedCondition
     ? (condDateOverrides[selectedCondition.id] ?? selectedCondition.date)
     : ''
@@ -1409,8 +1414,39 @@ const outcome = await lmfChat(sys, userMsg, { db: idb ?? undefined, profile, key
 
           <Text style={styles.sheetNote}>{selectedCondition.note}</Text>
 
-          {/* Source block — 3 lines */}
-          {ev && (
+          {/* Source block. Real (non-demo) conditions render every attributed
+              provider/facility/care event persisted for this condition
+              (P10-05) — not just one; demo conditions have no such rows and
+              fall back to the single evidence-string line below. */}
+          {hasAttribution ? (
+            <View style={styles.sourceBlock}>
+              <Text style={styles.sourceLine1}>
+                <Text style={styles.sourceLabel}>SOURCE</Text>
+              </Text>
+              {attribution.providers.map((p) => (
+                <View key={p.id} style={styles.sourceLine3}>
+                  <Text style={styles.sourceDoctor}>
+                    {p.name}{p.specialty ? ` · ${p.specialty}` : ''}
+                  </Text>
+                </View>
+              ))}
+              {attribution.facilities.map((f) => (
+                <Text key={f.id} style={styles.sourceLine2}>
+                  {[f.name, f.city, f.state, f.country].filter(Boolean).join(' · ')}
+                </Text>
+              ))}
+              {attribution.careEvents.map((e) => (
+                <Text key={e.id} style={styles.sourceMeta}>
+                  {[
+                    e.event_type,
+                    e.date,
+                    attributedProviderNames.has(e.provider_name) ? null : e.provider_name,
+                    e.facility_name,
+                  ].filter(Boolean).join(' · ')}
+                </Text>
+              ))}
+            </View>
+          ) : ev && (
             <View style={styles.sourceBlock}>
               <Text style={styles.sourceLine1}>
                 <Text style={styles.sourceLabel}>SOURCE</Text>

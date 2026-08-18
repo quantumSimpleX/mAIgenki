@@ -5,7 +5,9 @@ import {
 import { useOptionalIndexedDb } from '@/lib/db/indexedDbProvider'
 import {
  getIndexedConditions, getConditionRecords, getIndexedConditionDots, hasIndexedUserRecords,
+  getProvidersForRecord, getFacilitiesForRecord, getConditionCareEvents,
   type ConditionRecordEntry, type IndexedConditionDot,
+  type IndexedProvider, type IndexedFacility, type IndexedConditionCareEvent,
 } from '@/lib/db/indexedDb'
 import { useAppStore, type ConditionSource } from '@/store/useAppStore'
 
@@ -147,4 +149,52 @@ export function useConditionRecords(condId: string | null | undefined): Conditio
   if (!condId) return []
   if (loaded && loaded.id === condId && loaded.rows.length > 0) return loaded.rows
   return CONDITION_RECORDS[condId] ?? []
+}
+
+export type ConditionAttribution = {
+  providers: IndexedProvider[]
+  facilities: IndexedFacility[]
+  careEvents: IndexedConditionCareEvent[]
+}
+
+const EMPTY_ATTRIBUTION: ConditionAttribution = { providers: [], facilities: [], careEvents: [] }
+
+// Loads every provider/facility/care-event persisted for one condition
+// (P10-05). Providers and facilities are stored record-scoped in IndexedDB
+// (getProvidersForRecord/getFacilitiesForRecord), so this fetches the whole
+// record's rows and filters down to `conditionId`; care events are already
+// condition-indexed (getConditionCareEvents). Demo conditions (which carry no
+// provider/facility/care-event rows — see designConditionToConditionInput)
+// correctly resolve to EMPTY_ATTRIBUTION, so callers fall back to the
+// existing evidence-string SOURCE block for those.
+export function useConditionAttribution(conditionId: string | null | undefined, recordId: string | null | undefined): ConditionAttribution {
+  const [loaded, setLoaded] = useState<{ id: string; attribution: ConditionAttribution } | null>(null)
+  const db = useOptionalIndexedDb()
+
+  useEffect(() => {
+    if (!conditionId || !recordId || !db) return
+    let cancelled = false
+    Promise.all([
+      getProvidersForRecord(db, recordId),
+      getFacilitiesForRecord(db, recordId),
+      getConditionCareEvents(db, conditionId),
+    ])
+      .then(([providers, facilities, careEvents]) => {
+        if (cancelled) return
+        setLoaded({
+          id: conditionId,
+          attribution: {
+            providers: providers.filter((p) => p.condition_id === conditionId),
+            facilities: facilities.filter((f) => f.condition_id === conditionId),
+            careEvents,
+          },
+        })
+      })
+      .catch(() => { if (!cancelled) setLoaded({ id: conditionId, attribution: EMPTY_ATTRIBUTION }) })
+    return () => { cancelled = true }
+  }, [db, conditionId, recordId])
+
+  if (!conditionId) return EMPTY_ATTRIBUTION
+  if (loaded && loaded.id === conditionId) return loaded.attribution
+  return EMPTY_ATTRIBUTION
 }

@@ -531,10 +531,18 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     extraction_method: input.extractionMethod,
   })
 
+  // Record-scope: tracks every provider linked to any condition in this
+  // document, so the final input.providers loop below doesn't write a
+  // duplicate record-level row for a provider already linked to a condition.
   const linkedProviderKeys = new Set<string>()
   const providerKey = (provider: ProviderInput): string => `${provider.name}|${provider.email ?? ''}|${provider.phone ?? ''}`
 
   for (const rawCondition of input.conditions) {
+    // Condition-scope: tracks providers already given a row for *this*
+    // condition (via c.provider or a care event), so the "extra providers"
+    // loop below only skips true duplicates within the same condition —
+    // it must not be affected by other conditions processed earlier.
+    const conditionLinkedProviderKeys = new Set<string>()
     const mask = input.coordinateMasks?.[rawCondition.system] ?? input.coordinateMask ?? await input.coordinateMaskResolver?.(rawCondition.system)
     const c = mask ? repairConditionCoordinates(mask, rawCondition) : rawCondition
     const locations = c.locations ?? []
@@ -586,6 +594,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
         evidence: c.provider.evidence,
       })
       linkedProviderKeys.add(providerKey(c.provider))
+      conditionLinkedProviderKeys.add(providerKey(c.provider))
     }
 
     for (const [index, event] of (c.care_events ?? []).filter(isValidCareEventInput).entries()) {
@@ -600,6 +609,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
         evidence: event.provider.evidence,
       })
       linkedProviderKeys.add(providerKey(event.provider))
+      conditionLinkedProviderKeys.add(providerKey(event.provider))
       await putIndexedConditionCareEvent(db, {
         id: `${conditionId}-care-${index}`,
         condition_id: conditionId,
@@ -618,6 +628,42 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
         evidence: event.evidence,
       })
     }
+
+    // P10-02/P10-05: every unique provider/facility the merge step collected
+    // for this condition (enrich.ts's mergeTwoConditions), persisted as
+    // condition-scoped rows so the UI can read back every attribution, not
+    // just the single `c.provider` above or whatever survived inside a care
+    // event. Deterministic ids (not uuid()) so re-persisting the same
+    // condition upserts in place rather than accumulating duplicates.
+    for (const [index, provider] of (c.providers ?? []).filter(isValidProviderInput).entries()) {
+      if (conditionLinkedProviderKeys.has(providerKey(provider))) continue
+      await putIndexedProvider(db, {
+        id: `${conditionId}-provider-extra-${index}`,
+        record_id: recordId,
+        condition_id: conditionId,
+        name: provider.name,
+        specialty: provider.specialty,
+        email: provider.email,
+        phone: provider.phone,
+        evidence: provider.evidence,
+      })
+      linkedProviderKeys.add(providerKey(provider))
+      conditionLinkedProviderKeys.add(providerKey(provider))
+    }
+    for (const [index, facility] of (c.facilities ?? []).entries()) {
+      if (!facility || typeof facility.name !== 'string' || facility.name.trim() === '') continue
+      await putIndexedFacility(db, {
+        id: `${conditionId}-facility-${index}`,
+        record_id: recordId,
+        condition_id: conditionId,
+        name: facility.name,
+        address: facility.address,
+        city: facility.city,
+        state: facility.state,
+        country: facility.country,
+      })
+    }
+
     // Deterministic id (not uuid()) so re-seeding the same condition (e.g.
     // demo data reloaded) upserts each secondary location in place instead of
     // accumulating a fresh duplicate row per run.
@@ -738,6 +784,7 @@ export async function getIndexedConditions(db: IDBDatabase, mode: ConditionQuery
     .sort((a, b) => a.year_frac - b.year_frac)
     .map((c) => ({
       id: c.id,
+      record_id: c.record_id,
       system: normalizeSystemId(c.system),
       label: c.name_common ?? c.name_medical,
       medName: c.name_medical,

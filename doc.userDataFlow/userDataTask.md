@@ -682,4 +682,17 @@ Depends on: 8.11, 8.12.
 7. Add sparse-report, inheritance, context-limit, coordinate-mask, fallback, and regression fixtures.
 8. Run browser acceptance and compare body-map rendering before/after.
 
-Detailed kanban card: `doc.userDataFlow/kb1-TODO/p09-llm-extraction-enrichment.md`.
+Detailed kanban card: `doc.userDataFlow/kb4-DONE/p09-llm-extraction-enrichment.md`.
+
+## Phase 10 — Extraction/merge/enrichment data-integrity and coordinate-derivation fixes
+
+A 2026-08-17 audit found several gaps this task list's Phase 09 didn't close: dates/provider/facility can go silently null beyond what cross-document inheritance should allow, merged conditions keep only the first non-null provider instead of every unique provider/facility, `name_common`/`local_names` are never derived for real (non-demo) data, body-map coordinates come from a per-system hash-jitter default rather than the notes/anatomical-knowledge-derived position the product intends (alpha-mask repair is correctly wired as the final constraint, unchanged), and the persisted provider/facility/care-event data is never read back into the condition detail UI.
+
+1. Guarantee condition/date/notes/provider/facility are non-null whenever the source document supports a value; define an explicit fallback for the case where it doesn't.
+2. Fix cross-occurrence merge to retain every unique provider/facility, not just the first non-null one.
+3. Derive `name_common` and `local_names` per condition (currently unset for real extraction).
+4. Derive body-map `cx`/`cy` from consolidated notes first, general condition-location knowledge second, with the existing alpha-mask repair as the final, unchanged validation step.
+5. Wire persisted providers/facilities/care events into the condition detail UI.
+6. Add fixtures/tests for all of the above; run full validation and browser acceptance comparing dot placement and card content before/after.
+
+Detailed kanban card: `doc.userDataFlow/kb1-TODO/p10-extraction-merge-enrichment-fixes.md`.
