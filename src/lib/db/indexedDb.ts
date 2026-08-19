@@ -536,6 +536,40 @@ export type PersistEnrichmentResult = { recordId: string; conditionCount: number
 // against floating-point drift rather than requiring an exact match.
 const COORDINATE_EPSILON_PERCENT = 0.01
 
+// Defect 7: batched anatomy-enrichment LLM calls sometimes propose the exact
+// same point for multiple distinct, diffuse/non-focal conditions in the same
+// system ("template collapse"). Track points already placed per system for
+// this record so a later collision can be nudged apart via the same
+// deterministic jitter used for the no-coordinate fallback, then
+// re-validated against the alpha mask.
+const COLLISION_EPSILON_PERCENT = 0.5
+const MAX_COLLISION_JITTER_ATTEMPTS = 8
+
+function resolveCollisionFreePoint(
+  usedPointsBySystem: Map<string, { cx: number; cy: number }[]>,
+  system: string,
+  seed: string,
+  cx: number,
+  cy: number,
+  mask: AlphaMask | null,
+): { cx: number; cy: number } {
+  const used = usedPointsBySystem.get(system) ?? []
+  let candidate = { cx, cy }
+  let attempt = 0
+  while (
+    used.some(p => Math.abs(p.cx - candidate.cx) < COLLISION_EPSILON_PERCENT && Math.abs(p.cy - candidate.cy) < COLLISION_EPSILON_PERCENT)
+    && attempt < MAX_COLLISION_JITTER_ATTEMPTS
+  ) {
+    attempt++
+    const jittered = defaultConditionPosition(normalizeSystemId(system), `${seed}:collision${attempt}`)
+    const repaired = mask ? repairPixelCoordinate(mask, jittered.cx, jittered.cy) : null
+    candidate = repaired ?? jittered
+  }
+  used.push(candidate)
+  usedPointsBySystem.set(system, used)
+  return candidate
+}
+
 export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedInput): Promise<PersistEnrichmentResult> {
  const run = startPipelineDebugRun()
  run.log('debug', 'db', 'persist-started', { conditions: input.conditions.length, measurements: input.measurements.length, providers: input.providers?.length ?? 0 })
@@ -552,6 +586,7 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
   // duplicate record-level row for a provider already linked to a condition.
   const linkedProviderKeys = new Set<string>()
   const providerKey = (provider: ProviderInput): string => `${provider.name}|${provider.email ?? ''}|${provider.phone ?? ''}`
+  const usedPointsBySystem = new Map<string, { cx: number; cy: number }[]>()
 
   for (const rawCondition of input.conditions) {
     // Condition-scope: tracks providers already given a row for *this*
@@ -568,6 +603,13 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     const useFirstLocationAsPrimary = c.name_medical.toLowerCase().includes('nephrolith')
     const primaryLocation = useFirstLocationAsPrimary ? locations[0] : undefined
     const dateForTimeline = c.date_diagnosed ?? c.date_onset
+    const conditionSystem = normalizeSystemId(c.system)
+    const preJitterPos = defaultConditionPosition(conditionSystem, `${c.name_medical}:${c.system}`)
+    const preJitterCx = primaryLocation?.cx ?? c.cx ?? preJitterPos.cx
+    const preJitterCy = primaryLocation?.cy ?? c.cy ?? preJitterPos.cy
+    const resolvedPoint = resolveCollisionFreePoint(
+      usedPointsBySystem, conditionSystem, `${c.id ?? c.name_medical}`, preJitterCx, preJitterCy, mask ?? null,
+    )
     const { id: conditionId, cx, cy } = await putIndexedCondition(db, {
       id: c.id ?? uuid(),
       record_id: recordId,
@@ -579,8 +621,8 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
     status: c.status,
     severity: c.severity,
     certainty: c.certainty,
-      cx: primaryLocation?.cx ?? c.cx ?? undefined,
-      cy: primaryLocation?.cy ?? c.cy ?? undefined,
+      cx: resolvedPoint.cx,
+      cy: resolvedPoint.cy,
       year_frac: dateForTimeline ? parseDateFrac(dateForTimeline) : 0,
     date: dateForTimeline,
     date_onset: c.date_onset,
