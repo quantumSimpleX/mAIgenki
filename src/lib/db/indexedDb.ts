@@ -531,6 +531,11 @@ export async function getFacilitiesForRecord(db: IDBDatabase, recordId: string):
 
 export type PersistEnrichmentResult = { recordId: string; conditionCount: number; measurementCount: number }
 
+// Defect 6: tolerance (in cx/cy percent units) for treating a secondary
+// condition_locations point as "the same point" as the primary one, guarding
+// against floating-point drift rather than requiring an exact match.
+const COORDINATE_EPSILON_PERCENT = 0.01
+
 export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedInput): Promise<PersistEnrichmentResult> {
  const run = startPipelineDebugRun()
  run.log('debug', 'db', 'persist-started', { conditions: input.conditions.length, measurements: input.measurements.length, providers: input.providers?.length ?? 0 })
@@ -684,9 +689,20 @@ export async function persistEnrichmentResult(db: IDBDatabase, input: EnrichedIn
         normalizeSystemId(c.system),
         `${c.name_medical}:${loc.anatomical_location ?? ''}:${loc.laterality ?? ''}:${index}`,
       )
+      const resolvedCx = loc.cx ?? locationPosition.cx
+      const resolvedCy = loc.cy ?? locationPosition.cy
+      // Defect 6: when a condition has exactly one laterality-bearing
+      // location, its anatomy-derived cx/cy is the same point already
+      // written as the primary condition_locations row above (both derive
+      // from the same anatomy call / repaired coordinate). Writing a second
+      // row at an effectively identical point produces two overlapping dots
+      // with no distinguishing key, which React reports as a duplicate key.
+      // Skip a secondary row whose resolved point matches the primary's
+      // resolved point within floating-point tolerance.
+      if (Math.abs(resolvedCx - cx) < COORDINATE_EPSILON_PERCENT && Math.abs(resolvedCy - cy) < COORDINATE_EPSILON_PERCENT) continue
       await putIndexedConditionLocation(db, {
         id: `${conditionId}-loc-${index}`, condition_id: conditionId,
-        cx: loc.cx ?? locationPosition.cx, cy: loc.cy ?? locationPosition.cy, is_primary: false,
+        cx: resolvedCx, cy: resolvedCy, is_primary: false,
         anatomical_location: loc.anatomical_location ?? null,
         laterality: loc.laterality ?? null,
         evidence: loc.evidence ?? null,

@@ -358,6 +358,71 @@ describe('IndexedDB vertical slice', () => {
     db.close()
   })
 
+  // Defect 6 regression: when a condition has exactly one laterality-bearing
+  // location and the anatomy call gives it the same cx/cy as the condition's
+  // own top-level point (the common case — a single site with a laterality
+  // tag, e.g. "left knee"), persisting it must not write a second
+  // condition_locations row at that same point. Two rows at an identical
+  // coordinate produced thousands of React "duplicate key" console errors on
+  // a live run, since bodymap.tsx's dot key didn't disambiguate them.
+  it('does not write a duplicate condition_locations row when a single location matches the primary point', async () => {
+    const db = await openIndexedDb(`maigenki-single-location-collision-${Date.now()}`)
+    await persistEnrichmentResult(db, {
+      filename: 'report.pdf',
+      pageCount: 1,
+      extractionMethod: 'text',
+      conditions: [{
+        id: 'knee', name_medical: 'Osteoarthritis, left knee', name_common: 'Knee arthritis', system: 'skeletal',
+        organ: null, anatomical_location: 'left knee', status: 'documented', severity: null, certainty: null,
+        date_onset: null, date_diagnosed: '2022-06-01', evidence: null,
+        cx: 30, cy: 70,
+        locations: [{ anatomical_location: 'left knee', laterality: 'left', evidence: null, cx: 30, cy: 70 }],
+      }],
+      measurements: [],
+    })
+
+    const dots = await getIndexedConditionDots(db)
+    const kneeDots = dots.filter((d) => d.conditionId === 'knee')
+    expect(kneeDots).toHaveLength(1)
+    expect(kneeDots[0]).toEqual(expect.objectContaining({ cx_percent: 30, cy_percent: 70 }))
+
+    db.close()
+  })
+
+  // Companion case for the Defect 6 fix: a genuinely bilateral condition with
+  // two distinct sites must still produce two real, distinct dots — the
+  // coordinate-uniqueness guard must not collapse legitimate multi-site
+  // conditions down to one.
+  it('still persists two distinct dots for a genuinely bilateral condition', async () => {
+    const db = await openIndexedDb(`maigenki-bilateral-distinct-${Date.now()}`)
+    await persistEnrichmentResult(db, {
+      filename: 'report.pdf',
+      pageCount: 1,
+      extractionMethod: 'text',
+      conditions: [{
+        id: 'bilateral-knee', name_medical: 'Osteoarthritis, bilateral knees', name_common: 'Knee arthritis', system: 'skeletal',
+        organ: null, anatomical_location: 'knees', status: 'documented', severity: null, certainty: null,
+        date_onset: null, date_diagnosed: '2022-06-01', evidence: null,
+        cx: 30, cy: 70,
+        locations: [
+          { anatomical_location: 'left knee', laterality: 'left', evidence: null, cx: 30, cy: 70 },
+          { anatomical_location: 'right knee', laterality: 'right', evidence: null, cx: 70, cy: 70 },
+        ],
+      }],
+      measurements: [],
+    })
+
+    const dots = await getIndexedConditionDots(db)
+    const kneeDots = dots.filter((d) => d.conditionId === 'bilateral-knee')
+    expect(kneeDots).toHaveLength(2)
+    expect(kneeDots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ cx_percent: 30, cy_percent: 70 }),
+      expect.objectContaining({ cx_percent: 70, cy_percent: 70 }),
+    ]))
+
+    db.close()
+  })
+
   // P10-04/P10-06: a model-proposed cx/cy that lands on a transparent pixel
   // must be repaired onto the nearest opaque one, exactly as an
   // already-correct condition would be (repairConditionCoordinates, unchanged

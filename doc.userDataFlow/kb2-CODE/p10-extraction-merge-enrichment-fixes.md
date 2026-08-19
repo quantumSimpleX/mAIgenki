@@ -1884,3 +1884,158 @@ a pass" — this pass does not itself close the live-verification step; it confi
 code/data-layer is clean and ready for that run. Card intentionally left in `kb3-TEST`;
 the decision to run live acceptance and then move to `kb4-DONE` belongs to ArchAgent/the
 user, not this QA pass.
+
+## Defect 6 (Critical — found 2026-08-18, live run: thousands of "duplicate key"
+console errors, root-caused to a follow-on side effect of the Defect 4 fix)
+
+**Status: FIXED (2026-08-18, DevAgent) — see the "2026-08-18 — DevAgent, Defect 6 fix"
+Implementation Record entry near the end of this file for the fix, tests, and validation
+results. Not yet independently retested by QA; live browser re-verification still
+outstanding — see that entry's closing paragraph.**
+
+**User-reported symptom:** a live run (record with 80 conditions, 0 duplicate condition
+names — merge/dedupe itself is correct) produced thousands of React console errors:
+"Encountered two children with the same key" on the body-map's `<Circle>` dots
+(`src/app/bodymap.tsx:782`, `visibleDots.map`).
+
+**Root cause, confirmed directly against the live IndexedDB data:** 45 of 80 conditions'
+`condition_locations` rows contain **two rows with identical `cx`/`cy` down to many
+decimal places** (e.g. both at `50.04916420845624, 48.91170431211499`) — not a
+coincidence, the same computed point written twice.
+
+This is a direct, previously-untested side effect of the Defect 4 fix
+(`src/lib/llm/enrich.ts`, `buildConditionFromSummary`): a laterality-bearing `locations[]`
+entry now correctly carries `cx: anatomy?.cx ?? null, cy: anatomy?.cy ?? null` — the
+*same* anatomy-call point used for the condition's own top-level `cx`/`cy`. That's
+correct when a condition has multiple distinct sites. But when the LLM identifies only
+**one** location (the common case — a laterality tag on a single site, e.g. "left
+knee"), both the primary `condition_locations` row (from the condition's own top-level
+`cx`/`cy`) and the "secondary" row (from the single `locations[]` entry, in
+`persistEnrichmentResult`'s secondary-location loop, `src/lib/db/indexedDb.ts`) now
+draw from the exact same anatomy point — producing two perfectly overlapping rows for
+one real site. `useFirstLocationAsPrimary`/`primaryLocation` (same file, ~line 563)
+already special-cases this correctly for one hardcoded condition name
+("nephrolith") — using the first explicit location as the primary and skipping its
+re-addition as a secondary — but that special case was never generalized, so every
+other single-location laterality-bearing condition still writes a redundant duplicate.
+
+`bodymap.tsx`'s dot React key (`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`,
+line ~783) doesn't include `locationId`, so two rows sharing a coordinate for the same
+condition collide — hence the flood of console errors (visually the two overlapping
+dots may be indistinguishable, but React's reconciliation still breaks).
+
+**Fix direction:** don't write a secondary `condition_locations` row whose resolved
+`cx`/`cy` exactly matches the primary's resolved `cx`/`cy` — a coordinate-level
+uniqueness guard in `persistEnrichmentResult`'s secondary-location loop, more robust
+than expanding the nephrolith-specific `useFirstLocationAsPrimary` special case to
+every condition name. (A defense-in-depth option worth considering alongside this:
+also make the `bodymap.tsx` dot key include `locationId` so a genuine future coordinate
+collision degrades to "two visually-overlapping but distinctly-keyed dots" rather than
+a React key-collision error — but the primary required fix is not writing the
+duplicate row in the first place.)
+
+**Priority:** P0 — blocks `kb4-DONE`. Directly caused by the Defect 4 fix; must be
+resolved before the next live verification attempt, per explicit user request.
+
+## Blockers (updated 2026-08-18, second entry)
+
+- Defect 6 blocks `kb4-DONE`. Found during the live run that was otherwise going to
+  close out P10 (and, once P11's tiered-date fix is separately verified live, P11 too).
+
+## Completion
+
+NOT COMPLETE. Defect 6 found and not yet fixed. Do not move to `kb4-DONE` until fixed
+and retested, alongside Defect 4's live-visual-reconfirmation item (which this exact
+live run session would have closed if not for this new defect surfacing first).
+
+### 2026-08-18 — DevAgent, Defect 6 fix
+
+**Defect 6 — FIXED.**
+
+**Primary fix (`src/lib/db/indexedDb.ts`, `persistEnrichmentResult`, secondary-location
+loop, ~line 678):** added a coordinate-level uniqueness guard, per the card's fix
+direction, rather than expanding the nephrolith-specific `useFirstLocationAsPrimary`
+special case (that special case is untouched — still skips index 0 by name match, still
+works exactly as before). For each `locations[]` entry after resolving its final
+`cx`/`cy` (`loc.cx ?? locationPosition.cx` / `loc.cy ?? locationPosition.cy`, same
+resolution as before), the loop now compares that resolved point against the primary
+row's already-resolved point — the same `cx`/`cy` returned by `putIndexedCondition` and
+already used to write the `-primary` `condition_locations` row a few lines above, not a
+second independently-recomputed value. If both axes are within a small epsilon
+(`COORDINATE_EPSILON_PERCENT = 0.01`, a new module-level constant placed next to
+`PersistEnrichmentResult`), the secondary row is skipped entirely — not written with a
+`continue`. Epsilon exists only for floating-point safety (defends against the extremely
+unlikely case of two independently-derived-but-intended-identical values differing in the
+last decimal place); in the reported live-data case the two points matched to many
+decimal places because both derive from the exact same anatomy-call point and, when a
+mask is present, the exact same `repairPixelCoordinate` call (`repairConditionCoordinates`
+in `src/lib/llm/longitudinal.ts` independently repairs the top-level `cx`/`cy` and each
+`locations[]` entry's `cx`/`cy` from the same mask, so identical inputs before repair stay
+identical after it — confirmed by reading that function; it was not touched by this fix,
+per the card's constraint).
+
+This generalizes correctly to the nephrolith case rather than conflicting with it: for a
+`useFirstLocationAsPrimary` condition, index 0 is still skipped by the existing `continue`
+before the new guard is ever reached; for any other index in that same condition, the new
+guard only additionally skips it if its resolved point happens to coincide with the
+primary's, which is not the case for the demo bilateral kidney-stones fixture (its two
+locations are genuinely distinct points) — confirmed by the existing "seeds demo data and
+returns one dot per location, including the bilateral kidney-stones example" test still
+passing unchanged.
+
+**Optional hardening (also done, per the card's "clean, low-risk" bar) —
+`src/app/bodymap.tsx`:** all three dot-rendering call sites (`visible.map`'s `<Circle>`,
+`visibleDots.map`'s `<Circle>`, and the `snapped.map`'s `<View>`) now key on
+`` `${d.conditionId}:${d.locationId ?? 'fallback'}:${d.cx_percent}:${d.cy_percent}` ``
+instead of the prior `` `${d.conditionId}:${d.cx_percent}:${d.cy_percent}` ``.
+`locationId` was already a field on the dot type (`useConditions.ts`, already used
+elsewhere in this file for location-editing filters) — `null` only for the synthesized
+fallback dot of a condition with zero location rows, hence the `?? 'fallback'` to keep
+that case's key stable and unique (a condition only ever has one such synthesized dot, so
+a fixed literal cannot collide with a real `locationId`). This is defense-in-depth only:
+the primary fix means no two `condition_locations` rows for one condition should ever
+share a coordinate again, so this key change should have no visible effect today, but
+means a future, different-cause coordinate collision degrades to two overlapping,
+distinctly-keyed dots instead of a hard React key-collision error.
+
+**Tests added (`tests/lib/indexedDb.test.ts`):**
+- `'does not write a duplicate condition_locations row when a single location matches the
+  primary point'` — a condition with one laterality-tagged location whose `cx`/`cy` (30,
+  70) exactly matches its own top-level `cx`/`cy` (30, 70) now persists exactly one dot for
+  that condition (`getIndexedConditionDots` returns 1 row, not 2) — this is the regression
+  the card asked for, reproducing Defect 6's exact shape (single location, same point).
+- `'still persists two distinct dots for a genuinely bilateral condition'` — a companion
+  case with two distinct locations (30,70 and 70,70) against a top-level point matching the
+  first (30,70) still persists exactly two dots at the two distinct coordinates, proving
+  the uniqueness guard only removes the true duplicate and does not collapse a genuine
+  multi-site condition down to one dot.
+- The pre-existing `'uses the location's own cx/cy for a laterality-bearing secondary
+  location, not the hash-jitter default'` test (Defect 4's own regression test, genuinely
+  distinct coordinates: top-level 20/90 vs. location 62/45) continues to pass unchanged,
+  confirming the new guard doesn't interfere with Defect 4's already-approved fix.
+
+**Scope discipline:** touched only `src/lib/db/indexedDb.ts` (the primary fix + new
+constant), `src/app/bodymap.tsx` (the optional key hardening, three call sites), and
+`tests/lib/indexedDb.test.ts` (two new tests). `repairConditionCoordinates`
+(`src/lib/llm/longitudinal.ts`) and the nephrolith special case were read but not modified,
+per the card's explicit constraints. P11's date-hierarchy files were not touched.
+
+**Validation (ran fresh, this session):**
+- `npm run typecheck` — PASS, clean, no output.
+- `npx expo lint` — PASS, exit 0, no errors/warnings.
+- `npx jest --runInBand --coverage=false tests/lib/indexedDb.test.ts` — PASS, 18 tests (16
+  prior + 2 new).
+- `npm test` (full suite, with coverage) — PASS, **56 passed / 56 total suites, 561 passed
+  / 561 total tests, 0 failed** (559 baseline + 2 new Defect 6 regression tests, no other
+  count change — no test was removed or weakened to obtain this pass).
+
+**Defect 6 status: FIXED, ready for QA retest.** The root cause (a secondary
+`condition_locations` row duplicating the primary row's exact point whenever a condition
+has exactly one laterality-bearing location) no longer reaches storage — verified
+mechanically via the two new tests plus a read of the diff showing the guard sits between
+resolving the secondary point and the `putIndexedConditionLocation` write. Not verified in
+this session: a live browser/OpenRouter re-run against real multi-condition data to confirm
+the console-error flood is actually gone in practice (same class of blocker already
+recorded for P10-07 elsewhere in this card) — the QA/ArchAgent live-verification pass this
+defect was found during should re-run to confirm end-to-end, per the "must be resolved
+before the next live verification attempt" note in the defect's Priority line.

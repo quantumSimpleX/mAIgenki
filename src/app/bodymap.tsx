@@ -706,7 +706,7 @@ function GhostDots({
           const color = SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'
           return (
             <Circle
-              key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)} r={1.5}
+              key={`${d.conditionId}:${d.locationId ?? 'fallback'}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)} r={1.5}
               fill={isInferred ? 'none' : color} fillOpacity={isInferred ? undefined : 0.3}
               stroke={isInferred ? color : 'none'}
               strokeWidth={isInferred ? 1 : 0}
@@ -780,7 +780,7 @@ function BodySvg({
         const color = SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'
         return (
           <Circle
-            key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)}
+            key={`${d.conditionId}:${d.locationId ?? 'fallback'}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)}
             r={isEditingLocation ? 4 : isSelected ? 2.5 : 1.5}
             fill={isInferred ? 'none' : color}
             stroke={isInferred ? color : 'none'}
@@ -845,7 +845,7 @@ function ConditionRipples({
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
       {snapped.map((d) => (
         <View
-          key={`${d.conditionId}:${d.cx_percent}:${d.cy_percent}`}
+          key={`${d.conditionId}:${d.locationId ?? 'fallback'}:${d.cx_percent}:${d.cy_percent}`}
           style={{
             position: 'absolute',
             left: `${d.cx_percent}%`,
