@@ -703,10 +703,11 @@ function GhostDots({
       >
         {visible.map((d) => {
           const isInferred = d.status === 'inferred'
+          const isUnconfirmed = d.status === 'suspected'
           const color = SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'
           return (
             <Circle
-              key={`${d.conditionId}:${d.locationId ?? 'fallback'}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)} r={1.5}
+              key={`${d.conditionId}:${d.locationId ?? 'fallback'}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)} r={isUnconfirmed ? 0.75 : 1.5}
               fill={isInferred ? 'none' : color} fillOpacity={isInferred ? undefined : 0.3}
               stroke={isInferred ? color : 'none'}
               strokeWidth={isInferred ? 1 : 0}
@@ -777,11 +778,12 @@ function BodySvg({
         const isSelected = selectedCondition?.id === d.conditionId
         const isEditingLocation = locationEditingCondition?.id === d.conditionId
         const isInferred = d.status === 'inferred'
+        const isUnconfirmed = d.status === 'suspected'
         const color = SYSTEM_META[normalizeSystemId(d.system)]?.color ?? '#fff'
         return (
           <Circle
             key={`${d.conditionId}:${d.locationId ?? 'fallback'}:${d.cx_percent}:${d.cy_percent}`} cx={getSvgX(d.cx_percent)} cy={getSvgY(d.cy_percent)}
-            r={isEditingLocation ? 4 : isSelected ? 2.5 : 1.5}
+            r={isEditingLocation ? 4 : isSelected ? 2.5 : isUnconfirmed ? 0.75 : 1.5}
             fill={isInferred ? 'none' : color}
             stroke={isInferred ? color : 'none'}
             strokeWidth={isInferred ? 1 : 0}
@@ -838,6 +840,10 @@ function ConditionRipples({
 }) {
   const snapped = dots.filter((d) => {
     if (!activeSystems.includes(normalizeSystemId(d.system))) return false
+    // Unconfirmed (suspected) conditions render as a smaller dot and never
+    // ripple — the ripple is a "this is what's happening" cue that shouldn't
+    // apply to a risk factor/screening item the patient isn't confirmed to have.
+    if (d.status === 'suspected') return false
     const frac = condDateOverrides[d.conditionId] ? parseFloat(condDateOverrides[d.conditionId]) : d.yearFrac
     return Math.abs(frac - currentYear) < 1e-9
   })
@@ -1168,6 +1174,14 @@ function RecordsCarousel({ records }: { records: ConditionRecord[] }) {
 
 // ─── Condition Sheet ──────────────────────────────────────────────────────────
 
+// Every condition shows its status on the condition card, not just the
+// non-default ones — 'documented'/'resolved' are confirmed findings,
+// 'suspected' is a risk factor/screening item (smaller, non-rippling dot on
+// the body map), 'inferred' is derived from a clinical threshold rule.
+const STATUS_LABELS: Record<string, string> = {
+  documented: 'Documented', resolved: 'Resolved', suspected: 'Suspected', inferred: 'Inferred',
+}
+
 function ConditionSheet() {
   const insets = useSafeAreaInsets()
   // Reactive viewport height (not the module-level SH snapshot) so the sheet
@@ -1365,11 +1379,11 @@ const outcome = await lmfChat(sys, userMsg, { db: idb ?? undefined, profile, key
               title already is the English common name). */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: sc(8) }}>
             <Text style={styles.sheetCondNameLarge}>{localName}</Text>
-            {selectedCondition.status === 'inferred' && (
-              <View style={styles.inferredBadge}>
-                <Text style={styles.inferredBadgeText}>Inferred</Text>
-              </View>
-            )}
+            <View style={styles.inferredBadge}>
+              <Text style={styles.inferredBadgeText}>
+                {STATUS_LABELS[selectedCondition.status ?? 'documented'] ?? 'Documented'}
+              </Text>
+            </View>
           </View>
           <Text style={styles.sheetCondSubEn}>
             {preferredLanguage !== 'en'

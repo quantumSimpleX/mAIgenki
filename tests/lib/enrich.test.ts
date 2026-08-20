@@ -598,9 +598,9 @@ describe('enrichFromText — cross-occurrence tier resolution (P11-05)', () => {
 describe('parseConditionAnatomyBatch', () => {
   it('rejects an out-of-enum system value, same as a missing one', () => {
     const content = [
-      JSON.stringify({ index: 0, system: 'other', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }),
-      JSON.stringify({ index: 1, system: 'not-a-real-system', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }),
-      JSON.stringify({ index: 2, system: 'cardiovascular', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null }),
+      JSON.stringify({ index: 0, system: 'other', status: 'documented', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }),
+      JSON.stringify({ index: 1, system: 'not-a-real-system', status: 'documented', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }),
+      JSON.stringify({ index: 2, system: 'cardiovascular', status: 'documented', organ: 'heart', anatomical_location: null, laterality: null, name_common: null, local_names: null }),
     ].join('\n')
 
     const result = parseConditionAnatomyBatch(content)
@@ -611,13 +611,26 @@ describe('parseConditionAnatomyBatch', () => {
 
   it('accepts every one of the 11 real systems', () => {
     const content = ALL_SYSTEMS
-      .map((system, index) => JSON.stringify({ index, system, organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }))
+      .map((system, index) => JSON.stringify({ index, system, status: 'documented', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }))
       .join('\n')
 
     const result = parseConditionAnatomyBatch(content)
     ALL_SYSTEMS.forEach((system, index) => {
       expect(result?.get(index)?.system).toBe(system)
     })
+  })
+
+  it('rejects a missing or out-of-enum status value, same as system', () => {
+    const content = [
+      JSON.stringify({ index: 0, system: 'cardiovascular', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }),
+      JSON.stringify({ index: 1, system: 'cardiovascular', status: 'inferred', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }),
+      JSON.stringify({ index: 2, system: 'cardiovascular', status: 'suspected', organ: null, anatomical_location: null, laterality: null, name_common: null, local_names: null }),
+    ].join('\n')
+
+    const result = parseConditionAnatomyBatch(content)
+    expect(result?.has(0)).toBe(false)
+    expect(result?.has(1)).toBe(false)
+    expect(result?.get(2)?.status).toBe('suspected')
   })
 })
 

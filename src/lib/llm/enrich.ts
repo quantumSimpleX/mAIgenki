@@ -477,6 +477,13 @@ async function dedupeConditionSummaries(
 
 type ConditionAnatomy = {
   system: OrgSystem
+  // Confirmation status — 'documented'/'resolved' mean the condition is an
+  // actual diagnosis/finding the patient has (or had); 'suspected' means the
+  // record only supports a risk factor, screening result, or item being
+  // monitored, not a confirmed diagnosis. 'inferred' is reserved for
+  // clinical-rule-derived conditions (applyInferenceRules) and never
+  // produced by this LLM classification.
+  status: ConditionStatus
   organ: string | null
   anatomical_location: string | null
   laterality: string | null
@@ -518,10 +525,19 @@ function isValidSystem(value: unknown): value is OrgSystem {
   return typeof value === 'string' && VALID_SYSTEMS.has(value)
 }
 
-function isValidIndexedAnatomyLine(value: unknown): value is { index: number; system: OrgSystem; organ: string | null; anatomical_location: string | null; laterality: string | null; name_common: string | null; local_names: unknown } {
+// Only the two extraction-producible statuses — 'inferred' is reserved for
+// clinical-rule-derived conditions and never accepted from the LLM here.
+const VALID_ANATOMY_STATUSES = new Set<string>(['documented', 'resolved', 'suspected'])
+
+function isValidAnatomyStatus(value: unknown): value is ConditionStatus {
+  return typeof value === 'string' && VALID_ANATOMY_STATUSES.has(value)
+}
+
+function isValidIndexedAnatomyLine(value: unknown): value is { index: number; system: OrgSystem; status: ConditionStatus; organ: string | null; anatomical_location: string | null; laterality: string | null; name_common: string | null; local_names: unknown } {
   if (!isRecord(value)) return false
   return typeof value.index === 'number'
     && isValidSystem(value.system)
+    && isValidAnatomyStatus(value.status)
     && isNullableString(value.organ)
     && isNullableString(value.anatomical_location)
     && isNullableString(value.laterality)
@@ -548,6 +564,7 @@ export function parseConditionAnatomyBatch(content: string): Map<number, Conditi
     if (isValidIndexedAnatomyLine(value)) {
       results.set(value.index, {
         system: value.system,
+        status: value.status,
         organ: value.organ,
         anatomical_location: value.anatomical_location,
         laterality: value.laterality,
@@ -657,6 +674,11 @@ async function resolveConditionAnatomies(
     }
     anatomyByIndex.set(index, resolved ?? {
       system: classifyConditionSystemLocally(summary.name_medical, summary.notes),
+      // Conservative default when the LLM call fails outright: treat as a
+      // confirmed finding rather than guessing at "suspected" with no
+      // classification signal at all — matches this app's prior behavior
+      // before confirmation-status existed.
+      status: 'documented',
       organ: null,
       anatomical_location: null,
       laterality: null,
@@ -682,7 +704,7 @@ function buildConditionFromSummary(summary: ConditionSummary, anatomy: Condition
     system: anatomy?.system ?? classifyConditionSystemLocally(summary.name_medical, summary.notes),
     organ: anatomy?.organ ?? null,
     anatomical_location: anatomy?.anatomical_location ?? null,
-    status: 'documented',
+    status: anatomy?.status ?? 'documented',
     severity: null,
     certainty: null,
     date_onset: null,
