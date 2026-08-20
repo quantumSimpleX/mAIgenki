@@ -219,7 +219,7 @@ export async function clearIndexedDbData(db: IDBDatabase, name = INDEXED_DB_NAME
   })
 }
 
-export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase> {
+export async function openIndexedDb(name = INDEXED_DB_NAME, onConnectionLost?: () => void): Promise<IDBDatabase> {
   if (typeof indexedDB === 'undefined') throw new Error('IndexedDB is unavailable in this runtime')
   const request = indexedDB.open(name, INDEXED_DB_VERSION)
   request.onupgradeneeded = () => {
@@ -274,6 +274,7 @@ export async function openIndexedDb(name = INDEXED_DB_NAME): Promise<IDBDatabase
       reason: 'A newer version of this database was requested — closing this connection so that upgrade can proceed.',
     })
     db.close()
+    onConnectionLost?.()
   }
   return db
 }
